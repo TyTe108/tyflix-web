@@ -7,8 +7,10 @@ import { createPlexClient } from "./plex/client";
 import { createPlexServerClient } from "./plex/server";
 import { createAdminRouter } from "./routes/admin";
 import { createAuthRouter } from "./routes/auth";
+import { createDiscoverRouter } from "./routes/discover";
 import { createMeRouter } from "./routes/me";
 import { createSeerrClient } from "./seerr/client";
+import { createTmdbClient } from "./tmdb/client";
 
 loadLocalEnvFile();
 
@@ -41,6 +43,10 @@ const dashboard = createDashboardClient({
   baseUrl: config.dashboardUrl,
 });
 
+const tmdb = createTmdbClient({
+  apiKey: config.tmdbApiKey,
+});
+
 const app = express();
 
 app.get("/healthz", (_req, res) => {
@@ -67,6 +73,12 @@ app.use(
   "/api/admin",
   requireAdmin(config.sessionSecret),
   createAdminRouter({ dashboard }),
+);
+
+app.use(
+  "/api/discover",
+  requireAuth(config.sessionSecret),
+  createDiscoverRouter({ tmdb }),
 );
 
 if (config.nodeEnv === "production") {

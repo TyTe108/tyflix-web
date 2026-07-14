@@ -14,6 +14,7 @@ const validEnv = {
   SEERR_URL: "http://seerr:5055",
   SEERR_API_KEY: "seerr-api-key",
   DASHBOARD_URL: "http://dashboard:8787",
+  TMDB_API_KEY: "tmdb-api-key",
 };
 
 describe("loadConfig", () => {
@@ -31,6 +32,7 @@ describe("loadConfig", () => {
       seerrApiKey: "seerr-api-key",
       dashboardUrl: "http://dashboard:8787",
       dbPath: path.resolve("./data/tyflix.db"),
+      tmdbApiKey: "tmdb-api-key",
     });
   });
 
@@ -185,5 +187,18 @@ describe("loadConfig", () => {
       DB_PATH: "/var/data/tyflix.db",
     });
     assert.equal(config.dbPath, "/var/data/tyflix.db");
+  });
+
+  it("throws naming TMDB_API_KEY when missing or empty", () => {
+    assert.throws(
+      () => loadConfig({ ...validEnv, TMDB_API_KEY: undefined }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("TMDB_API_KEY"),
+    );
+    assert.throws(
+      () => loadConfig({ ...validEnv, TMDB_API_KEY: "" }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("TMDB_API_KEY"),
+    );
   });
 });

@@ -12,6 +12,7 @@ export type AppConfig = {
   seerrApiKey: string;
   dashboardUrl: string;
   dbPath: string;
+  tmdbApiKey: string;
 };
 
 export function validate(
@@ -115,6 +116,10 @@ function parseDbPath(
   return path.isAbsolute(value) ? value : path.resolve(cwd, value);
 }
 
+function parseTmdbApiKey(raw: string | undefined): string {
+  return validate("TMDB_API_KEY", raw, () => null);
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     port: parsePort(env.PORT),
@@ -128,5 +133,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     seerrApiKey: parseSeerrApiKey(env.SEERR_API_KEY),
     dashboardUrl: parseDashboardUrl(env.DASHBOARD_URL),
     dbPath: parseDbPath(env.DB_PATH),
+    tmdbApiKey: parseTmdbApiKey(env.TMDB_API_KEY),
   };
 }
