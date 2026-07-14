@@ -3,6 +3,8 @@ export type AppConfig = {
   nodeEnv: "development" | "production" | "test";
   plexClientId: string;
   plexProduct: string;
+  plexBaseUrl: string;
+  plexToken: string;
   sessionSecret: string;
   seerrUrl: string;
   seerrApiKey: string;
@@ -84,12 +86,23 @@ function parseSeerrApiKey(raw: string | undefined): string {
   return validate("SEERR_API_KEY", raw, () => null);
 }
 
+function parsePlexBaseUrl(raw: string | undefined): string {
+  const validated = validate("PLEX_BASEURL", raw, () => null);
+  return validated.replace(/\/+$/, "");
+}
+
+function parsePlexToken(raw: string | undefined): string {
+  return validate("PLEX_TOKEN", raw, () => null);
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     port: parsePort(env.PORT),
     nodeEnv: parseNodeEnv(env.NODE_ENV),
     plexClientId: parsePlexClientId(env.PLEX_CLIENT_ID),
     plexProduct: parsePlexProduct(env.PLEX_PRODUCT),
+    plexBaseUrl: parsePlexBaseUrl(env.PLEX_BASEURL),
+    plexToken: parsePlexToken(env.PLEX_TOKEN),
     sessionSecret: parseSessionSecret(env.SESSION_SECRET),
     seerrUrl: parseSeerrUrl(env.SEERR_URL),
     seerrApiKey: parseSeerrApiKey(env.SEERR_API_KEY),

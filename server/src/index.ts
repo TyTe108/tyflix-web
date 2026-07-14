@@ -1,9 +1,11 @@
 import express from "express";
 import path from "path";
 import { loadConfig, type AppConfig } from "./config";
-import { requireAdmin } from "./middleware/auth";
+import { requireAdmin, requireAuth } from "./middleware/auth";
 import { createPlexClient } from "./plex/client";
+import { createPlexServerClient } from "./plex/server";
 import { createAuthRouter } from "./routes/auth";
+import { createMeRouter } from "./routes/me";
 import { createSeerrClient } from "./seerr/client";
 
 loadLocalEnvFile();
@@ -21,6 +23,11 @@ const secureCookies = config.nodeEnv === "production";
 const plex = createPlexClient({
   clientId: config.plexClientId,
   product: config.plexProduct,
+});
+
+const plexServer = createPlexServerClient({
+  baseUrl: config.plexBaseUrl,
+  token: config.plexToken,
 });
 
 const seerr = createSeerrClient({
@@ -42,6 +49,12 @@ app.use(
     sessionSecret: config.sessionSecret,
     secureCookies,
   }),
+);
+
+app.use(
+  "/api/me",
+  requireAuth(config.sessionSecret),
+  createMeRouter({ plexServer, seerr }),
 );
 
 // Temporary gate-verification probe; replaced by real admin routes in Phase 3.

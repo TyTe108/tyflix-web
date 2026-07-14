@@ -7,6 +7,8 @@ const validEnv = {
   NODE_ENV: "production",
   PLEX_CLIENT_ID: "plex-client-id",
   PLEX_PRODUCT: "CustomProduct",
+  PLEX_BASEURL: "http://plex:32400",
+  PLEX_TOKEN: "plex-token",
   SESSION_SECRET: "sixteen-chars!!!",
   SEERR_URL: "http://seerr:5055",
   SEERR_API_KEY: "seerr-api-key",
@@ -20,10 +22,46 @@ describe("loadConfig", () => {
       nodeEnv: "production",
       plexClientId: "plex-client-id",
       plexProduct: "CustomProduct",
+      plexBaseUrl: "http://plex:32400",
+      plexToken: "plex-token",
       sessionSecret: "sixteen-chars!!!",
       seerrUrl: "http://seerr:5055",
       seerrApiKey: "seerr-api-key",
     });
+  });
+
+  it("strips trailing slashes from PLEX_BASEURL", () => {
+    const config = loadConfig({
+      ...validEnv,
+      PLEX_BASEURL: "http://plex:32400///",
+    });
+    assert.equal(config.plexBaseUrl, "http://plex:32400");
+  });
+
+  it("throws naming PLEX_BASEURL when missing or empty", () => {
+    assert.throws(
+      () => loadConfig({ ...validEnv, PLEX_BASEURL: undefined }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("PLEX_BASEURL"),
+    );
+    assert.throws(
+      () => loadConfig({ ...validEnv, PLEX_BASEURL: "" }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("PLEX_BASEURL"),
+    );
+  });
+
+  it("throws naming PLEX_TOKEN when missing or empty", () => {
+    assert.throws(
+      () => loadConfig({ ...validEnv, PLEX_TOKEN: undefined }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("PLEX_TOKEN"),
+    );
+    assert.throws(
+      () => loadConfig({ ...validEnv, PLEX_TOKEN: "  " }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("PLEX_TOKEN"),
+    );
   });
 
   it('defaults PLEX_PRODUCT to "Tyflix" and NODE_ENV to "development"', () => {
