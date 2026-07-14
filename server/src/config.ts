@@ -13,6 +13,16 @@ export type AppConfig = {
   dashboardUrl: string;
   dbPath: string;
   tmdbApiKey: string;
+  radarrUrl: string;
+  radarrApiKey: string;
+  radarrQualityProfileId: number;
+  radarrRootFolder: string;
+  radarrMinimumAvailability: string;
+  sonarrUrl: string;
+  sonarrApiKey: string;
+  sonarrQualityProfileId: number;
+  sonarrRootFolder: string;
+  sonarrLanguageProfileId: number | null;
 };
 
 export function validate(
@@ -120,6 +130,59 @@ function parseTmdbApiKey(raw: string | undefined): string {
   return validate("TMDB_API_KEY", raw, () => null);
 }
 
+function parsePositiveInt(name: string, raw: string | undefined): number {
+  const validated = validate(name, raw, (v) => {
+    if (!/^-?\d+$/.test(v)) {
+      return "must be an integer";
+    }
+    return null;
+  });
+  return Number(validated);
+}
+
+function parseOptionalPositiveInt(
+  name: string,
+  raw: string | undefined,
+): number | null {
+  if (raw === undefined || raw.trim() === "") {
+    return null;
+  }
+  return parsePositiveInt(name, raw);
+}
+
+function parseRadarrUrl(raw: string | undefined): string {
+  const validated = validate("RADARR_URL", raw, () => null);
+  return validated.replace(/\/+$/, "");
+}
+
+function parseRadarrApiKey(raw: string | undefined): string {
+  return validate("RADARR_API_KEY", raw, () => null);
+}
+
+function parseRadarrRootFolder(raw: string | undefined): string {
+  return validate("RADARR_ROOT_FOLDER", raw, () => null);
+}
+
+function parseRadarrMinimumAvailability(raw: string | undefined): string {
+  if (raw === undefined || raw.trim() === "") {
+    return "released";
+  }
+  return validate("RADARR_MINIMUM_AVAILABILITY", raw, () => null);
+}
+
+function parseSonarrUrl(raw: string | undefined): string {
+  const validated = validate("SONARR_URL", raw, () => null);
+  return validated.replace(/\/+$/, "");
+}
+
+function parseSonarrApiKey(raw: string | undefined): string {
+  return validate("SONARR_API_KEY", raw, () => null);
+}
+
+function parseSonarrRootFolder(raw: string | undefined): string {
+  return validate("SONARR_ROOT_FOLDER", raw, () => null);
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     port: parsePort(env.PORT),
@@ -134,5 +197,26 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     dashboardUrl: parseDashboardUrl(env.DASHBOARD_URL),
     dbPath: parseDbPath(env.DB_PATH),
     tmdbApiKey: parseTmdbApiKey(env.TMDB_API_KEY),
+    radarrUrl: parseRadarrUrl(env.RADARR_URL),
+    radarrApiKey: parseRadarrApiKey(env.RADARR_API_KEY),
+    radarrQualityProfileId: parsePositiveInt(
+      "RADARR_QUALITY_PROFILE_ID",
+      env.RADARR_QUALITY_PROFILE_ID,
+    ),
+    radarrRootFolder: parseRadarrRootFolder(env.RADARR_ROOT_FOLDER),
+    radarrMinimumAvailability: parseRadarrMinimumAvailability(
+      env.RADARR_MINIMUM_AVAILABILITY,
+    ),
+    sonarrUrl: parseSonarrUrl(env.SONARR_URL),
+    sonarrApiKey: parseSonarrApiKey(env.SONARR_API_KEY),
+    sonarrQualityProfileId: parsePositiveInt(
+      "SONARR_QUALITY_PROFILE_ID",
+      env.SONARR_QUALITY_PROFILE_ID,
+    ),
+    sonarrRootFolder: parseSonarrRootFolder(env.SONARR_ROOT_FOLDER),
+    sonarrLanguageProfileId: parseOptionalPositiveInt(
+      "SONARR_LANGUAGE_PROFILE_ID",
+      env.SONARR_LANGUAGE_PROFILE_ID,
+    ),
   };
 }
