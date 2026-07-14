@@ -2,12 +2,18 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   fetchAdminSystem,
+  fetchAdminUsers,
   formatPct,
+  formatRate,
   formatTempC,
   formatUptime,
+  postureBadgeClass,
   type AdminSystem,
   type AdminSystemGpu,
   type AdminSystemStorage,
+  type AdminUnwatchedTitle,
+  type AdminUser,
+  type AdminUsersResponse,
 } from "../api/admin";
 
 type LoadStatus = "loading" | "ready" | "error";
@@ -79,10 +85,201 @@ export function AdminPage() {
         ) : null}
       </section>
 
-      <ComingNextSection title="Users" />
+      <UsersPanel />
+
       <ComingNextSection title="Jobs" />
       <ComingNextSection title="Containers" />
     </main>
+  );
+}
+
+function UsersPanel() {
+  const [data, setData] = useState<AdminUsersResponse | null>(null);
+  const [status, setStatus] = useState<LoadStatus>("loading");
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const retry = useCallback(() => {
+    setReloadKey((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setStatus("loading");
+    setError(null);
+
+    void fetchAdminUsers()
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        setData(response);
+        setStatus("ready");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        setData(null);
+        setStatus("error");
+        setError(
+          err instanceof Error ? err.message : "Failed to load users",
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey]);
+
+  return (
+    <section className="admin-section" aria-labelledby="users-heading">
+      <h2 id="users-heading">Users</h2>
+
+      {status === "loading" ? (
+        <p className="muted">Loading users…</p>
+      ) : null}
+
+      {status === "error" ? (
+        <div className="stats-error">
+          <p className="error">{error ?? "Failed to load users"}</p>
+          <button type="button" className="btn secondary" onClick={retry}>
+            Retry
+          </button>
+        </div>
+      ) : null}
+
+      {status === "ready" && data !== null ? (
+        <UsersBody data={data} />
+      ) : null}
+    </section>
+  );
+}
+
+function UsersBody({ data }: { data: AdminUsersResponse }) {
+  const { users, totals, watched_definition } = data;
+
+  return (
+    <div className="admin-users">
+      <p className="admin-users-totals muted">
+        {totals.users} user{totals.users === 1 ? "" : "s"} ·{" "}
+        {totals.requesters} requester{totals.requesters === 1 ? "" : "s"} ·{" "}
+        {totals.gb_requested_h} requested · {totals.gb_watched_h} watched ·{" "}
+        {totals.gb_unwatched_h} unwatched · rate {formatRate(totals.rate)}
+      </p>
+
+      <div className="admin-users-scroll">
+        <div className="admin-users-list" role="table">
+          <div className="admin-users-row admin-users-header" role="row">
+            <div className="admin-users-cell" role="columnheader">
+              User
+            </div>
+            <div className="admin-users-cell" role="columnheader">
+              Requests
+            </div>
+            <div className="admin-users-cell" role="columnheader">
+              Requested
+            </div>
+            <div className="admin-users-cell" role="columnheader">
+              Watched
+            </div>
+            <div className="admin-users-cell" role="columnheader">
+              Unwatched
+            </div>
+            <div className="admin-users-cell" role="columnheader">
+              Rate
+            </div>
+            <div className="admin-users-cell" role="columnheader">
+              Posture
+            </div>
+          </div>
+
+          {users.map((user) => (
+            <UserListRow key={user.user} user={user} />
+          ))}
+        </div>
+      </div>
+
+      <p className="stats-caption muted">{watched_definition}</p>
+    </div>
+  );
+}
+
+function UserListRow({ user }: { user: AdminUser }) {
+  if (user.unwatched_titles.length === 0) {
+    return (
+      <div className="admin-users-row" role="row">
+        <UserRowCells user={user} />
+      </div>
+    );
+  }
+
+  return (
+    <details className="admin-user-details">
+      <summary className="admin-users-row admin-users-row-expandable">
+        <UserRowCells user={user} />
+      </summary>
+      <UnwatchedTitlesList titles={user.unwatched_titles} />
+    </details>
+  );
+}
+
+function UserRowCells({ user }: { user: AdminUser }) {
+  return (
+    <>
+      <div className="admin-users-cell admin-users-col-user" role="cell">
+        <span className="admin-users-name">{user.user}</span>
+        <span className="muted admin-users-plex">{user.plex_username}</span>
+        {!user.plex_linked ? (
+          <span className="admin-users-unlinked">unlinked</span>
+        ) : null}
+      </div>
+      <div className="admin-users-cell admin-users-col-num" role="cell">
+        <span>
+          {user.available}/{user.total_requests}
+        </span>
+        {user.pending > 0 ? (
+          <span className="muted admin-users-pending">
+            (+{user.pending} pending)
+          </span>
+        ) : null}
+      </div>
+      <div className="admin-users-cell admin-users-col-num" role="cell">
+        {user.gb_requested_h}
+      </div>
+      <div className="admin-users-cell admin-users-col-num" role="cell">
+        {user.gb_watched_h}
+      </div>
+      <div className="admin-users-cell admin-users-col-num" role="cell">
+        {user.gb_unwatched_h}
+      </div>
+      <div className="admin-users-cell admin-users-col-num" role="cell">
+        {formatRate(user.rate)}
+      </div>
+      <div className="admin-users-cell admin-users-col-posture" role="cell">
+        <span className={postureBadgeClass(user.posture)}>{user.posture}</span>
+      </div>
+    </>
+  );
+}
+
+function UnwatchedTitlesList({ titles }: { titles: AdminUnwatchedTitle[] }) {
+  return (
+    <ul className="admin-unwatched-list">
+      {titles.map((item) => (
+        <li key={`${item.type}:${item.title}:${item.requested}`}>
+          <div className="stats-unwatched-row">
+            <span className="stats-unwatched-title">{item.title}</span>
+            <span className="stats-tag">{item.type === "tv" ? "TV" : "Movie"}</span>
+          </div>
+          <div className="stats-unwatched-meta muted">
+            <span>{item.size_h}</span>
+            {item.eps != null ? <span>{item.eps}</span> : null}
+            <span>Requested {item.requested}</span>
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }
 

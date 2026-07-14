@@ -401,6 +401,174 @@ a {
   font-size: 0.875rem;
 }
 
+.admin-users-totals {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.admin-users-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -0.25rem;
+  padding: 0 0.25rem;
+}
+
+.admin-users-list {
+  min-width: 42rem;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-users-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1.4fr) repeat(5, minmax(4.5rem, 1fr)) minmax(
+      6.5rem,
+      1fr
+    );
+  gap: 0 0.5rem;
+  align-items: start;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid rgba(31, 61, 45, 0.1);
+}
+
+.admin-users-list > :last-child {
+  border-bottom: 0;
+}
+
+.admin-users-header {
+  padding: 0 0 0.5rem;
+  border-bottom: 1px solid rgba(31, 61, 45, 0.2);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #5c5c5c;
+}
+
+.admin-users-cell {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.admin-users-name {
+  display: block;
+  font-weight: 600;
+}
+
+.admin-users-plex {
+  display: block;
+  font-size: 0.8rem;
+  margin-top: 0.1rem;
+}
+
+.admin-users-unlinked {
+  display: inline-block;
+  margin-top: 0.2rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8b1e1e;
+  border: 1px solid rgba(139, 30, 30, 0.35);
+  border-radius: 0.25rem;
+  padding: 0.05rem 0.35rem;
+}
+
+.admin-users-pending {
+  display: block;
+  font-size: 0.8rem;
+  margin-top: 0.1rem;
+  line-height: 1.35;
+}
+
+.admin-users-col-posture .admin-posture {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.admin-posture {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-radius: 0.25rem;
+  padding: 0.15rem 0.45rem;
+  white-space: nowrap;
+}
+
+.admin-posture-approve {
+  color: #1f3d2d;
+  background: rgba(31, 61, 45, 0.12);
+  border: 1px solid rgba(31, 61, 45, 0.35);
+}
+
+.admin-posture-watch {
+  color: #7a4f00;
+  background: rgba(180, 120, 0, 0.12);
+  border: 1px solid rgba(180, 120, 0, 0.4);
+}
+
+.admin-posture-scrutinize {
+  color: #8b1e1e;
+  background: rgba(139, 30, 30, 0.1);
+  border: 1px solid rgba(139, 30, 30, 0.35);
+}
+
+.admin-posture-neutral {
+  color: #5c5c5c;
+  background: rgba(92, 92, 92, 0.1);
+  border: 1px solid rgba(92, 92, 92, 0.3);
+}
+
+.admin-user-details {
+  margin: 0;
+  border-bottom: 1px solid rgba(31, 61, 45, 0.1);
+}
+
+.admin-users-row-expandable {
+  list-style: none;
+  cursor: pointer;
+  padding-left: 1.25rem;
+  position: relative;
+  border-bottom: 0;
+}
+
+.admin-user-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.admin-user-details > summary::before {
+  content: "▸";
+  position: absolute;
+  left: 0;
+  top: 0.75rem;
+  color: #5c5c5c;
+  transition: transform 0.15s ease;
+}
+
+.admin-user-details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.admin-unwatched-list {
+  list-style: none;
+  margin: 0 0 0.65rem 1rem;
+  padding: 0 0 0.5rem;
+  border-top: 1px solid rgba(31, 61, 45, 0.08);
+}
+
+.admin-unwatched-list li {
+  padding: 0.65rem 0;
+  border-bottom: 1px solid rgba(31, 61, 45, 0.08);
+}
+
+.admin-unwatched-list li:last-child {
+  border-bottom: 0;
+}
+
 @media (max-width: 32rem) {
   .stats-totals {
     grid-template-columns: 1fr;

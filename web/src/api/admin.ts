@@ -74,8 +74,52 @@ export type AdminSystem = {
   services: AdminSystemService[];
 };
 
+export type AdminUnwatchedTitle = {
+  title: string;
+  type: "movie" | "tv";
+  size: number;
+  size_h: string;
+  eps: string | null;
+  requested: string;
+};
+
+export type AdminUser = {
+  user: string;
+  plex_username: string;
+  email: string | null;
+  plex_linked: boolean;
+  total_requests: number;
+  available: number;
+  pending: number;
+  rate: number | null;
+  gb_requested: number;
+  gb_requested_h: string;
+  gb_watched: number;
+  gb_watched_h: string;
+  gb_unwatched: number;
+  gb_unwatched_h: string;
+  posture: string;
+  unwatched_titles: AdminUnwatchedTitle[];
+};
+
+export type AdminUsersTotals = {
+  users: number;
+  requesters: number;
+  requests: number;
+  available: number;
+  rate: number | null;
+  gb_requested: number;
+  gb_requested_h: string;
+  gb_watched: number;
+  gb_watched_h: string;
+  gb_unwatched: number;
+  gb_unwatched_h: string;
+};
+
 export type AdminUsersResponse = {
-  users: unknown[];
+  users: AdminUser[];
+  totals: AdminUsersTotals;
+  watched_definition: string;
 };
 
 export type AdminJobsResponse = {
@@ -133,9 +177,29 @@ export function formatPct(value: number | null | undefined): string {
   return `${value.toFixed(1)}%`;
 }
 
+export function formatRate(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "—";
+  }
+  return `${value}%`;
+}
+
 export function formatTempC(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "—";
   }
   return `${value.toFixed(0)}°C`;
+}
+
+export function postureBadgeClass(posture: string): string {
+  switch (posture) {
+    case "Approve freely":
+      return "admin-posture admin-posture-approve";
+    case "Watch":
+      return "admin-posture admin-posture-watch";
+    case "Scrutinize":
+      return "admin-posture admin-posture-scrutinize";
+    default:
+      return "admin-posture admin-posture-neutral";
+  }
 }
