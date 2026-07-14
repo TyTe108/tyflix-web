@@ -122,8 +122,22 @@ export type AdminUsersResponse = {
   watched_definition: string;
 };
 
+export type AdminJob = {
+  name: string;
+  desc: string;
+  schedule: string;
+  last_run: number | null;
+  next_run: number | null;
+  status: string;
+  last_line: string;
+  kind: string;
+  running?: boolean;
+};
+
 export type AdminJobsResponse = {
-  jobs: unknown[];
+  jobs: AdminJob[];
+  cache_age: number;
+  generated_at: number;
 };
 
 export type AdminContainersResponse = {
@@ -201,5 +215,28 @@ export function postureBadgeClass(posture: string): string {
       return "admin-posture admin-posture-scrutinize";
     default:
       return "admin-posture admin-posture-neutral";
+  }
+}
+
+export function formatEpoch(seconds: number | null): string {
+  if (seconds === null || Number.isNaN(seconds)) {
+    return "—";
+  }
+  const date = new Date(seconds * 1000);
+  const month = date.toLocaleString(undefined, { month: "short" });
+  const day = date.getDate();
+  const hours = date.getHours().toString().padStart(2, "0");
+  const mins = date.getMinutes().toString().padStart(2, "0");
+  return `${month} ${day}, ${hours}:${mins}`;
+}
+
+export function jobStatusBadgeClass(status: string): string {
+  switch (status) {
+    case "ok":
+      return "admin-status admin-status-ok";
+    case "attention":
+      return "admin-status admin-status-attention";
+    default:
+      return "admin-status admin-status-neutral";
   }
 }

@@ -2,12 +2,17 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   fetchAdminSystem,
+  fetchAdminJobs,
   fetchAdminUsers,
+  formatEpoch,
   formatPct,
   formatRate,
   formatTempC,
   formatUptime,
+  jobStatusBadgeClass,
   postureBadgeClass,
+  type AdminJob,
+  type AdminJobsResponse,
   type AdminSystem,
   type AdminSystemGpu,
   type AdminSystemStorage,
@@ -87,7 +92,8 @@ export function AdminPage() {
 
       <UsersPanel />
 
-      <ComingNextSection title="Jobs" />
+      <JobsPanel />
+
       <ComingNextSection title="Containers" />
     </main>
   );
@@ -280,6 +286,126 @@ function UnwatchedTitlesList({ titles }: { titles: AdminUnwatchedTitle[] }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+function JobsPanel() {
+  const [data, setData] = useState<AdminJobsResponse | null>(null);
+  const [status, setStatus] = useState<LoadStatus>("loading");
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const retry = useCallback(() => {
+    setReloadKey((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setStatus("loading");
+    setError(null);
+
+    void fetchAdminJobs()
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        setData(response);
+        setStatus("ready");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        setData(null);
+        setStatus("error");
+        setError(
+          err instanceof Error ? err.message : "Failed to load jobs",
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey]);
+
+  return (
+    <section className="admin-section" aria-labelledby="jobs-heading">
+      <h2 id="jobs-heading">Jobs</h2>
+
+      {status === "loading" ? (
+        <p className="muted">Loading jobs…</p>
+      ) : null}
+
+      {status === "error" ? (
+        <div className="stats-error">
+          <p className="error">{error ?? "Failed to load jobs"}</p>
+          <button type="button" className="btn secondary" onClick={retry}>
+            Retry
+          </button>
+        </div>
+      ) : null}
+
+      {status === "ready" && data !== null ? (
+        <JobsBody jobs={data.jobs} />
+      ) : null}
+    </section>
+  );
+}
+
+function JobsBody({ jobs }: { jobs: AdminJob[] }) {
+  return (
+    <div className="admin-jobs">
+      <div className="admin-jobs-scroll">
+        <div className="admin-jobs-list" role="table">
+          <div className="admin-jobs-row admin-jobs-header" role="row">
+            <div className="admin-jobs-cell" role="columnheader">
+              Job
+            </div>
+            <div className="admin-jobs-cell" role="columnheader">
+              Schedule
+            </div>
+            <div className="admin-jobs-cell" role="columnheader">
+              Last run
+            </div>
+            <div className="admin-jobs-cell" role="columnheader">
+              Next run
+            </div>
+            <div className="admin-jobs-cell" role="columnheader">
+              Status
+            </div>
+          </div>
+
+          {jobs.map((job) => (
+            <div key={job.name} className="admin-jobs-entry">
+              <div className="admin-jobs-row" role="row">
+                <div className="admin-jobs-cell admin-jobs-col-job" role="cell">
+                  <span className="admin-jobs-name">{job.name}</span>
+                  <span className="muted admin-jobs-desc">{job.desc}</span>
+                  <span className="stats-tag admin-jobs-kind">{job.kind}</span>
+                </div>
+                <div className="admin-jobs-cell" role="cell">
+                  {job.schedule}
+                </div>
+                <div className="admin-jobs-cell" role="cell">
+                  {formatEpoch(job.last_run)}
+                </div>
+                <div className="admin-jobs-cell" role="cell">
+                  {formatEpoch(job.next_run)}
+                </div>
+                <div className="admin-jobs-cell admin-jobs-col-status" role="cell">
+                  <span className={jobStatusBadgeClass(job.status)}>
+                    {job.status}
+                  </span>
+                </div>
+              </div>
+              {job.last_line ? (
+                <p className="admin-jobs-last-line muted">{job.last_line}</p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

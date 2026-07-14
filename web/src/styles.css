@@ -569,6 +569,117 @@ a {
   border-bottom: 0;
 }
 
+.admin-jobs-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -0.25rem;
+  padding: 0 0.25rem;
+}
+
+.admin-jobs-list {
+  min-width: 38rem;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-jobs-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1.6fr) minmax(6rem, 1.1fr) minmax(
+      5rem,
+      0.85fr
+    ) minmax(5rem, 0.85fr) minmax(4.5rem, 0.65fr);
+  gap: 0 0.5rem;
+  align-items: start;
+  padding: 0.65rem 0 0;
+}
+
+.admin-jobs-header {
+  padding: 0 0 0.5rem;
+  border-bottom: 1px solid rgba(31, 61, 45, 0.2);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #5c5c5c;
+}
+
+.admin-jobs-entry {
+  border-bottom: 1px solid rgba(31, 61, 45, 0.1);
+  padding-bottom: 0.65rem;
+}
+
+.admin-jobs-list > .admin-jobs-entry:last-child {
+  border-bottom: 0;
+}
+
+.admin-jobs-cell {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.admin-jobs-name {
+  display: block;
+  font-weight: 600;
+}
+
+.admin-jobs-desc {
+  display: block;
+  font-size: 0.8rem;
+  margin-top: 0.1rem;
+  line-height: 1.35;
+}
+
+.admin-jobs-kind {
+  display: inline-block;
+  margin-top: 0.25rem;
+  text-transform: lowercase;
+}
+
+.admin-jobs-col-status .admin-status {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.admin-jobs-last-line {
+  margin: 0;
+  padding: 0 0 0.15rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.admin-status {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+  border-radius: 0.25rem;
+  padding: 0.15rem 0.45rem;
+  white-space: nowrap;
+}
+
+.admin-status-ok {
+  color: #1f3d2d;
+  background: rgba(31, 61, 45, 0.12);
+  border: 1px solid rgba(31, 61, 45, 0.35);
+}
+
+.admin-status-attention {
+  color: #8b1e1e;
+  background: rgba(139, 30, 30, 0.1);
+  border: 1px solid rgba(139, 30, 30, 0.35);
+}
+
+.admin-status-neutral {
+  color: #5c5c5c;
+  background: rgba(92, 92, 92, 0.1);
+  border: 1px solid rgba(92, 92, 92, 0.3);
+}
+
 @media (max-width: 32rem) {
   .stats-totals {
     grid-template-columns: 1fr;
