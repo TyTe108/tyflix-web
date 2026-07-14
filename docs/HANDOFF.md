@@ -3,7 +3,7 @@
 > Living doc. Its job is to let a fresh conversation pick up this project cold.
 > Keep it current; delete guidance notes as you go.
 >
-> **Last updated after:** Phase 1.3 — Phase 1 (Plex auth + Seerr role gate) complete end-to-end.
+> **Last updated after:** Phase 2.2 — Phase 2 (per-user watched-vs-requested) complete, byte-verified vs the dashboard.
 > **Working name:** "Tyflix Web" / repo `tyflix-web` — rename freely.
 
 ---
@@ -248,7 +248,18 @@ Log (newest at bottom):
 - **Phase 1.3** — frontend Plex login (popup + poll), `AuthContext`, `ProtectedRoute`/`AdminRoute`,
   Home + stub Admin page (`react-router-dom` v7). Verified: web build, prod single-origin serving,
   and live browser login as admin.
-- **Phase 1 COMPLETE.** Next: Phase 2 (per-user "watched vs requested").
+- **Phase 1 COMPLETE.**
+- **Phase 2.1** — GET /api/me/stats (behind requireAuth): new Plex media-server client (accounts /
+  history / library item sizes), Seerr getRequestsByUser, and a pure computeWatchedVsRequested join
+  (GB-weighted, per-episode, requested-season-scoped). node:test for the join incl. the empty-seasons
+  case. **Verified live: byte-for-byte identical to the dashboard's owner row** (201,258,420,458
+  requested / 31,297,353,970 watched / rate 16). Owner resolves to Plex history accountID 1 via the
+  username fallback (plexId 309174878 is not itself a history account key).
+- **Phase 2.2** — Home renders the stats (rate + CSS bar, requested/watched/unwatched totals, counts,
+  largest-first unwatched titles with movie/TV tags + x/y eps) with loading and error/retry states.
+  Verified in-browser (16% watched, 187.4 GB requested, 12 unwatched titles).
+- **Phase 2 COMPLETE.** Next: Phase 3 (admin dashboard, admin-only — proxy the FastAPI dashboard's
+  JSON APIs; likely 3.1 system+storage, 3.2 per-user table, 3.3 jobs, 3.4 containers).
 
 ## 9. Deferred / candidate future work
 
@@ -263,9 +274,9 @@ Log (newest at bottom):
 
 ## 10. Rollout / status
 
-Phase 1 complete (Plex auth + Seerr role gate, verified live end-to-end). Not yet deployed
-(Phase 4). Next: Phase 2 — per-user "watched vs requested" analytics, ported from the dashboard's
-join logic (§6).
+Phases 1–2 complete and verified live (auth + Seerr role gate; per-user watched-vs-requested,
+byte-matched to the dashboard). Not yet deployed (Phase 4). Next: Phase 3 — the admin-only dashboard
+view (proxy the FastAPI dashboard's JSON APIs behind requireAdmin; needs DASHBOARD_URL in .env).
 
 ## 11. Working patterns established
 

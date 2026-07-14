@@ -84,3 +84,145 @@ h1 {
 a {
   color: #1f3d2d;
 }
+
+.stats {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(31, 61, 45, 0.15);
+}
+
+.stats h2 {
+  font-family: "Fraunces", "Iowan Old Style", Georgia, serif;
+  font-weight: 600;
+  font-size: 1.35rem;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.75rem;
+}
+
+.stats h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.stats-rate {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0 0 0.75rem;
+}
+
+.stats-bar {
+  height: 0.55rem;
+  border-radius: 999px;
+  background: rgba(31, 61, 45, 0.12);
+  overflow: hidden;
+  margin-bottom: 1.25rem;
+}
+
+.stats-bar-fill {
+  height: 100%;
+  background: #1f3d2d;
+  border-radius: inherit;
+  transition: width 0.25s ease;
+}
+
+.stats-totals {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
+}
+
+.stats-totals div {
+  margin: 0;
+}
+
+.stats-totals dt {
+  font-size: 0.8rem;
+  color: #5c5c5c;
+  margin: 0 0 0.15rem;
+}
+
+.stats-totals dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-counts {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.stats-unwatched-heading {
+  margin-top: 1.5rem;
+}
+
+.stats-unwatched-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.stats-unwatched-list li {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid rgba(31, 61, 45, 0.1);
+}
+
+.stats-unwatched-list li:last-child {
+  border-bottom: 0;
+}
+
+.stats-unwatched-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.stats-unwatched-title {
+  font-weight: 600;
+}
+
+.stats-tag {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #1f3d2d;
+  border: 1px solid rgba(31, 61, 45, 0.35);
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.4rem;
+}
+
+.stats-unwatched-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.stats-caption {
+  margin: 1.25rem 0 0;
+  font-size: 0.8rem;
+}
+
+.stats-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.stats-error .error {
+  margin: 0;
+}
+
+@media (max-width: 32rem) {
+  .stats-totals {
+    grid-template-columns: 1fr;
+  }
+}
+
