@@ -3,7 +3,7 @@
 > Living doc. Its job is to let a fresh conversation pick up this project cold.
 > Keep it current; delete guidance notes as you go.
 >
-> **Last updated after:** initial planning (pre–Phase 0). No code exists yet.
+> **Last updated after:** Phase 1.3 — Phase 1 (Plex auth + Seerr role gate) complete end-to-end.
 > **Working name:** "Tyflix Web" / repo `tyflix-web` — rename freely.
 
 ---
@@ -79,7 +79,7 @@ Static React build served by the same Node process (single origin)
   browser; only our opaque session cookie is.
 - Defense-in-depth (deferred, candidate): Cloudflare Access in front of `/admin` routes.
 
-## 4. File layout (planned — nothing built yet)
+## 4. File layout (current as of Phase 1; test files + web pages now exist)
 
 ```
 tyflix-web/
@@ -173,6 +173,17 @@ tyflix-web/
   its hardest, host-coupled code (cgroup PID-namespace translation, GPU sampler, socket-proxy),
   but couples the admin view's uptime to that container being reachable. Acceptable for the
   companion phase; porting the collectors into Node is deferred replacement-phase work.
+- **`node --test <dir>` runs `index.js` on Node 22**, starting the server instead of discovering
+  tests. Use the quoted glob: `node --test "dist/**/*.test.js"` (the `test` script does this).
+- **Desktop Commander spawns children with `NODE_ENV=production`.** The server correctly skips
+  `.env` loading in production, so a DC-launched dev instance sees no config and exits with
+  "Invalid PLEX_CLIENT_ID". Force `NODE_ENV=development` when running the server via DC. Not an
+  app bug; `npm run dev` in a normal terminal is unaffected.
+- **Dev vs prod `SEERR_URL`.** Local dev points at the public tunnel `https://seerr.tylerte.dev`
+  (the Docker-internal `http://seerr:5055` is unreachable from the Mac); prod (Docker on the Dell)
+  uses `http://seerr:5055`. The same split will apply to `PLEX_BASEURL` + Plex token in Phase 2.
+- **Owner identity (verified live):** the owner Plex account `id 309174878` (`tylerte221`) resolves
+  to Seerr user `id 1` with `permissions: 2` (exactly the ADMIN bit) → `isAdmin` true.
 
 ## 6. Core logic — watched-vs-requested (to port in Phase 2)
 
@@ -223,8 +234,21 @@ Roadmap (planned):
 - **Phase 5+ (future / "more ideas" → replacement path):** TMDB browse, request submission →
   Radarr/Sonarr, notifications, own user store. Deferred.
 
-Log:
-- *(pending)* Phase 0 — not started.
+Log (newest at bottom):
+- **Phase 0** — scaffold (Express 5 + Vite/React/TS monorepo, `/healthz`, fail-loud config,
+  multi-stage Dockerfile). Verified: dev "backend: ok", bad `PORT` exits loud, prod build serves both.
+- **Phase 1.1** — Plex OAuth PIN round-trip (backend): `POST /api/auth/plex/start`,
+  `GET /api/auth/plex/check`. Verified live against Plex (pending → approve → real Plex identity).
+- **Phase 1.2** — Seerr-backed authorization + signed session: `getUserByPlexId`, HMAC session
+  cookie, `/api/auth/me`, `/api/auth/logout`, `requireAuth`/`requireAdmin`, and a temporary
+  `GET /api/admin/ping` gate probe (**replace in Phase 3**). Verified live (owner → isAdmin) and
+  with forged/tampered/expired cookies (401/403/200 all correct).
+- **Phase 1.2.1** — unit tests (`node:test`, no deps) for config, session, Seerr client;
+  `npm test` (server) = `build && node --test "dist/**/*.test.js"`. 20 tests; mutation-checked.
+- **Phase 1.3** — frontend Plex login (popup + poll), `AuthContext`, `ProtectedRoute`/`AdminRoute`,
+  Home + stub Admin page (`react-router-dom` v7). Verified: web build, prod single-origin serving,
+  and live browser login as admin.
+- **Phase 1 COMPLETE.** Next: Phase 2 (per-user "watched vs requested").
 
 ## 9. Deferred / candidate future work
 
@@ -239,7 +263,9 @@ Log:
 
 ## 10. Rollout / status
 
-Pre–Phase 0. Planning complete; auth facts verified from primary sources.
+Phase 1 complete (Plex auth + Seerr role gate, verified live end-to-end). Not yet deployed
+(Phase 4). Next: Phase 2 — per-user "watched vs requested" analytics, ported from the dashboard's
+join logic (§6).
 
 ## 11. Working patterns established
 
