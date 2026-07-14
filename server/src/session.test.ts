@@ -149,7 +149,7 @@ describe("readSession rejects invalid tokens", () => {
       SECRET,
     );
     const [payloadPart, sigPart] = token.split(".");
-    const badSig = `${sigPart.slice(0, -1)}${sigPart.endsWith("a") ? "b" : "a"}`;
+    const badSig = `${sigPart[0] === "A" ? "B" : "A"}${sigPart.slice(1)}`;
     assert.equal(
       readSession(
         fakeReq(`${SESSION_COOKIE_NAME}=${payloadPart}.${badSig}`),

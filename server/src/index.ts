@@ -2,14 +2,18 @@ import express from "express";
 import path from "path";
 import { loadConfig, type AppConfig } from "./config";
 import { createDashboardClient } from "./dashboard/client";
+import { openDatabase } from "./db";
 import { requireAdmin, requireAuth } from "./middleware/auth";
 import { createPlexClient } from "./plex/client";
 import { createPlexServerClient } from "./plex/server";
+import { createRadarrClient } from "./radarr/client";
 import { createAdminRouter } from "./routes/admin";
 import { createAuthRouter } from "./routes/auth";
 import { createDiscoverRouter } from "./routes/discover";
 import { createMeRouter } from "./routes/me";
+import { createRequestsRouter } from "./routes/requests";
 import { createSeerrClient } from "./seerr/client";
+import { createSonarrClient } from "./sonarr/client";
 import { createTmdbClient } from "./tmdb/client";
 
 loadLocalEnvFile();
@@ -17,6 +21,13 @@ loadLocalEnvFile();
 let config: AppConfig;
 try {
   config = loadConfig();
+} catch (err) {
+  console.error(err instanceof Error ? err.message : err);
+  process.exit(1);
+}
+
+try {
+  openDatabase(config.dbPath);
 } catch (err) {
   console.error(err instanceof Error ? err.message : err);
   process.exit(1);
@@ -47,7 +58,27 @@ const tmdb = createTmdbClient({
   apiKey: config.tmdbApiKey,
 });
 
+const radarr = createRadarrClient({
+  url: config.radarrUrl,
+  apiKey: config.radarrApiKey,
+});
+
+const sonarr = createSonarrClient({
+  url: config.sonarrUrl,
+  apiKey: config.sonarrApiKey,
+});
+
+const requestsConfig = {
+  radarrQualityProfileId: config.radarrQualityProfileId,
+  radarrRootFolder: config.radarrRootFolder,
+  radarrMinimumAvailability: config.radarrMinimumAvailability,
+  sonarrQualityProfileId: config.sonarrQualityProfileId,
+  sonarrRootFolder: config.sonarrRootFolder,
+  sonarrLanguageProfileId: config.sonarrLanguageProfileId,
+};
+
 const app = express();
+app.use(express.json());
 
 app.get("/healthz", (_req, res) => {
   res.json({ ok: true });
@@ -79,6 +110,18 @@ app.use(
   "/api/discover",
   requireAuth(config.sessionSecret),
   createDiscoverRouter({ tmdb }),
+);
+
+app.use(
+  "/api/requests",
+  requireAuth(config.sessionSecret),
+  createRequestsRouter({
+    tmdb,
+    radarr,
+    sonarr,
+    config: requestsConfig,
+    sessionSecret: config.sessionSecret,
+  }),
 );
 
 if (config.nodeEnv === "production") {
