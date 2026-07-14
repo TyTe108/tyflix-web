@@ -1,8 +1,10 @@
 import express from "express";
 import path from "path";
 import { loadConfig, type AppConfig } from "./config";
+import { requireAdmin } from "./middleware/auth";
 import { createPlexClient } from "./plex/client";
 import { createAuthRouter } from "./routes/auth";
+import { createSeerrClient } from "./seerr/client";
 
 loadLocalEnvFile();
 
@@ -14,9 +16,16 @@ try {
   process.exit(1);
 }
 
+const secureCookies = config.nodeEnv === "production";
+
 const plex = createPlexClient({
   clientId: config.plexClientId,
   product: config.plexProduct,
+});
+
+const seerr = createSeerrClient({
+  baseUrl: config.seerrUrl,
+  apiKey: config.seerrApiKey,
 });
 
 const app = express();
@@ -25,7 +34,20 @@ app.get("/healthz", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.use("/api/auth", createAuthRouter(plex));
+app.use(
+  "/api/auth",
+  createAuthRouter({
+    plex,
+    seerr,
+    sessionSecret: config.sessionSecret,
+    secureCookies,
+  }),
+);
+
+// Temporary gate-verification probe; replaced by real admin routes in Phase 3.
+app.get("/api/admin/ping", requireAdmin(config.sessionSecret), (_req, res) => {
+  res.json({ ok: true });
+});
 
 if (config.nodeEnv === "production") {
   const webDistPath = path.resolve(__dirname, "../../web/dist");

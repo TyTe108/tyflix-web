@@ -3,6 +3,9 @@ export type AppConfig = {
   nodeEnv: "development" | "production" | "test";
   plexClientId: string;
   plexProduct: string;
+  sessionSecret: string;
+  seerrUrl: string;
+  seerrApiKey: string;
 };
 
 export function validate(
@@ -63,11 +66,32 @@ function parsePlexProduct(raw: string | undefined): string {
   return validate("PLEX_PRODUCT", raw, () => null);
 }
 
+function parseSessionSecret(raw: string | undefined): string {
+  return validate("SESSION_SECRET", raw, (v) => {
+    if (v.length < 16) {
+      return "must be at least 16 characters";
+    }
+    return null;
+  });
+}
+
+function parseSeerrUrl(raw: string | undefined): string {
+  const validated = validate("SEERR_URL", raw, () => null);
+  return validated.replace(/\/+$/, "");
+}
+
+function parseSeerrApiKey(raw: string | undefined): string {
+  return validate("SEERR_API_KEY", raw, () => null);
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     port: parsePort(env.PORT),
     nodeEnv: parseNodeEnv(env.NODE_ENV),
     plexClientId: parsePlexClientId(env.PLEX_CLIENT_ID),
     plexProduct: parsePlexProduct(env.PLEX_PRODUCT),
+    sessionSecret: parseSessionSecret(env.SESSION_SECRET),
+    seerrUrl: parseSeerrUrl(env.SEERR_URL),
+    seerrApiKey: parseSeerrApiKey(env.SEERR_API_KEY),
   };
 }
