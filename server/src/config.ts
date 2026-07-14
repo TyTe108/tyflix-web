@@ -1,9 +1,11 @@
 export type AppConfig = {
   port: number;
   nodeEnv: "development" | "production" | "test";
+  plexClientId: string;
+  plexProduct: string;
 };
 
-function validate(
+export function validate(
   name: string,
   value: string | undefined,
   check: (raw: string) => string | null,
@@ -50,9 +52,22 @@ function parseNodeEnv(
   return validated as AppConfig["nodeEnv"];
 }
 
+function parsePlexClientId(raw: string | undefined): string {
+  return validate("PLEX_CLIENT_ID", raw, () => null);
+}
+
+function parsePlexProduct(raw: string | undefined): string {
+  if (raw === undefined || raw.trim() === "") {
+    return "Tyflix";
+  }
+  return validate("PLEX_PRODUCT", raw, () => null);
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     port: parsePort(env.PORT),
     nodeEnv: parseNodeEnv(env.NODE_ENV),
+    plexClientId: parsePlexClientId(env.PLEX_CLIENT_ID),
+    plexProduct: parsePlexProduct(env.PLEX_PRODUCT),
   };
 }
