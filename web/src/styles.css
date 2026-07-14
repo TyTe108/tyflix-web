@@ -773,6 +773,233 @@ a {
   white-space: normal;
 }
 
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.discover-search {
+  display: block;
+  margin: 1.25rem 0 1.75rem;
+}
+
+.discover-search input {
+  width: 100%;
+  font: inherit;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid rgba(31, 61, 45, 0.35);
+  border-radius: 0.4rem;
+  background: rgba(255, 255, 255, 0.7);
+  color: inherit;
+}
+
+.discover-search input:focus {
+  outline: 2px solid rgba(31, 61, 45, 0.45);
+  outline-offset: 1px;
+}
+
+.discover-results h2 {
+  font-family: "Fraunces", "Iowan Old Style", Georgia, serif;
+  font-weight: 600;
+  font-size: 1.35rem;
+  letter-spacing: -0.02em;
+  margin: 0 0 1rem;
+}
+
+.media-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: 1rem;
+}
+
+.media-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.media-card:hover .media-card-title {
+  color: #1f3d2d;
+}
+
+.media-poster {
+  aspect-ratio: 2 / 3;
+  border-radius: 0.35rem;
+  overflow: hidden;
+  background: rgba(31, 61, 45, 0.08);
+}
+
+.media-poster img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.media-poster-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0.75rem;
+  font-size: 0.8rem;
+  color: #5c5c5c;
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 6px,
+      rgba(31, 61, 45, 0.06) 6px,
+      rgba(31, 61, 45, 0.06) 12px
+    );
+}
+
+.media-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.media-card-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+.media-card-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.media-card-year {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.media-detail {
+  margin-top: 1.25rem;
+}
+
+.media-detail-hero {
+  aspect-ratio: 16 / 9;
+  border-radius: 0.4rem;
+  overflow: hidden;
+  background: rgba(31, 61, 45, 0.08);
+  margin-bottom: 1.25rem;
+}
+
+.media-detail-hero-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.media-detail-hero-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #5c5c5c;
+  font-size: 0.9rem;
+}
+
+.media-detail-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0 0 0.5rem;
+}
+
+.media-detail-status {
+  font-size: 0.875rem;
+}
+
+.media-detail h1 {
+  margin-bottom: 0.35rem;
+}
+
+.media-detail-year {
+  font-weight: 400;
+  color: #5c5c5c;
+}
+
+.media-detail-genres,
+.media-detail-runtime {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+}
+
+.media-detail-overview {
+  margin: 1rem 0 0;
+  line-height: 1.55;
+}
+
+.media-detail-seasons {
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgba(31, 61, 45, 0.15);
+}
+
+.media-detail-seasons h2 {
+  font-family: "Fraunces", "Iowan Old Style", Georgia, serif;
+  font-weight: 600;
+  font-size: 1.2rem;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.75rem;
+}
+
+.media-season-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.media-season-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid rgba(31, 61, 45, 0.1);
+  font-size: 0.95rem;
+}
+
+.media-season-list li:last-child {
+  border-bottom: 0;
+}
+
+.media-season-name {
+  font-weight: 600;
+}
+
 @media (max-width: 32rem) {
   .stats-totals {
     grid-template-columns: 1fr;
@@ -790,6 +1017,11 @@ a {
     flex-direction: column;
     align-items: flex-start;
     gap: 0.2rem;
+  }
+
+  .media-grid {
+    grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+    gap: 0.75rem;
   }
 }
 

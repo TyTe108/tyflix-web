@@ -40,8 +40,10 @@ Quality profile + root folder: fetch the lists from Radarr/Sonarr and use a conf
 first/"any" profile) — MVP uses a sensible default, **not** a per-request chooser.
 
 ### Availability / status (MVP)
-Coarse status: `pending → approved → processing → available` (+ `declined`). Availability MVP: check
-Radarr/Sonarr (`hasFile` / episode file counts) and/or Plex on a periodic refresh. Real-time webhooks deferred.
+**Two-axis status (mirrors Seerr's `MediaRequestStatus` + `MediaStatus`), per Tyler 2026-07-13:**
+`request_status` = pending → approved | declined (+ `failed` if the Radarr/Sonarr add errors); `media_status`
+= unknown → pending → processing → partially_available → available. Availability MVP: refresh `media_status`
+from Radarr/Sonarr (`hasFile` / episode file counts) and/or Plex periodically. Real-time webhooks deferred.
 
 ## Architecture additions
 - `server/src/db/` — better-sqlite3 connection + schema init (idempotent migrations) + a `requests` data-access module.
@@ -52,10 +54,13 @@ Radarr/Sonarr (`hasFile` / episode file counts) and/or Plex on a periodic refres
 - `web/src/pages/` — Discover, MediaDetail, Requests (+ admin approval queue).
 - config: `TMDB_API_KEY`, `RADARR_URL`/`RADARR_API_KEY`, `SONARR_URL`/`SONARR_API_KEY` (+ optional default profile/root ids).
 
-### `requests` table (initial)
+### `requests` table (two-axis status — refined in 5.1.1)
 `id` (pk), `tmdb_id`, `media_type` ('movie'|'tv'), `title`, `seasons` (JSON, tv only),
-`requested_by_seerr_id`, `requested_by_name`, `status`, `radarr_id`/`sonarr_id` (nullable),
-`created_at`, `updated_at`, `decided_by` (nullable), `decided_at` (nullable).
+`requested_by_seerr_id`, `requested_by_name`,
+**`request_status`** ('pending'|'approved'|'declined'|'failed'),
+**`media_status`** ('unknown'|'pending'|'processing'|'partially_available'|'available'),
+`radarr_id`/`sonarr_id` (nullable), `created_at`, `updated_at`, `decided_by` (nullable), `decided_at` (nullable).
+5.1 shipped a single `status` column; 5.1.1 splits it into the two axes above (no data existed yet).
 
 ## Increment plan
 - **5.1** — Persistence foundation: better-sqlite3, schema init, `requests` data-access module + `node:test`.

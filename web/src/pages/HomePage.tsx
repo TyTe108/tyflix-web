@@ -57,25 +57,23 @@ export function HomePage() {
     <main className="page">
       <header className="row">
         <h1>Tyflix</h1>
-        <button
-          type="button"
-          className="btn secondary"
-          onClick={() => void logout()}
-        >
-          Logout
-        </button>
+        <div className="nav-links">
+          <Link to="/discover">Discover</Link>
+          {isAdmin ? <Link to="/admin">Admin</Link> : null}
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={() => void logout()}
+          >
+            Logout
+          </button>
+        </div>
       </header>
 
       <p>
         Signed in as <strong>{user.displayName}</strong>
         {isAdmin ? " (admin)" : " (member)"}.
       </p>
-
-      {isAdmin ? (
-        <p>
-          <Link to="/admin">Admin</Link>
-        </p>
-      ) : null}
 
       <section className="stats" aria-labelledby="stats-heading">
         <h2 id="stats-heading">Watched vs requested</h2>
