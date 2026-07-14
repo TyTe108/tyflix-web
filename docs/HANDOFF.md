@@ -3,7 +3,7 @@
 > Living doc. Its job is to let a fresh conversation pick up this project cold.
 > Keep it current; delete guidance notes as you go.
 >
-> **Last updated after:** Phase 3.4 — Phase 3 (admin dashboard, all four panels) complete. Next: Phase 4 (deploy).
+> **Last updated after:** Phase 3 complete + Phase 5 (Seerr-replacement MVP) planned and reprioritized ahead of Phase 4 (deploy). Next: Phase 5.1.
 > **Working name:** "Tyflix Web" / repo `tyflix-web` — rename freely.
 
 ---
@@ -229,10 +229,15 @@ Roadmap (planned):
   dashboard for the same user.
 - **Phase 3 — Admin view (admin-only).** Proxy the dashboard JSON APIs behind the admin gate;
   re-present system/storage, per-user table, jobs, containers. Likely split 3.1–3.4.
-- **Phase 4 — Deploy.** Dockerize into the Dell stack + Cloudflare tunnel hostname; secrets;
-  don't route the public hostname until the Phase 1 gate is smoke-tested.
-- **Phase 5+ (future / "more ideas" → replacement path):** TMDB browse, request submission →
-  Radarr/Sonarr, notifications, own user store. Deferred.
+- **Phase 5 — Seerr replacement (MVP request pipeline).** ⟵ reprioritized 2026-07-13 to come BEFORE
+  Phase 4 (Tyler's call). TMDB discovery → request → approve (mirrors Seerr permissions) → Radarr/Sonarr →
+  status. Introduces a **SQLite** datastore (better-sqlite3). Runs **alongside** Seerr (Seerr stays the
+  auth/permission backend); cut over later. Increments 5.1–5.6. Spec: `docs/phase-5-replacement-spec.md`.
+- **Phase 4 — Deploy (now AFTER Phase 5).** Dockerize into the Dell stack + Cloudflare tunnel hostname
+  `tyflix-dashboard.tylerte.dev`; secrets; DB volume; add the `/api` 404-guard; don't route the public
+  hostname until the admin gate is smoke-tested in prod.
+- **Beyond the MVP (deferred):** 4K, quality-profile chooser, request limits, issues, notifications,
+  watchlist, own user store, retiring Seerr.
 
 Log (newest at bottom):
 - **Phase 0** — scaffold (Express 5 + Vite/React/TS monorepo, `/healthz`, fail-loud config,
@@ -275,7 +280,8 @@ Log (newest at bottom):
 
 ## 9. Deferred / candidate future work
 
-- Full Seerr replacement (own request pipeline, TMDB discovery) — the long-term goal.
+- Full Seerr **parity** (4K, request limits, issues, notifications, watchlist, own user store, retiring
+  Seerr) — beyond the Phase 5 MVP. (The MVP request pipeline itself is now ACTIVE as Phase 5, ahead of deploy.)
 - Port host-metric collectors into Node to drop the FastAPI-dashboard dependency.
 - Tautulli-backed watch history for durable, profile-independent accuracy.
 - Cloudflare Access on `/admin` as defense-in-depth.
@@ -290,11 +296,10 @@ Log (newest at bottom):
 ## 10. Rollout / status
 
 Phases 1–3 complete and verified live (Plex auth + Seerr role gate; per-user watched-vs-requested,
-byte-matched to the dashboard; full admin dashboard — system/storage, per-user table, jobs, containers —
-proxied behind requireAdmin). `.env` now also carries `DASHBOARD_URL`. Not yet deployed. Next: Phase 4 —
-containerize (the multi-stage Dockerfile already builds web+server into one image), set prod env
-(SEERR_URL/PLEX_BASEURL/DASHBOARD_URL become Docker-internal on the Dell), add the container to the Dell
-compose, wire a Cloudflare tunnel hostname, and add an `/api` 404-guard before the SPA catch-all.
+byte-matched to the dashboard; full admin dashboard proxied behind requireAdmin). Not yet deployed.
+**Next: Phase 5 — the Seerr-replacement MVP request pipeline (reprioritized ahead of deploy 2026-07-13),
+then Phase 4 (deploy).** See `docs/phase-5-replacement-spec.md`; increments 5.1–5.6 start with the SQLite
+persistence foundation (5.1). Deploy hostname chosen: `tyflix-dashboard.tylerte.dev`.
 
 ## 11. Working patterns established
 
