@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsc && concurrently -k -n tsc,node -c blue,cyan \"tsc -w --preserveWatchOutput\" \"node --watch dist/index.js\"",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "npm run build && node --test \"dist/**/*.test.js\""
   },
   "dependencies": {
     "express": "5.2.1"
