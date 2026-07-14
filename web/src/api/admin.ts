@@ -140,9 +140,45 @@ export type AdminJobsResponse = {
   generated_at: number;
 };
 
+export type AdminDockerRow = {
+  name: string;
+  image: string;
+  state: string;
+  health: string | null;
+  restarts: number;
+  uptime_s: number;
+  cpu: number;
+  mem_used_h: string;
+  mem_limit_h: string;
+  mem_pct: number;
+  net_rx_h: string;
+  net_tx_h: string;
+  blk_r_h: string;
+  blk_w_h: string;
+  pids: number;
+};
+
+export type AdminNativeRow = {
+  name: string;
+  unit: string;
+  state: string;
+  cpu: number;
+  mem_used_h: string;
+  pids: number;
+  uptime_s: number;
+};
+
 export type AdminContainersResponse = {
-  containers?: unknown[];
-  [key: string]: unknown;
+  docker: {
+    ok: boolean;
+    error?: string;
+    rows: AdminDockerRow[];
+  };
+  native: {
+    rows: AdminNativeRow[];
+  };
+  cache_age: number;
+  generated_at: number;
 };
 
 async function fetchAdminJson<T>(path: string): Promise<T> {
@@ -236,6 +272,35 @@ export function jobStatusBadgeClass(status: string): string {
       return "admin-status admin-status-ok";
     case "attention":
       return "admin-status admin-status-attention";
+    default:
+      return "admin-status admin-status-neutral";
+  }
+}
+
+export function stateBadgeClass(state: string): string {
+  switch (state) {
+    case "running":
+      return "admin-status admin-status-ok";
+    case "exited":
+    case "stopped":
+    case "dead":
+      return "admin-status admin-status-attention";
+    case "restarting":
+    case "created":
+      return "admin-status admin-status-amber";
+    default:
+      return "admin-status admin-status-neutral";
+  }
+}
+
+export function healthBadgeClass(health: string): string {
+  switch (health) {
+    case "healthy":
+      return "admin-status admin-status-ok";
+    case "unhealthy":
+      return "admin-status admin-status-attention";
+    case "starting":
+      return "admin-status admin-status-amber";
     default:
       return "admin-status admin-status-neutral";
   }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  fetchAdminContainers,
   fetchAdminSystem,
   fetchAdminJobs,
   fetchAdminUsers,
@@ -9,10 +10,15 @@ import {
   formatRate,
   formatTempC,
   formatUptime,
+  healthBadgeClass,
   jobStatusBadgeClass,
   postureBadgeClass,
+  stateBadgeClass,
+  type AdminContainersResponse,
+  type AdminDockerRow,
   type AdminJob,
   type AdminJobsResponse,
+  type AdminNativeRow,
   type AdminSystem,
   type AdminSystemGpu,
   type AdminSystemStorage,
@@ -94,7 +100,7 @@ export function AdminPage() {
 
       <JobsPanel />
 
-      <ComingNextSection title="Containers" />
+      <ContainersPanel />
     </main>
   );
 }
@@ -409,13 +415,201 @@ function JobsBody({ jobs }: { jobs: AdminJob[] }) {
   );
 }
 
-function ComingNextSection({ title }: { title: string }) {
-  const id = `coming-${title.toLowerCase()}`;
+function ContainersPanel() {
+  const [data, setData] = useState<AdminContainersResponse | null>(null);
+  const [status, setStatus] = useState<LoadStatus>("loading");
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const retry = useCallback(() => {
+    setReloadKey((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setStatus("loading");
+    setError(null);
+
+    void fetchAdminContainers()
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        setData(response);
+        setStatus("ready");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        setData(null);
+        setStatus("error");
+        setError(
+          err instanceof Error ? err.message : "Failed to load containers",
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey]);
+
   return (
-    <section className="admin-section" aria-labelledby={id}>
-      <h2 id={id}>{title}</h2>
-      <p className="muted">Coming next.</p>
+    <section className="admin-section" aria-labelledby="containers-heading">
+      <h2 id="containers-heading">Containers</h2>
+
+      {status === "loading" ? (
+        <p className="muted">Loading containers…</p>
+      ) : null}
+
+      {status === "error" ? (
+        <div className="stats-error">
+          <p className="error">{error ?? "Failed to load containers"}</p>
+          <button type="button" className="btn secondary" onClick={retry}>
+            Retry
+          </button>
+        </div>
+      ) : null}
+
+      {status === "ready" && data !== null ? (
+        <ContainersBody data={data} />
+      ) : null}
     </section>
+  );
+}
+
+function ContainersBody({ data }: { data: AdminContainersResponse }) {
+  return (
+    <div className="admin-containers">
+      <h3 className="admin-subheading">Docker</h3>
+      {data.docker.ok ? (
+        <DockerTable rows={data.docker.rows} />
+      ) : (
+        <p className="error">{data.docker.error ?? "Docker unavailable"}</p>
+      )}
+
+      <h3 className="admin-subheading">Native services</h3>
+      <NativeTable rows={data.native.rows} />
+    </div>
+  );
+}
+
+function DockerTable({ rows }: { rows: AdminDockerRow[] }) {
+  return (
+    <div className="admin-containers-scroll">
+      <div className="admin-containers-list admin-containers-docker" role="table">
+        <div className="admin-containers-row admin-containers-header" role="row">
+          <div className="admin-containers-cell" role="columnheader">
+            Container
+          </div>
+          <div className="admin-containers-cell" role="columnheader">
+            State
+          </div>
+          <div className="admin-containers-cell" role="columnheader">
+            CPU
+          </div>
+          <div className="admin-containers-cell" role="columnheader">
+            Memory
+          </div>
+          <div className="admin-containers-cell" role="columnheader">
+            Net
+          </div>
+          <div className="admin-containers-cell" role="columnheader">
+            Uptime
+          </div>
+        </div>
+
+        {rows.map((row) => (
+          <div key={row.name} className="admin-containers-row" role="row">
+            <div className="admin-containers-cell admin-containers-col-name" role="cell">
+              <span className="admin-containers-name">{row.name}</span>
+              <span className="muted admin-containers-sub">{row.image}</span>
+              <span className="muted admin-containers-sub">
+                pids {row.pids} · restarts {row.restarts} · blk {row.blk_r_h}/
+                {row.blk_w_h}
+              </span>
+            </div>
+            <div className="admin-containers-cell admin-containers-col-badges" role="cell">
+              <span className={stateBadgeClass(row.state)}>{row.state}</span>
+              {row.health != null ? (
+                <span className={healthBadgeClass(row.health)}>{row.health}</span>
+              ) : null}
+            </div>
+            <div className="admin-containers-cell" role="cell">
+              {formatPct(row.cpu)}
+            </div>
+            <div className="admin-containers-cell" role="cell">
+              <span>
+                {row.mem_used_h} / {row.mem_limit_h}
+              </span>
+              <span className="muted admin-containers-sub">
+                {formatPct(row.mem_pct)}
+              </span>
+            </div>
+            <div className="admin-containers-cell" role="cell">
+              <span>↓ {row.net_rx_h}</span>
+              <span className="muted admin-containers-sub">↑ {row.net_tx_h}</span>
+            </div>
+            <div className="admin-containers-cell" role="cell">
+              {formatUptime(row.uptime_s)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NativeTable({ rows }: { rows: AdminNativeRow[] }) {
+  return (
+    <div className="admin-containers-scroll">
+      <div className="admin-containers-list admin-containers-native" role="table">
+        <div className="admin-containers-row admin-containers-header" role="row">
+          <div className="admin-containers-cell" role="columnheader">
+            Service
+          </div>
+          <div className="admin-containers-cell" role="columnheader">
+            State
+          </div>
+          <div className="admin-containers-cell" role="columnheader">
+            CPU
+          </div>
+          <div className="admin-containers-cell" role="columnheader">
+            Memory
+          </div>
+          <div className="admin-containers-cell" role="columnheader">
+            PIDs
+          </div>
+          <div className="admin-containers-cell" role="columnheader">
+            Uptime
+          </div>
+        </div>
+
+        {rows.map((row) => (
+          <div key={row.unit} className="admin-containers-row" role="row">
+            <div className="admin-containers-cell admin-containers-col-name" role="cell">
+              <span className="admin-containers-name">{row.name}</span>
+              <span className="muted admin-containers-sub">{row.unit}</span>
+            </div>
+            <div className="admin-containers-cell admin-containers-col-badges" role="cell">
+              <span className={stateBadgeClass(row.state)}>{row.state}</span>
+            </div>
+            <div className="admin-containers-cell" role="cell">
+              {formatPct(row.cpu)}
+            </div>
+            <div className="admin-containers-cell" role="cell">
+              {row.mem_used_h}
+            </div>
+            <div className="admin-containers-cell" role="cell">
+              {row.pids}
+            </div>
+            <div className="admin-containers-cell" role="cell">
+              {formatUptime(row.uptime_s)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
