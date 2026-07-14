@@ -1,53 +1,20 @@
-import { useEffect, useState } from "react";
-
-type BackendStatus = "loading" | "ok" | "unreachable";
+import { Navigate, Route, Routes } from "react-router-dom";
+import { AdminRoute, ProtectedRoute } from "./auth/ProtectedRoute";
+import { AdminPage } from "./pages/AdminPage";
+import { HomePage } from "./pages/HomePage";
+import { LoginPage } from "./pages/LoginPage";
 
 export function App() {
-  const [status, setStatus] = useState<BackendStatus>("loading");
-
-  useEffect(() => {
-    let cancelled = false;
-
-    fetch("/healthz")
-      .then(async (res) => {
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-        const body: unknown = await res.json();
-        if (
-          typeof body !== "object" ||
-          body === null ||
-          !("ok" in body) ||
-          (body as { ok: unknown }).ok !== true
-        ) {
-          throw new Error("unexpected health response");
-        }
-        if (!cancelled) {
-          setStatus("ok");
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setStatus("unreachable");
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const label =
-    status === "loading"
-      ? "backend: …"
-      : status === "ok"
-        ? "backend: ok"
-        : "backend: unreachable";
-
   return (
-    <main>
-      <h1>Tyflix</h1>
-      <p>{label}</p>
-    </main>
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route element={<ProtectedRoute />}>
+        <Route path="/" element={<HomePage />} />
+      </Route>
+      <Route element={<AdminRoute />}>
+        <Route path="/admin" element={<AdminPage />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
