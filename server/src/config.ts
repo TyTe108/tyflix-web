@@ -1,3 +1,5 @@
+import path from "node:path";
+
 export type AppConfig = {
   port: number;
   nodeEnv: "development" | "production" | "test";
@@ -9,6 +11,7 @@ export type AppConfig = {
   seerrUrl: string;
   seerrApiKey: string;
   dashboardUrl: string;
+  dbPath: string;
 };
 
 export function validate(
@@ -101,6 +104,17 @@ function parseDashboardUrl(raw: string | undefined): string {
   return validated.replace(/\/+$/, "");
 }
 
+function parseDbPath(
+  raw: string | undefined,
+  cwd: string = process.cwd(),
+): string {
+  const value =
+    raw === undefined || raw.trim() === ""
+      ? "./data/tyflix.db"
+      : validate("DB_PATH", raw, () => null);
+  return path.isAbsolute(value) ? value : path.resolve(cwd, value);
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     port: parsePort(env.PORT),
@@ -113,5 +127,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     seerrUrl: parseSeerrUrl(env.SEERR_URL),
     seerrApiKey: parseSeerrApiKey(env.SEERR_API_KEY),
     dashboardUrl: parseDashboardUrl(env.DASHBOARD_URL),
+    dbPath: parseDbPath(env.DB_PATH),
   };
 }

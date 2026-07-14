@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { describe, it } from "node:test";
 import { loadConfig } from "./config";
 
@@ -29,6 +30,7 @@ describe("loadConfig", () => {
       seerrUrl: "http://seerr:5055",
       seerrApiKey: "seerr-api-key",
       dashboardUrl: "http://dashboard:8787",
+      dbPath: path.resolve("./data/tyflix.db"),
     });
   });
 
@@ -162,5 +164,26 @@ describe("loadConfig", () => {
       () => loadConfig({ ...validEnv, PORT: "65536" }),
       (err: unknown) => err instanceof Error && err.message.includes("PORT"),
     );
+  });
+
+  it('defaults DB_PATH to "./data/tyflix.db" as an absolute path', () => {
+    const config = loadConfig(validEnv);
+    assert.equal(config.dbPath, path.resolve("./data/tyflix.db"));
+  });
+
+  it("resolves relative DB_PATH against cwd", () => {
+    const config = loadConfig({
+      ...validEnv,
+      DB_PATH: "./custom/tyflix.db",
+    });
+    assert.equal(config.dbPath, path.resolve("./custom/tyflix.db"));
+  });
+
+  it("preserves absolute DB_PATH", () => {
+    const config = loadConfig({
+      ...validEnv,
+      DB_PATH: "/var/data/tyflix.db",
+    });
+    assert.equal(config.dbPath, "/var/data/tyflix.db");
   });
 });
