@@ -12,6 +12,7 @@ const validEnv = {
   SESSION_SECRET: "sixteen-chars!!!",
   SEERR_URL: "http://seerr:5055",
   SEERR_API_KEY: "seerr-api-key",
+  DASHBOARD_URL: "http://dashboard:8787",
 };
 
 describe("loadConfig", () => {
@@ -27,7 +28,29 @@ describe("loadConfig", () => {
       sessionSecret: "sixteen-chars!!!",
       seerrUrl: "http://seerr:5055",
       seerrApiKey: "seerr-api-key",
+      dashboardUrl: "http://dashboard:8787",
     });
+  });
+
+  it("strips trailing slashes from DASHBOARD_URL", () => {
+    const config = loadConfig({
+      ...validEnv,
+      DASHBOARD_URL: "http://dashboard:8787///",
+    });
+    assert.equal(config.dashboardUrl, "http://dashboard:8787");
+  });
+
+  it("throws naming DASHBOARD_URL when missing or empty", () => {
+    assert.throws(
+      () => loadConfig({ ...validEnv, DASHBOARD_URL: undefined }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("DASHBOARD_URL"),
+    );
+    assert.throws(
+      () => loadConfig({ ...validEnv, DASHBOARD_URL: "" }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("DASHBOARD_URL"),
+    );
   });
 
   it("strips trailing slashes from PLEX_BASEURL", () => {

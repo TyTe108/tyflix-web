@@ -1,9 +1,11 @@
 import express from "express";
 import path from "path";
 import { loadConfig, type AppConfig } from "./config";
+import { createDashboardClient } from "./dashboard/client";
 import { requireAdmin, requireAuth } from "./middleware/auth";
 import { createPlexClient } from "./plex/client";
 import { createPlexServerClient } from "./plex/server";
+import { createAdminRouter } from "./routes/admin";
 import { createAuthRouter } from "./routes/auth";
 import { createMeRouter } from "./routes/me";
 import { createSeerrClient } from "./seerr/client";
@@ -35,6 +37,10 @@ const seerr = createSeerrClient({
   apiKey: config.seerrApiKey,
 });
 
+const dashboard = createDashboardClient({
+  baseUrl: config.dashboardUrl,
+});
+
 const app = express();
 
 app.get("/healthz", (_req, res) => {
@@ -57,10 +63,11 @@ app.use(
   createMeRouter({ plexServer, seerr }),
 );
 
-// Temporary gate-verification probe; replaced by real admin routes in Phase 3.
-app.get("/api/admin/ping", requireAdmin(config.sessionSecret), (_req, res) => {
-  res.json({ ok: true });
-});
+app.use(
+  "/api/admin",
+  requireAdmin(config.sessionSecret),
+  createAdminRouter({ dashboard }),
+);
 
 if (config.nodeEnv === "production") {
   const webDistPath = path.resolve(__dirname, "../../web/dist");

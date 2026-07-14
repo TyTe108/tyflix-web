@@ -8,6 +8,7 @@ export type AppConfig = {
   sessionSecret: string;
   seerrUrl: string;
   seerrApiKey: string;
+  dashboardUrl: string;
 };
 
 export function validate(
@@ -95,6 +96,11 @@ function parsePlexToken(raw: string | undefined): string {
   return validate("PLEX_TOKEN", raw, () => null);
 }
 
+function parseDashboardUrl(raw: string | undefined): string {
+  const validated = validate("DASHBOARD_URL", raw, () => null);
+  return validated.replace(/\/+$/, "");
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     port: parsePort(env.PORT),
@@ -106,5 +112,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     sessionSecret: parseSessionSecret(env.SESSION_SECRET),
     seerrUrl: parseSeerrUrl(env.SEERR_URL),
     seerrApiKey: parseSeerrApiKey(env.SEERR_API_KEY),
+    dashboardUrl: parseDashboardUrl(env.DASHBOARD_URL),
   };
 }
