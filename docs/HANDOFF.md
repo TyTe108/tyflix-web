@@ -3,7 +3,7 @@
 > Living doc. Its job is to let a fresh conversation pick up this project cold.
 > Keep it current; delete guidance notes as you go.
 >
-> **Last updated after:** Phase 2.2 — Phase 2 (per-user watched-vs-requested) complete, byte-verified vs the dashboard.
+> **Last updated after:** Phase 3.4 — Phase 3 (admin dashboard, all four panels) complete. Next: Phase 4 (deploy).
 > **Working name:** "Tyflix Web" / repo `tyflix-web` — rename freely.
 
 ---
@@ -258,8 +258,20 @@ Log (newest at bottom):
 - **Phase 2.2** — Home renders the stats (rate + CSS bar, requested/watched/unwatched totals, counts,
   largest-first unwatched titles with movie/TV tags + x/y eps) with loading and error/retry states.
   Verified in-browser (16% watched, 187.4 GB requested, 12 unwatched titles).
-- **Phase 2 COMPLETE.** Next: Phase 3 (admin dashboard, admin-only — proxy the FastAPI dashboard's
-  JSON APIs; likely 3.1 system+storage, 3.2 per-user table, 3.3 jobs, 3.4 containers).
+- **Phase 2 COMPLETE.**
+- **Phase 3.1** — admin dashboard proxy: `createDashboardClient` (10s timeout) + a whitelisted
+  `GET /api/admin/{system,users,jobs,containers}` router behind `requireAdmin` (fixed whitelist → no SSRF);
+  removed the temporary `/api/admin/ping`. Frontend admin shell + System/Storage panel. Verified: gate
+  401/403/200, whitelist 404, dashboard-down 502.
+- **Phase 3.2** — per-user watched-vs-requested table with posture badges (approve/watch/scrutinize) and
+  expandable unwatched-titles. Reworked to a single shared CSS-grid layout (header + all rows) after a
+  column-overflow bug with the `(+N pending)` note (now a sub-line; cells `min-width:0`).
+- **Phase 3.3** — Jobs panel (schedule, last/next run via `formatEpoch`, ok/attention badges,
+  attention-first). Surfaced a live real alert (Byparr "indexers FAILING").
+- **Phase 3.4** — Containers panel: Docker sub-table (11 rows: state+health badges, CPU/mem/net/uptime,
+  pids/restarts/blk) + Native services (Plex/Radarr/Sonarr/Prowlarr). `docker.ok===false` shows the error.
+- **Phase 3 COMPLETE.** All four admin panels live behind the admin gate, verified in-browser.
+  Next: Phase 4 (deploy — Docker on the Dell behind the Cloudflare tunnel).
 
 ## 9. Deferred / candidate future work
 
@@ -271,12 +283,18 @@ Log (newest at bottom):
 ### Known technical debt (accepted for now)
 - Admin view depends on the Python dashboard being up (proxy approach).
 - Watch history is Plex-only (owner may read ~0%).
+- In production, unmatched `/api/*` routes fall through to the SPA catch-all (return index.html, not a 404
+  JSON). Harmless today (dev returns 404; the admin whitelist prevents SSRF) — add an `/api` 404 guard
+  before the catch-all in Phase 4.
 
 ## 10. Rollout / status
 
-Phases 1–2 complete and verified live (auth + Seerr role gate; per-user watched-vs-requested,
-byte-matched to the dashboard). Not yet deployed (Phase 4). Next: Phase 3 — the admin-only dashboard
-view (proxy the FastAPI dashboard's JSON APIs behind requireAdmin; needs DASHBOARD_URL in .env).
+Phases 1–3 complete and verified live (Plex auth + Seerr role gate; per-user watched-vs-requested,
+byte-matched to the dashboard; full admin dashboard — system/storage, per-user table, jobs, containers —
+proxied behind requireAdmin). `.env` now also carries `DASHBOARD_URL`. Not yet deployed. Next: Phase 4 —
+containerize (the multi-stage Dockerfile already builds web+server into one image), set prod env
+(SEERR_URL/PLEX_BASEURL/DASHBOARD_URL become Docker-internal on the Dell), add the container to the Dell
+compose, wire a Cloudflare tunnel hostname, and add an `/api` 404-guard before the SPA catch-all.
 
 ## 11. Working patterns established
 
