@@ -3,14 +3,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { closeDatabase, openDatabase } from "./index";
+import { closeDatabase, getDb, openDatabase } from "./index";
 import {
   createRequest,
   findActiveDuplicate,
   getRequestById,
   listAllRequests,
   listRequestsByUser,
-  updateRequestStatus,
+  updateRequest,
 } from "./requests";
 
 describe("requests data access", () => {
@@ -26,7 +26,7 @@ describe("requests data access", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("create→getById round-trip preserves seasons JSON", () => {
+  it("create defaults pending/unknown and round-trips seasons + both axes", () => {
     const created = createRequest({
       tmdbId: 603,
       mediaType: "tv",
@@ -44,7 +44,8 @@ describe("requests data access", () => {
     assert.deepEqual(fetched!.seasons, [1, 2, 3]);
     assert.equal(fetched!.requestedBySeerrId, 42);
     assert.equal(fetched!.requestedByName, "Tyler");
-    assert.equal(fetched!.status, "pending");
+    assert.equal(fetched!.requestStatus, "pending");
+    assert.equal(fetched!.mediaStatus, "unknown");
   });
 
   it("listRequestsByUser filters by user and returns newest first", () => {
@@ -76,27 +77,36 @@ describe("requests data access", () => {
     assert.equal(results[1].id, older.id);
   });
 
-  it("findActiveDuplicate matches tmdb_id+media_type and ignores declined rows", () => {
+  it("findActiveDuplicate ignores declined and failed request_status", () => {
     const active = createRequest({
       tmdbId: 550,
       mediaType: "movie",
       title: "Fight Club",
       requestedBySeerrId: 1,
       requestedByName: "Tyler",
-      status: "pending",
     });
 
     const duplicate = findActiveDuplicate(550, "movie");
     assert.notEqual(duplicate, null);
     assert.equal(duplicate!.id, active.id);
 
-    updateRequestStatus(active.id, { status: "declined" });
-
+    updateRequest(active.id, { requestStatus: "declined" });
     assert.equal(findActiveDuplicate(550, "movie"), null);
+
+    const failed = createRequest({
+      tmdbId: 551,
+      mediaType: "movie",
+      title: "Failed Dup",
+      requestedBySeerrId: 1,
+      requestedByName: "Tyler",
+    });
+    assert.notEqual(findActiveDuplicate(551, "movie"), null);
+    updateRequest(failed.id, { requestStatus: "failed" });
+    assert.equal(findActiveDuplicate(551, "movie"), null);
     assert.equal(findActiveDuplicate(550, "tv"), null);
   });
 
-  it("updateRequestStatus transitions status, sets decided_*, and bumps updated_at", async () => {
+  it("updateRequest transitions axes independently, sets decided_*, bumps updated_at", async () => {
     const created = createRequest({
       tmdbId: 100,
       mediaType: "movie",
@@ -108,19 +118,59 @@ describe("requests data access", () => {
     await new Promise((resolve) => setTimeout(resolve, 2));
 
     const decidedAt = "2026-07-14T00:00:00.000Z";
-    const updated = updateRequestStatus(created.id, {
-      status: "approved",
+    const approved = updateRequest(created.id, {
+      requestStatus: "approved",
+      mediaStatus: "pending",
       radarrId: 42,
       decidedBy: 1,
       decidedAt,
     });
 
-    assert.equal(updated.status, "approved");
-    assert.equal(updated.radarrId, 42);
-    assert.equal(updated.decidedBy, 1);
-    assert.equal(updated.decidedAt, decidedAt);
-    assert.notEqual(updated.updatedAt, created.updatedAt);
-    assert.equal(updated.createdAt, created.createdAt);
+    assert.equal(approved.requestStatus, "approved");
+    assert.equal(approved.mediaStatus, "pending");
+    assert.equal(approved.radarrId, 42);
+    assert.equal(approved.decidedBy, 1);
+    assert.equal(approved.decidedAt, decidedAt);
+    assert.notEqual(approved.updatedAt, created.updatedAt);
+    assert.equal(approved.createdAt, created.createdAt);
+
+    await new Promise((resolve) => setTimeout(resolve, 2));
+
+    const processing = updateRequest(created.id, {
+      mediaStatus: "processing",
+    });
+    assert.equal(processing.requestStatus, "approved");
+    assert.equal(processing.mediaStatus, "processing");
+    assert.notEqual(processing.updatedAt, approved.updatedAt);
+
+    const available = updateRequest(created.id, {
+      mediaStatus: "available",
+    });
+    assert.equal(available.requestStatus, "approved");
+    assert.equal(available.mediaStatus, "available");
+    assert.equal(available.createdAt, created.createdAt);
+  });
+
+  it("rejects invalid request_status and media_status via CHECK", () => {
+    const db = getDb();
+    assert.throws(() => {
+      db.prepare(
+        `INSERT INTO requests (
+          tmdb_id, media_type, title, seasons,
+          requested_by_seerr_id, requested_by_name,
+          request_status, media_status, created_at, updated_at
+        ) VALUES (1, 'movie', 'Bad', NULL, 1, 'A', 'bogus', 'unknown', 't', 't')`,
+      ).run();
+    });
+    assert.throws(() => {
+      db.prepare(
+        `INSERT INTO requests (
+          tmdb_id, media_type, title, seasons,
+          requested_by_seerr_id, requested_by_name,
+          request_status, media_status, created_at, updated_at
+        ) VALUES (1, 'movie', 'Bad', NULL, 1, 'A', 'pending', 'bogus', 't', 't')`,
+      ).run();
+    });
   });
 
   it("listAllRequests returns all rows newest first", () => {
@@ -167,6 +217,8 @@ describe("openDatabase", () => {
       const all = listAllRequests();
       assert.equal(all.length, 1);
       assert.equal(all[0].title, "Persisted");
+      assert.equal(all[0].requestStatus, "pending");
+      assert.equal(all[0].mediaStatus, "unknown");
     } finally {
       closeDatabase();
       rmSync(tempDir, { recursive: true, force: true });
@@ -183,6 +235,8 @@ describe("openDatabase", () => {
       requestedByName: "Tyler",
     });
     assert.equal(getRequestById(created.id)?.title, "In Memory");
+    assert.equal(created.requestStatus, "pending");
+    assert.equal(created.mediaStatus, "unknown");
     closeDatabase();
   });
 });

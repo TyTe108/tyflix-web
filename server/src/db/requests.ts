@@ -1,12 +1,19 @@
 import { getDb } from "./index";
 
 export type MediaType = "movie" | "tv";
-export type RequestStatus =
+
+export type RequestApprovalStatus =
   | "pending"
   | "approved"
+  | "declined"
+  | "failed";
+
+export type MediaAvailabilityStatus =
+  | "unknown"
+  | "pending"
   | "processing"
-  | "available"
-  | "declined";
+  | "partially_available"
+  | "available";
 
 export type RequestRow = {
   id: number;
@@ -16,7 +23,8 @@ export type RequestRow = {
   seasons: number[] | null;
   requestedBySeerrId: number;
   requestedByName: string;
-  status: RequestStatus;
+  requestStatus: RequestApprovalStatus;
+  mediaStatus: MediaAvailabilityStatus;
   radarrId: number | null;
   sonarrId: number | null;
   createdAt: string;
@@ -32,11 +40,13 @@ export type CreateRequestInput = {
   seasons?: number[] | null;
   requestedBySeerrId: number;
   requestedByName: string;
-  status?: RequestStatus;
+  requestStatus?: RequestApprovalStatus;
+  mediaStatus?: MediaAvailabilityStatus;
 };
 
-export type UpdateRequestStatusPatch = {
-  status?: RequestStatus;
+export type UpdateRequestPatch = {
+  requestStatus?: RequestApprovalStatus;
+  mediaStatus?: MediaAvailabilityStatus;
   radarrId?: number | null;
   sonarrId?: number | null;
   decidedBy?: number | null;
@@ -51,7 +61,8 @@ type RequestDbRow = {
   seasons: string | null;
   requested_by_seerr_id: number;
   requested_by_name: string;
-  status: RequestStatus;
+  request_status: RequestApprovalStatus;
+  media_status: MediaAvailabilityStatus;
   radarr_id: number | null;
   sonarr_id: number | null;
   created_at: string;
@@ -83,7 +94,8 @@ function mapRow(row: RequestDbRow): RequestRow {
     seasons: parseSeasons(row.seasons),
     requestedBySeerrId: row.requested_by_seerr_id,
     requestedByName: row.requested_by_name,
-    status: row.status,
+    requestStatus: row.request_status,
+    mediaStatus: row.media_status,
     radarrId: row.radarr_id,
     sonarrId: row.sonarr_id,
     createdAt: row.created_at,
@@ -95,7 +107,7 @@ function mapRow(row: RequestDbRow): RequestRow {
 
 const SELECT_COLUMNS = `
   id, tmdb_id, media_type, title, seasons,
-  requested_by_seerr_id, requested_by_name, status,
+  requested_by_seerr_id, requested_by_name, request_status, media_status,
   radarr_id, sonarr_id, created_at, updated_at,
   decided_by, decided_at
 `;
@@ -103,15 +115,16 @@ const SELECT_COLUMNS = `
 export function createRequest(input: CreateRequestInput): RequestRow {
   const db = getDb();
   const now = new Date().toISOString();
-  const status = input.status ?? "pending";
+  const requestStatus = input.requestStatus ?? "pending";
+  const mediaStatus = input.mediaStatus ?? "unknown";
 
   const result = db
     .prepare(
       `INSERT INTO requests (
         tmdb_id, media_type, title, seasons,
-        requested_by_seerr_id, requested_by_name, status,
+        requested_by_seerr_id, requested_by_name, request_status, media_status,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.tmdbId,
@@ -120,7 +133,8 @@ export function createRequest(input: CreateRequestInput): RequestRow {
       serializeSeasons(input.seasons),
       input.requestedBySeerrId,
       input.requestedByName,
-      status,
+      requestStatus,
+      mediaStatus,
       now,
       now,
     );
@@ -174,16 +188,17 @@ export function findActiveDuplicate(
     .prepare(
       `SELECT ${SELECT_COLUMNS}
        FROM requests
-       WHERE tmdb_id = ? AND media_type = ? AND status != 'declined'
+       WHERE tmdb_id = ? AND media_type = ?
+         AND request_status NOT IN ('declined', 'failed')
        LIMIT 1`,
     )
     .get(tmdbId, mediaType) as RequestDbRow | undefined;
   return row === undefined ? null : mapRow(row);
 }
 
-export function updateRequestStatus(
+export function updateRequest(
   id: number,
-  patch: UpdateRequestStatusPatch,
+  patch: UpdateRequestPatch,
 ): RequestRow {
   const db = getDb();
   const existing = getRequestById(id);
@@ -192,7 +207,8 @@ export function updateRequestStatus(
   }
 
   const updatedAt = new Date().toISOString();
-  const status = patch.status ?? existing.status;
+  const requestStatus = patch.requestStatus ?? existing.requestStatus;
+  const mediaStatus = patch.mediaStatus ?? existing.mediaStatus;
   const radarrId =
     patch.radarrId !== undefined ? patch.radarrId : existing.radarrId;
   const sonarrId =
@@ -204,14 +220,24 @@ export function updateRequestStatus(
 
   db.prepare(
     `UPDATE requests SET
-      status = ?,
+      request_status = ?,
+      media_status = ?,
       radarr_id = ?,
       sonarr_id = ?,
       decided_by = ?,
       decided_at = ?,
       updated_at = ?
      WHERE id = ?`,
-  ).run(status, radarrId, sonarrId, decidedBy, decidedAt, updatedAt, id);
+  ).run(
+    requestStatus,
+    mediaStatus,
+    radarrId,
+    sonarrId,
+    decidedBy,
+    decidedAt,
+    updatedAt,
+    id,
+  );
 
   const updated = getRequestById(id);
   if (updated === null) {

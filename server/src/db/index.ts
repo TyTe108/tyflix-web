@@ -2,6 +2,9 @@ import BetterSqlite3 from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 
+// If a stale data/tyflix.db from the single-status 5.1 schema exists locally,
+// delete it so CREATE TABLE IF NOT EXISTS builds the two-axis shape. The file
+// is gitignored and throwaway; tests use fresh temp / :memory: DBs.
 const REQUESTS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS requests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -11,7 +14,8 @@ CREATE TABLE IF NOT EXISTS requests (
   seasons TEXT,
   requested_by_seerr_id INTEGER NOT NULL,
   requested_by_name TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'processing', 'available', 'declined')),
+  request_status TEXT NOT NULL CHECK (request_status IN ('pending', 'approved', 'declined', 'failed')),
+  media_status TEXT NOT NULL CHECK (media_status IN ('unknown', 'pending', 'processing', 'partially_available', 'available')),
   radarr_id INTEGER,
   sonarr_id INTEGER,
   created_at TEXT NOT NULL,
