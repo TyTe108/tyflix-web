@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import path from "node:path";
 import { describe, it } from "node:test";
 import { loadConfig } from "./config";
 
@@ -15,14 +14,6 @@ const validEnv = {
   SEERR_API_KEY: "seerr-api-key",
   DASHBOARD_URL: "http://dashboard:8787",
   TMDB_API_KEY: "tmdb-api-key",
-  RADARR_URL: "http://radarr:7878",
-  RADARR_API_KEY: "radarr-api-key",
-  RADARR_QUALITY_PROFILE_ID: "4",
-  RADARR_ROOT_FOLDER: "/movies",
-  SONARR_URL: "http://sonarr:8989",
-  SONARR_API_KEY: "sonarr-api-key",
-  SONARR_QUALITY_PROFILE_ID: "5",
-  SONARR_ROOT_FOLDER: "/tv",
 };
 
 describe("loadConfig", () => {
@@ -39,18 +30,7 @@ describe("loadConfig", () => {
       seerrUrl: "http://seerr:5055",
       seerrApiKey: "seerr-api-key",
       dashboardUrl: "http://dashboard:8787",
-      dbPath: path.resolve("./data/tyflix.db"),
       tmdbApiKey: "tmdb-api-key",
-      radarrUrl: "http://radarr:7878",
-      radarrApiKey: "radarr-api-key",
-      radarrQualityProfileId: 4,
-      radarrRootFolder: "/movies",
-      radarrMinimumAvailability: "released",
-      sonarrUrl: "http://sonarr:8989",
-      sonarrApiKey: "sonarr-api-key",
-      sonarrQualityProfileId: 5,
-      sonarrRootFolder: "/tv",
-      sonarrLanguageProfileId: null,
     });
   });
 
@@ -186,27 +166,6 @@ describe("loadConfig", () => {
     );
   });
 
-  it('defaults DB_PATH to "./data/tyflix.db" as an absolute path', () => {
-    const config = loadConfig(validEnv);
-    assert.equal(config.dbPath, path.resolve("./data/tyflix.db"));
-  });
-
-  it("resolves relative DB_PATH against cwd", () => {
-    const config = loadConfig({
-      ...validEnv,
-      DB_PATH: "./custom/tyflix.db",
-    });
-    assert.equal(config.dbPath, path.resolve("./custom/tyflix.db"));
-  });
-
-  it("preserves absolute DB_PATH", () => {
-    const config = loadConfig({
-      ...validEnv,
-      DB_PATH: "/var/data/tyflix.db",
-    });
-    assert.equal(config.dbPath, "/var/data/tyflix.db");
-  });
-
   it("throws naming TMDB_API_KEY when missing or empty", () => {
     assert.throws(
       () => loadConfig({ ...validEnv, TMDB_API_KEY: undefined }),
@@ -220,44 +179,4 @@ describe("loadConfig", () => {
     );
   });
 
-  it("strips trailing slashes from RADARR_URL and SONARR_URL", () => {
-    const config = loadConfig({
-      ...validEnv,
-      RADARR_URL: "http://radarr:7878///",
-      SONARR_URL: "http://sonarr:8989///",
-    });
-    assert.equal(config.radarrUrl, "http://radarr:7878");
-    assert.equal(config.sonarrUrl, "http://sonarr:8989");
-  });
-
-  it("defaults RADARR_MINIMUM_AVAILABILITY to released", () => {
-    const config = loadConfig(validEnv);
-    assert.equal(config.radarrMinimumAvailability, "released");
-  });
-
-  it("parses optional SONARR_LANGUAGE_PROFILE_ID", () => {
-    const withId = loadConfig({
-      ...validEnv,
-      SONARR_LANGUAGE_PROFILE_ID: "2",
-    });
-    assert.equal(withId.sonarrLanguageProfileId, 2);
-    const without = loadConfig(validEnv);
-    assert.equal(without.sonarrLanguageProfileId, null);
-  });
-
-  it("throws naming RADARR_URL when missing or empty", () => {
-    assert.throws(
-      () => loadConfig({ ...validEnv, RADARR_URL: undefined }),
-      (err: unknown) =>
-        err instanceof Error && err.message.includes("RADARR_URL"),
-    );
-  });
-
-  it("throws naming SONARR_API_KEY when missing or empty", () => {
-    assert.throws(
-      () => loadConfig({ ...validEnv, SONARR_API_KEY: undefined }),
-      (err: unknown) =>
-        err instanceof Error && err.message.includes("SONARR_API_KEY"),
-    );
-  });
 });

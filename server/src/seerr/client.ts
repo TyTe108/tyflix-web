@@ -226,10 +226,9 @@ export function createSeerrClient(options: SeerrClientOptions) {
       for (const row of results) {
         const mapped = mapSeerrRequest(row);
         if (mapped === null) {
-          throw new SeerrUpstreamError(
-            `Seerr ${path} returned an unexpected request`,
-            502,
-          );
+          // One malformed request must not fail the whole list.
+          console.warn(`Seerr ${path} returned an unmappable request; skipping`);
+          continue;
         }
         requests.push(mapped);
       }

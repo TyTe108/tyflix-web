@@ -3,7 +3,7 @@
 > Living doc. Its job is to let a fresh conversation pick up this project cold.
 > Keep it current; delete guidance notes as you go.
 >
-> **Last updated after:** Phase 3 complete + Phase 5 (Seerr-replacement MVP) planned and reprioritized ahead of Phase 4 (deploy). Next: Phase 5.1.
+> **Last updated after:** Phase 5 complete — but PIVOTED mid-way to a **Seerr-backed** architecture (2026-07-15): the own-request pipeline (SQLite/Radarr/Sonarr) was built (5.1–5.7) then **retired** (5.8–5.10); requests now flow through Seerr's API. See §3 + the increment log. Next: parity backlog and/or Phase 4 deploy.
 > **Working name:** "Tyflix Web" / repo `tyflix-web` — rename freely.
 
 ---
@@ -17,9 +17,12 @@
   analytics).
 - **Who it's for:** Tyler (owner/admin) and the Plex users who share the Tyflix
   server. Publicly reachable, so treat every non-owner as untrusted.
-- **Product intent:** Start as a **standalone companion** to Jellyseerr (Seerr keeps
-  handling browse/request; we add the analytics + login). Architect so it can grow
-  into a **full Seerr replacement** later (own request pipeline, TMDB browse, etc.).
+- **Product intent (as of 2026-07-15):** a **Seerr-backed enhancement** — NOT standalone, NOT a
+  replacement. tyflix-web has its own Plex login + discovery/requesting UI + analytics, but **every request
+  flows through Seerr's API** (Seerr = single source of truth → always in sync; Seerr owns approvals +
+  Radarr/Sonarr + availability). The backend's unique value is the analytics/dashboard Seerr lacks. Goal:
+  build toward **parity with Seerr's UI** (mining Seerr's MIT source) while Seerr stays the engine. (Earlier
+  "standalone companion → full replacement" framing was superseded — see the Phase 5 pivot in the log.)
 - **Developer:** Tyler (solo). **Integration point** — runs the coding agent, smoke-tests, commits.
 - **Workflow:** Cursor writes the code; Claude plans and reviews; Tyler runs Cursor,
   pastes real file contents back for review, smoke-tests, then commits. Nothing is
@@ -68,6 +71,11 @@ Static React build served by the same Node process (single origin)
   FastAPI dashboard's `/api/system`, `/api/users`, `/api/jobs`, `/api/containers` rather
   than re-implement host `/proc`, cgroup, GPU-sampler, and docker-socket-proxy plumbing
   in Node. Re-present that data in the React admin UI. (Tradeoff in §5 quirks.)
+- **Requests layer (Phase 5, Seerr-backed):** discovery via TMDB (`/api/discover/*`); requesting + reading +
+  approve/decline all go through **Seerr's API** (`POST/GET /api/v1/request`, `/request/{id}/approve|decline`),
+  submitted on behalf of the logged-in user via the Seerr API key. tyflix-web keeps **no** request store of
+  its own — Seerr is the source of truth (in sync). Seerr's two-axis status (request `status` + `media.status`)
+  maps straight to our `requestStatus`/`mediaStatus`.
 
 ### Security / trust model
 
@@ -184,6 +192,16 @@ tyflix-web/
   uses `http://seerr:5055`. The same split will apply to `PLEX_BASEURL` + Plex token in Phase 2.
 - **Owner identity (verified live):** the owner Plex account `id 309174878` (`tylerte221`) resolves
   to Seerr user `id 1` with `permissions: 2` (exactly the ADMIN bit) → `isAdmin` true.
+- **Radarr `/movie/lookup` returns `hasFile=undefined` for library movies** (discovery endpoint, not library
+  state). Seerr's addMovie (which we copied, then retired) relied on it → owned media read as "processing" +
+  triggered a redundant search. If ever talking to Radarr directly again, use `GET /movie/{id}` for reliable
+  `hasFile`. (Moot now — Seerr owns Radarr/Sonarr.)
+- **Seerr request = two axes.** `status` (1 pending,2 approved,3 declined,4 failed,5 completed) AND
+  `media.status` (1 unknown … 4 partially_available,5 available). Map straight to `requestStatus`/`mediaStatus`.
+  Submit on behalf of a user: `POST /api/v1/request { mediaType, mediaId:<tmdbId>, seasons?, userId }` + API key.
+- **Test looping catches flakiness single runs miss.** A base64url signature-tamper test flipped the LAST sig
+  char, which (unpadded HMAC) can decode to the same bytes → ~25% flaky. Tamper a FULLY-significant char (first)
+  instead. Run suspect suites ~15–20× when in doubt.
 
 ## 6. Core logic — watched-vs-requested (to port in Phase 2)
 
@@ -229,15 +247,16 @@ Roadmap (planned):
   dashboard for the same user.
 - **Phase 3 — Admin view (admin-only).** Proxy the dashboard JSON APIs behind the admin gate;
   re-present system/storage, per-user table, jobs, containers. Likely split 3.1–3.4.
-- **Phase 5 — Seerr replacement (MVP request pipeline).** ⟵ reprioritized 2026-07-13 to come BEFORE
-  Phase 4 (Tyler's call). TMDB discovery → request → approve (mirrors Seerr permissions) → Radarr/Sonarr →
-  status. Introduces a **SQLite** datastore (better-sqlite3). Runs **alongside** Seerr (Seerr stays the
-  auth/permission backend); cut over later. Increments 5.1–5.6. Spec: `docs/phase-5-replacement-spec.md`.
-- **Phase 4 — Deploy (now AFTER Phase 5).** Dockerize into the Dell stack + Cloudflare tunnel hostname
-  `tyflix-dashboard.tylerte.dev`; secrets; DB volume; add the `/api` 404-guard; don't route the public
-  hostname until the admin gate is smoke-tested in prod.
-- **Beyond the MVP (deferred):** 4K, quality-profile chooser, request limits, issues, notifications,
-  watchlist, own user store, retiring Seerr.
+- **Phase 5 — Requests (Seerr-backed). COMPLETE.** Built an own-store MVP (5.1–5.7: SQLite + Radarr/Sonarr
+  clients + approval) then **pivoted 2026-07-15** to route everything through Seerr (5.8 Seerr request routes
+  → 5.9 UI align → 5.10 removed the own-store/servarr/DB). Net: TMDB discovery UI that requests via Seerr;
+  My Requests + admin approval queue read/write Seerr; all in sync. (`phase-5-replacement-spec.md` is
+  SUPERSEDED — it documents the retired own-store approach.)
+- **Parity backlog (next candidates, all via Seerr's API):** 4K requests, quality-profile selection, request
+  limits, issue reporting, notifications, watchlist. Goal = parity with Seerr's UI, Seerr as the engine.
+- **Phase 4 — Deploy.** Dockerize into the Dell stack + Cloudflare tunnel hostname `tyflix-dashboard.tylerte.dev`;
+  prod env; add the `/api` 404-guard; don't route the public hostname until the admin gate is smoke-tested in
+  prod. (No DB volume needed — no own store.)
 
 Log (newest at bottom):
 - **Phase 0** — scaffold (Express 5 + Vite/React/TS monorepo, `/healthz`, fail-loud config,
@@ -276,12 +295,26 @@ Log (newest at bottom):
 - **Phase 3.4** — Containers panel: Docker sub-table (11 rows: state+health badges, CPU/mem/net/uptime,
   pids/restarts/blk) + Native services (Plex/Radarr/Sonarr/Prowlarr). `docker.ok===false` shows the error.
 - **Phase 3 COMPLETE.** All four admin panels live behind the admin gate, verified in-browser.
-  Next: Phase 4 (deploy — Docker on the Dell behind the Cloudflare tunnel).
+- **Phase 5.1 / 5.1.1** — SQLite requests store (better-sqlite3), two-axis request/media status. *(Retired in 5.10.)*
+- **Phase 5.2 / 5.3** — TMDB client + discovery endpoints; discovery UI (browse/search/detail). *(Kept.)*
+- **Phase 5.4** — Radarr/Sonarr API clients (adapted from Seerr's servarr code). *(Retired in 5.10.)*
+- **Phase 5.5 / 5.6 / 5.7** — own request routes + approval, requesting UI, admin approval queue. Verified live
+  (auto-approve/pending/dup/approve). *(Routes retired/repointed in 5.8–5.10.)*
+- **PIVOT 2026-07-15** — Tyler: "not standalone; enhance Seerr; data in sync." → Seerr becomes the single
+  source of truth for requests.
+- **Phase 5.8** — Seerr-backed request routes: submit/list/approve/decline via Seerr's API (on behalf of the
+  user); `/api/me/stats` switched to Seerr's per-user endpoint. **Verified live: me/stats still byte-matches the
+  dashboard; a request made in tyflix-web appears in Seerr (in sync).**
+- **Phase 5.9** — UI aligned to the Seerr-backed `RequestView` (+ completed/blocklisted/deleted statuses).
+- **Phase 5.10** — deleted the retired own-store/Radarr/Sonarr/DB code + config + better-sqlite3; skip-not-throw
+  hardening in the Seerr list mapper. 43 tests; all endpoints re-verified working.
+- **Phase 5 COMPLETE (Seerr-backed).** Next: parity backlog (via Seerr) and/or Phase 4 deploy.
 
 ## 9. Deferred / candidate future work
 
-- Full Seerr **parity** (4K, request limits, issues, notifications, watchlist, own user store, retiring
-  Seerr) — beyond the Phase 5 MVP. (The MVP request pipeline itself is now ACTIVE as Phase 5, ahead of deploy.)
+- **Parity backlog (via Seerr's API):** 4K requests, quality-profile selection, request limits, issue
+  reporting, notifications, watchlist. Goal = parity with Seerr's UI while Seerr stays the engine.
+- Own user store / retiring Seerr — explicitly NOT the direction anymore (tyflix-web enhances Seerr, in sync).
 - Port host-metric collectors into Node to drop the FastAPI-dashboard dependency.
 - Tautulli-backed watch history for durable, profile-independent accuracy.
 - Cloudflare Access on `/admin` as defense-in-depth.
@@ -295,11 +328,13 @@ Log (newest at bottom):
 
 ## 10. Rollout / status
 
-Phases 1–3 complete and verified live (Plex auth + Seerr role gate; per-user watched-vs-requested,
-byte-matched to the dashboard; full admin dashboard proxied behind requireAdmin). Not yet deployed.
-**Next: Phase 5 — the Seerr-replacement MVP request pipeline (reprioritized ahead of deploy 2026-07-13),
-then Phase 4 (deploy).** See `docs/phase-5-replacement-spec.md`; increments 5.1–5.6 start with the SQLite
-persistence foundation (5.1). Deploy hostname chosen: `tyflix-dashboard.tylerte.dev`.
+Phases 1–3 + 5 complete and verified live. tyflix-web is a **Seerr-backed enhancement**: Plex login + Seerr
+admin gate, TMDB discovery UI that requests **through Seerr** (in sync), My Requests + admin approval queue
+reading/writing Seerr, per-user watched-vs-requested + the full admin dashboard. No own request store
+(retired). 43 server tests. **Not deployed.** Next: the **parity backlog** (4K, quality profiles, request
+limits, issues, notifications, watchlist — all via Seerr) and/or **Phase 4 deploy** (hostname
+`tyflix-dashboard.tylerte.dev`). Local dev: `npm run dev`; `.env` carries PLEX_*, SESSION_SECRET,
+SEERR_URL+key, TMDB_API_KEY, DASHBOARD_URL (`RADARR_*`/`SONARR_*`/`DB_PATH` are stale/ignored — safe to delete).
 
 ## 11. Working patterns established
 
@@ -311,6 +346,9 @@ persistence foundation (5.1). Deploy hostname chosen: `tyflix-dashboard.tylerte.
 ## 12. Documents in the repo
 
 - `docs/HANDOFF.md` — this file (kept current).
-- `docs/phase-1-auth-spec.md` — Phase 1 design + decision log.
-- Reference (external): `Home Media Server/dashboard/app/main.py` — the analytics + metrics
-  source of truth to port/proxy.
+- `docs/phase-1-auth-spec.md` — Phase 1 design + decision log (current).
+- `docs/phase-5-replacement-spec.md` — **SUPERSEDED / HISTORICAL.** Describes the own-store request MVP we
+  built (5.1–5.7) then retired in the 2026-07-15 Seerr-backed pivot. Kept for decision history; do NOT build
+  from it — the live architecture is §3 + the Phase 5 log above.
+- Reference (external): `Home Media Server/dashboard/app/main.py` — the dashboard analytics/metrics source of
+  truth (proxied by Phase 3).

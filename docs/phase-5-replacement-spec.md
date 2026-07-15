@@ -1,3 +1,11 @@
+> # ⚠️ SUPERSEDED / HISTORICAL (2026-07-15)
+> This spec describes the **own-store request MVP** (SQLite + Radarr/Sonarr clients + our own approval) that
+> we built in increments 5.1–5.7 and then **RETIRED**. Tyler redirected: tyflix-web should **enhance Seerr
+> and stay in sync**, not run a parallel request system. Since 5.8, **all requests flow through Seerr's API**
+> (Seerr = single source of truth); the own store / Radarr-Sonarr clients / DB were removed in 5.10. **Do not
+> build from this doc.** The live architecture is `HANDOFF.md` §3 + the Phase 5 log. Kept only for decision
+> history (why we built, then retired, the own-store approach).
+
 # Phase 5 — Seerr replacement (MVP request pipeline)
 
 > Written up front. Decisions per Tyler 2026-07-13: **MVP scope** (grow later), approvals **mirror Seerr**,
