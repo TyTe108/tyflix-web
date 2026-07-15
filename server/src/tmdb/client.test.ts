@@ -186,6 +186,8 @@ describe("createTmdbClient().discover", () => {
       page: 3,
     });
     await tmdb.discover("tv");
+    await tmdb.discover("movie", { genreId: 28, companyId: 420 });
+    await tmdb.discover("tv", { networkId: 213 });
 
     assert.equal(calls[0].pathname, "/3/discover/tv");
     assert.equal(calls[0].searchParams.get("sort_by"), "popularity.desc");
@@ -193,7 +195,16 @@ describe("createTmdbClient().discover", () => {
     assert.equal(calls[0].searchParams.get("with_genres"), "18");
     assert.equal(calls[0].searchParams.get("page"), "3");
     assert.equal(calls[1].searchParams.has("with_genres"), false);
+    assert.equal(calls[1].searchParams.has("with_companies"), false);
+    assert.equal(calls[1].searchParams.has("with_networks"), false);
     assert.equal(calls[1].searchParams.get("page"), "1");
+    assert.equal(calls[2].pathname, "/3/discover/movie");
+    assert.equal(calls[2].searchParams.get("with_genres"), "28");
+    assert.equal(calls[2].searchParams.get("with_companies"), "420");
+    assert.equal(calls[2].searchParams.has("with_networks"), false);
+    assert.equal(calls[3].pathname, "/3/discover/tv");
+    assert.equal(calls[3].searchParams.get("with_networks"), "213");
+    assert.equal(calls[3].searchParams.has("with_companies"), false);
     assert.deepEqual(withGenre, {
       page: 3,
       totalPages: 12,

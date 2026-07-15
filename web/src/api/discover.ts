@@ -7,6 +7,16 @@ export type Genre = {
   name: string;
 };
 
+export type StudioOption = {
+  id: number;
+  name: string;
+};
+
+export type StudiosResponse = {
+  studios: StudioOption[];
+  networks: StudioOption[];
+};
+
 export type CastCredit = {
   id: number;
   name: string;
@@ -138,17 +148,31 @@ export async function fetchGenres(mediaType: MediaType): Promise<Genre[]> {
 
 export async function browseMedia(
   mediaType: MediaType,
-  genreId?: number,
-  page?: number,
+  options: {
+    genreId?: number;
+    companyId?: number;
+    networkId?: number;
+    page?: number;
+  } = {},
 ): Promise<SearchResponse> {
   const params = new URLSearchParams({ mediaType });
-  if (genreId !== undefined) {
-    params.set("genreId", String(genreId));
+  if (options.genreId !== undefined) {
+    params.set("genreId", String(options.genreId));
   }
-  if (page !== undefined) {
-    params.set("page", String(page));
+  if (options.companyId !== undefined) {
+    params.set("companyId", String(options.companyId));
+  }
+  if (options.networkId !== undefined) {
+    params.set("networkId", String(options.networkId));
+  }
+  if (options.page !== undefined) {
+    params.set("page", String(options.page));
   }
   return getJson<SearchResponse>(`/api/discover/browse?${params}`);
+}
+
+export async function fetchStudios(): Promise<StudiosResponse> {
+  return getJson<StudiosResponse>("/api/discover/studios");
 }
 
 export async function searchMedia(

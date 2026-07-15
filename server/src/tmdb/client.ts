@@ -93,6 +93,8 @@ export type CollectionDetail = {
 
 export type DiscoverOptions = {
   genreId?: number;
+  companyId?: number;
+  networkId?: number;
   page?: number;
 };
 
@@ -244,6 +246,12 @@ export function createTmdbClient(options: TmdbClientOptions) {
     };
     if (options.genreId !== undefined) {
       query.with_genres = String(options.genreId);
+    }
+    if (mediaType === "movie" && options.companyId !== undefined) {
+      query.with_companies = String(options.companyId);
+    }
+    if (mediaType === "tv" && options.networkId !== undefined) {
+      query.with_networks = String(options.networkId);
     }
 
     const body = await getJson(`/discover/${mediaType}`, query);

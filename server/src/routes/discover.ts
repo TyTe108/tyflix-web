@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { MediaAvailability } from "../seerr/client";
 import type { MediaStatusProvider } from "../seerr/mediaStatusProvider";
 import { TmdbUpstreamError, type TmdbClient } from "../tmdb/client";
+import { NETWORKS, STUDIOS } from "../tmdb/studios";
 
 export type DiscoverRouterDeps = {
   tmdb: TmdbClient;
@@ -65,6 +66,10 @@ export function createDiscoverRouter(deps: DiscoverRouterDeps): Router {
     }
   });
 
+  router.get("/studios", (_req, res) => {
+    res.json({ studios: STUDIOS, networks: NETWORKS });
+  });
+
   router.get("/browse", async (req, res) => {
     const mediaType = req.query.mediaType;
     if (mediaType !== "movie" && mediaType !== "tv") {
@@ -77,6 +82,16 @@ export function createDiscoverRouter(deps: DiscoverRouterDeps): Router {
       res.status(400).json({ error: "invalid genre id" });
       return;
     }
+    const companyId = parseOptionalNumericQuery(req.query.companyId);
+    if (companyId === null) {
+      res.status(400).json({ error: "invalid company id" });
+      return;
+    }
+    const networkId = parseOptionalNumericQuery(req.query.networkId);
+    if (networkId === null) {
+      res.status(400).json({ error: "invalid network id" });
+      return;
+    }
     const page = parseOptionalNumericQuery(req.query.page);
     if (page === null) {
       res.status(400).json({ error: "invalid page" });
@@ -86,6 +101,12 @@ export function createDiscoverRouter(deps: DiscoverRouterDeps): Router {
     try {
       const result = await tmdb.discover(mediaType, {
         ...(genreId !== undefined ? { genreId } : {}),
+        ...(mediaType === "movie" && companyId !== undefined
+          ? { companyId }
+          : {}),
+        ...(mediaType === "tv" && networkId !== undefined
+          ? { networkId }
+          : {}),
         ...(page !== undefined ? { page } : {}),
       });
       const statuses = await getStatusMapOrEmpty(mediaStatus);

@@ -3,11 +3,13 @@ import { Link } from "react-router-dom";
 import {
   browseMedia,
   fetchGenres,
+  fetchStudios,
   fetchTrending,
   searchMedia,
   type Genre,
   type MediaSummary,
   type MediaType,
+  type StudioOption,
 } from "../api/discover";
 import { useAuth } from "../auth/AuthContext";
 import { MediaCard } from "../components/MediaCard";
@@ -29,6 +31,9 @@ export function DiscoverPage() {
   const [genres, setGenres] = useState<Genre[]>([]);
   const [selectedGenreId, setSelectedGenreId] = useState<number | null>(null);
   const [genresLoading, setGenresLoading] = useState(false);
+  const [studios, setStudios] = useState<StudioOption[]>([]);
+  const [networks, setNetworks] = useState<StudioOption[]>([]);
+  const [selectedSourceId, setSelectedSourceId] = useState<number | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -38,6 +43,26 @@ export function DiscoverPage() {
       window.clearTimeout(timer);
     };
   }, [query]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchStudios()
+      .then((result) => {
+        if (!cancelled) {
+          setStudios(result.studios);
+          setNetworks(result.networks);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStudios([]);
+          setNetworks([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const retry = useCallback(() => {
     setReloadKey((n) => n + 1);
@@ -83,10 +108,17 @@ export function DiscoverPage() {
         ? searchMedia(debouncedQuery).then((body) => body.results)
         : mediaType === "all"
           ? fetchTrending()
-          : browseMedia(
-              mediaType,
-              selectedGenreId ?? undefined,
-            ).then((body) => body.results);
+          : browseMedia(mediaType, {
+              ...(selectedGenreId !== null
+                ? { genreId: selectedGenreId }
+                : {}),
+              ...(mediaType === "movie" && selectedSourceId !== null
+                ? { companyId: selectedSourceId }
+                : {}),
+              ...(mediaType === "tv" && selectedSourceId !== null
+                ? { networkId: selectedSourceId }
+                : {}),
+            }).then((body) => body.results);
 
     void load
       .then((items) => {
@@ -110,24 +142,36 @@ export function DiscoverPage() {
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery, mediaType, selectedGenreId, reloadKey]);
+  }, [
+    debouncedQuery,
+    mediaType,
+    selectedGenreId,
+    selectedSourceId,
+    reloadKey,
+  ]);
 
   const selectedGenre = genres.find(
     (genre) => genre.id === selectedGenreId,
   );
+  const sourceOptions = mediaType === "movie" ? studios : networks;
+  const selectedSource = sourceOptions.find(
+    (source) => source.id === selectedSourceId,
+  );
+  const mediaTypeLabel = mediaType === "movie" ? "Movies" : "TV";
   const heading =
     debouncedQuery !== ""
       ? `Results for “${debouncedQuery}”`
       : mediaType === "all"
         ? "Trending this week"
-        : `Popular ${selectedGenre ? `${selectedGenre.name} ` : ""}${
-            mediaType === "movie" ? "Movies" : "TV"
-          }`;
+        : selectedSource
+          ? `Popular ${selectedSource.name} ${mediaTypeLabel}`
+          : `Popular ${selectedGenre ? `${selectedGenre.name} ` : ""}${mediaTypeLabel}`;
   const showFilters = query.trim() === "" && debouncedQuery === "";
 
   function selectMediaType(nextMediaType: BrowseMediaType) {
     setMediaType(nextMediaType);
     setSelectedGenreId(null);
+    setSelectedSourceId(null);
   }
 
   return (
@@ -187,29 +231,54 @@ export function DiscoverPage() {
           </div>
 
           {mediaType !== "all" ? (
-            <label className="discover-genre-filter">
-              <span>Genre</span>
-              <select
-                value={selectedGenreId ?? ""}
-                disabled={genresLoading}
-                onChange={(event) =>
-                  setSelectedGenreId(
-                    event.target.value === ""
-                      ? null
-                      : Number(event.target.value),
-                  )
-                }
-              >
-                <option value="">
-                  {genresLoading ? "Loading genres…" : "All genres"}
-                </option>
-                {genres.map((genre) => (
-                  <option key={genre.id} value={genre.id}>
-                    {genre.name}
+            <>
+              <label className="discover-genre-filter">
+                <span>Genre</span>
+                <select
+                  value={selectedGenreId ?? ""}
+                  disabled={genresLoading}
+                  onChange={(event) =>
+                    setSelectedGenreId(
+                      event.target.value === ""
+                        ? null
+                        : Number(event.target.value),
+                    )
+                  }
+                >
+                  <option value="">
+                    {genresLoading ? "Loading genres…" : "All genres"}
                   </option>
-                ))}
-              </select>
-            </label>
+                  {genres.map((genre) => (
+                    <option key={genre.id} value={genre.id}>
+                      {genre.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="discover-genre-filter">
+                <span>{mediaType === "movie" ? "Studio" : "Network"}</span>
+                <select
+                  value={selectedSourceId ?? ""}
+                  onChange={(event) =>
+                    setSelectedSourceId(
+                      event.target.value === ""
+                        ? null
+                        : Number(event.target.value),
+                    )
+                  }
+                >
+                  <option value="">
+                    {mediaType === "movie" ? "All studios" : "All networks"}
+                  </option>
+                  {sourceOptions.map((source) => (
+                    <option key={source.id} value={source.id}>
+                      {source.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
           ) : null}
         </div>
       ) : null}

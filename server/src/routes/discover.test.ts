@@ -7,6 +7,7 @@ import {
   type DiscoverRouterDeps,
 } from "./discover";
 import { createMediaStatusProvider } from "../seerr/mediaStatusProvider";
+import { NETWORKS, STUDIOS } from "../tmdb/studios";
 
 function createStubTmdb(): DiscoverRouterDeps["tmdb"] {
   return {
@@ -317,15 +318,18 @@ describe("discovery media status annotation", () => {
 describe("discover browse routes", () => {
   it("annotates browse results and forwards browse options", async () => {
     const tmdb = createStubTmdb();
-    let received:
-      | {
-          mediaType: "movie" | "tv";
-          options: { genreId?: number; page?: number };
-        }
-      | undefined;
+    const received: Array<{
+      mediaType: "movie" | "tv";
+      options: {
+        genreId?: number;
+        companyId?: number;
+        networkId?: number;
+        page?: number;
+      };
+    }> = [];
     const originalDiscover = tmdb.discover;
     tmdb.discover = async (mediaType, options) => {
-      received = { mediaType, options: options ?? {} };
+      received.push({ mediaType, options: options ?? {} });
       return originalDiscover(mediaType, options);
     };
     const app = createApp({
@@ -334,6 +338,7 @@ describe("discover browse routes", () => {
         async listMedia() {
           return [
             { id: 10, tmdbId: 603, mediaType: "movie", status: 5 },
+            { id: 20, tmdbId: 1396, mediaType: "tv", status: 4 },
           ];
         },
       }),
@@ -341,22 +346,37 @@ describe("discover browse routes", () => {
 
     const response = await fetchLocal(
       app,
-      "/api/discover/browse?mediaType=movie&genreId=28&page=2",
+      "/api/discover/browse?mediaType=movie&genreId=28&companyId=420&page=2",
+    );
+    const tvResponse = await fetchLocal(
+      app,
+      "/api/discover/browse?mediaType=tv&genreId=18&networkId=213",
     );
     const body = (await response.json()) as {
       page: number;
       totalPages: number;
       results: Array<{ mediaStatus: unknown }>;
     };
+    const tvBody = (await tvResponse.json()) as {
+      results: Array<{ mediaStatus: unknown }>;
+    };
 
     assert.equal(response.status, 200);
-    assert.deepEqual(received, {
-      mediaType: "movie",
-      options: { genreId: 28, page: 2 },
-    });
+    assert.equal(tvResponse.status, 200);
+    assert.deepEqual(received, [
+      {
+        mediaType: "movie",
+        options: { genreId: 28, companyId: 420, page: 2 },
+      },
+      {
+        mediaType: "tv",
+        options: { genreId: 18, networkId: 213 },
+      },
+    ]);
     assert.equal(body.page, 2);
     assert.equal(body.totalPages, 4);
     assert.equal(body.results[0].mediaStatus, "available");
+    assert.equal(tvBody.results[0].mediaStatus, "partially_available");
   });
 
   it("returns null browse statuses when the provider rejects", async () => {
@@ -410,6 +430,27 @@ describe("discover browse routes", () => {
 
     assert.equal(browse.status, 400);
     assert.equal(genres.status, 400);
+  });
+});
+
+describe("GET /api/discover/studios", () => {
+  it("returns the curated studio and network lists", async () => {
+    const app = createApp({
+      tmdb: createStubTmdb(),
+      mediaStatus: createMediaStatusProvider({
+        async listMedia() {
+          return [];
+        },
+      }),
+    });
+
+    const response = await fetchLocal(app, "/api/discover/studios");
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      studios: STUDIOS,
+      networks: NETWORKS,
+    });
   });
 });
 
