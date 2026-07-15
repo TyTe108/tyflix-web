@@ -15,6 +15,21 @@ export type SeerrMedia = {
   mediaType: string | null;
 };
 
+export type MediaAvailability =
+  | "unknown"
+  | "pending"
+  | "processing"
+  | "partially_available"
+  | "available"
+  | "blocklisted"
+  | "deleted";
+
+export type SeerrMediaListItem = {
+  tmdbId: number;
+  mediaType: "movie" | "tv";
+  status: number;
+};
+
 export type SeerrRequestSeason = {
   seasonNumber: number;
 };
@@ -45,14 +60,7 @@ export type RequestView = {
     | "declined"
     | "failed"
     | "completed";
-  mediaStatus:
-    | "unknown"
-    | "pending"
-    | "processing"
-    | "partially_available"
-    | "available"
-    | "blocklisted"
-    | "deleted";
+  mediaStatus: MediaAvailability;
   requestedById: number;
   requestedByName: string;
   createdAt: string;
@@ -250,6 +258,57 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return listRequests(`/api/v1/user/${userId}/requests`);
   }
 
+  async function listMedia(): Promise<SeerrMediaListItem[]> {
+    const take = 100;
+    let skip = 0;
+    let total = Number.POSITIVE_INFINITY;
+    const media: SeerrMediaListItem[] = [];
+
+    while (skip < total) {
+      const body = await getJson("/api/v1/media", {
+        take: String(take),
+        skip: String(skip),
+      });
+
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        typeof (body as { pageInfo?: unknown }).pageInfo !== "object" ||
+        (body as { pageInfo: unknown }).pageInfo === null ||
+        !Array.isArray((body as { results?: unknown }).results)
+      ) {
+        throw new SeerrUpstreamError(
+          "Seerr /api/v1/media returned unexpected body",
+          502,
+        );
+      }
+
+      const pageInfo = (body as { pageInfo: { results?: unknown } }).pageInfo;
+      if (typeof pageInfo.results !== "number") {
+        throw new SeerrUpstreamError(
+          "Seerr /api/v1/media returned unexpected pageInfo",
+          502,
+        );
+      }
+
+      total = pageInfo.results;
+      const results = (body as { results: unknown[] }).results;
+      for (const row of results) {
+        const mapped = mapSeerrMediaListItem(row);
+        if (mapped !== null) {
+          media.push(mapped);
+        }
+      }
+
+      if (results.length === 0) {
+        break;
+      }
+      skip += take;
+    }
+
+    return media;
+  }
+
   async function createRequest(
     input: CreateSeerrRequestInput,
   ): Promise<SeerrRequest> {
@@ -279,6 +338,7 @@ export function createSeerrClient(options: SeerrClientOptions) {
     listAllRequests,
     listUserRequests,
     getRequestsByUser: listUserRequests,
+    listMedia,
     createRequest,
     approveRequest,
     declineRequest,
@@ -305,10 +365,14 @@ const MEDIA_STATUS = {
   7: "deleted",
 } as const;
 
+export function mediaStatusFromCode(code: number): MediaAvailability | null {
+  return MEDIA_STATUS[code as keyof typeof MEDIA_STATUS] ?? null;
+}
+
 export function toRequestView(req: SeerrRequest, title: string): RequestView {
   const requestStatus = REQUEST_STATUS[req.status as keyof typeof REQUEST_STATUS];
-  const mediaStatus = MEDIA_STATUS[req.media.status as keyof typeof MEDIA_STATUS];
-  if (requestStatus === undefined || mediaStatus === undefined) {
+  const mediaStatus = mediaStatusFromCode(req.media.status);
+  if (requestStatus === undefined || mediaStatus === null) {
     throw new SeerrUpstreamError("Seerr request returned an unknown status", 502);
   }
 
@@ -325,6 +389,27 @@ export function toRequestView(req: SeerrRequest, title: string): RequestView {
       req.requestedBy.displayName || req.requestedBy.plexUsername,
     createdAt: req.createdAt,
   };
+}
+
+function mapSeerrMediaListItem(row: unknown): SeerrMediaListItem | null {
+  if (typeof row !== "object" || row === null) {
+    return null;
+  }
+
+  const tmdbId = (row as { tmdbId?: unknown }).tmdbId;
+  const mediaType = (row as { mediaType?: unknown }).mediaType;
+  const status = (row as { status?: unknown }).status;
+  if (
+    typeof tmdbId !== "number" ||
+    !Number.isFinite(tmdbId) ||
+    (mediaType !== "movie" && mediaType !== "tv") ||
+    typeof status !== "number" ||
+    !Number.isFinite(status)
+  ) {
+    return null;
+  }
+
+  return { tmdbId, mediaType, status };
 }
 
 function mapSeerrUser(row: unknown): SeerrUser | null {

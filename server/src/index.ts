@@ -80,7 +80,7 @@ app.use(
 app.use(
   "/api/discover",
   requireAuth(config.sessionSecret),
-  createDiscoverRouter({ tmdb }),
+  createDiscoverRouter({ tmdb, seerr }),
 );
 
 app.use(

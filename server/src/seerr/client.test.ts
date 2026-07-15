@@ -3,6 +3,7 @@ import { afterEach, describe, it } from "node:test";
 import {
   SeerrUpstreamError,
   createSeerrClient,
+  mediaStatusFromCode,
   toRequestView,
   type SeerrRequest,
 } from "./client";
@@ -179,6 +180,59 @@ describe("createSeerrClient().getUserByPlexId", () => {
       (err: unknown) =>
         err instanceof SeerrUpstreamError &&
         err.message.includes("network down"),
+    );
+  });
+});
+
+describe("Seerr media client", () => {
+  it("paginates media, maps valid rows, and skips malformed rows", async () => {
+    const calls: string[] = [];
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      calls.push(url.search);
+      if (url.searchParams.get("skip") === "0") {
+        return jsonResponse(200, {
+          pageInfo: { results: 101 },
+          results: [
+            { tmdbId: 603, mediaType: "movie", status: 5, tvdbId: null },
+            { tmdbId: "bad", mediaType: "movie", status: 2 },
+            { tmdbId: 1, mediaType: "tv" },
+            { tmdbId: 2, mediaType: "person", status: 5 },
+          ],
+        });
+      }
+      return jsonResponse(200, {
+        pageInfo: { results: 101 },
+        results: [{ tmdbId: 1396, mediaType: "tv", status: 4 }],
+      });
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    assert.deepEqual(await seerr.listMedia(), [
+      { tmdbId: 603, mediaType: "movie", status: 5 },
+      { tmdbId: 1396, mediaType: "tv", status: 4 },
+    ]);
+    assert.deepEqual(calls, ["?take=100&skip=0", "?take=100&skip=100"]);
+  });
+
+  it("maps all known media status codes and returns null for unknown codes", () => {
+    assert.deepEqual(
+      [1, 2, 3, 4, 5, 6, 7, 0, 8].map(mediaStatusFromCode),
+      [
+        "unknown",
+        "pending",
+        "processing",
+        "partially_available",
+        "available",
+        "blocklisted",
+        "deleted",
+        null,
+        null,
+      ],
     );
   });
 });
