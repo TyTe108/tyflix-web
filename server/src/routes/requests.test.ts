@@ -1,41 +1,34 @@
 import assert from "node:assert/strict";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import express from "express";
-import { closeDatabase, openDatabase } from "../db";
-import { getRequestById, listAllRequests } from "../db/requests";
 import { requireAuth } from "../middleware/auth";
-import type { RadarrClient } from "../radarr/client";
 import {
-  SEERR_PERM_ADMIN,
-  SEERR_PERM_AUTO_APPROVE_MOVIE,
-} from "../requests/autoApprove";
-import type { SonarrClient } from "../sonarr/client";
+  SeerrUpstreamError,
+  type CreateSeerrRequestInput,
+  type SeerrRequest,
+} from "../seerr/client";
 import { issueSession, SESSION_COOKIE_NAME } from "../session";
-import type { TmdbClient } from "../tmdb/client";
-import { createRequestsRouter } from "./requests";
+import {
+  createRequestsRouter,
+  type RequestsRouterDeps,
+} from "./requests";
 
 const SECRET = "sixteen-chars!!!";
+const ADMIN_PERMISSION = 2;
 
 type FakeRes = {
   cookies: Array<{ name: string; value: string }>;
   cookie(name: string, value: string): void;
 };
 
-function fakeRes(): FakeRes {
+function sessionCookie(permissions = 0, seerrUserId = 7): string {
   const cookies: Array<{ name: string; value: string }> = [];
-  return {
+  const res: FakeRes = {
     cookies,
-    cookie(name: string, value: string) {
+    cookie(name, value) {
       cookies.push({ name, value });
     },
   };
-}
-
-function sessionCookie(
-  permissions: number,
-  seerrUserId = 1,
-): string {
-  const res = fakeRes();
   issueSession(
     res as unknown as import("express").Response,
     {
@@ -48,23 +41,81 @@ function sessionCookie(
     },
     { secret: SECRET, secure: false },
   );
-  return `${SESSION_COOKIE_NAME}=${res.cookies[0].value}`;
+  return `${SESSION_COOKIE_NAME}=${cookies[0].value}`;
 }
 
-function createStubTmdb(): TmdbClient & {
-  movieDetailCalls: number[];
-} {
-  const movieDetailCalls: number[] = [];
+function seerrRequest(
+  overrides: Partial<SeerrRequest> = {},
+): SeerrRequest {
   return {
-    movieDetailCalls,
-    async search() {
-      return { page: 1, totalPages: 1, results: [] };
+    id: 12,
+    status: 1,
+    type: "movie",
+    seasons: [],
+    createdAt: "2026-07-15T00:00:00.000Z",
+    requestedBy: {
+      id: 7,
+      displayName: "Tyler",
+      plexUsername: "tyler",
     },
-    async trending() {
+    media: {
+      tmdbId: 603,
+      tvdbId: null,
+      mediaType: "movie",
+      status: 2,
+      ratingKey: null,
+    },
+    ...overrides,
+  };
+}
+
+function createStubSeerr(
+  overrides: Partial<RequestsRouterDeps["seerr"]> = {},
+): RequestsRouterDeps["seerr"] & {
+  createCalls: CreateSeerrRequestInput[];
+  approveCalls: number[];
+  declineCalls: number[];
+} {
+  const createCalls: CreateSeerrRequestInput[] = [];
+  const approveCalls: number[] = [];
+  const declineCalls: number[] = [];
+  return {
+    createCalls,
+    approveCalls,
+    declineCalls,
+    async listAllRequests() {
       return [];
     },
-    async movieDetail(id: number) {
-      movieDetailCalls.push(id);
+    async listUserRequests() {
+      return [];
+    },
+    async createRequest(input) {
+      createCalls.push(input);
+      return seerrRequest();
+    },
+    async approveRequest(id) {
+      approveCalls.push(id);
+      return seerrRequest({ id, status: 2 });
+    },
+    async declineRequest(id) {
+      declineCalls.push(id);
+      return seerrRequest({ id, status: 3 });
+    },
+    ...overrides,
+  };
+}
+
+function createStubTmdb(): RequestsRouterDeps["tmdb"] & {
+  movieCalls: number[];
+  tvCalls: number[];
+} {
+  const movieCalls: number[] = [];
+  const tvCalls: number[] = [];
+  return {
+    movieCalls,
+    tvCalls,
+    async movieDetail(id) {
+      movieCalls.push(id);
       return {
         tmdbId: id,
         mediaType: "movie",
@@ -78,7 +129,8 @@ function createStubTmdb(): TmdbClient & {
         status: "Released",
       };
     },
-    async tvDetail(id: number) {
+    async tvDetail(id) {
+      tvCalls.push(id);
       return {
         tmdbId: id,
         mediaType: "tv",
@@ -90,251 +142,159 @@ function createStubTmdb(): TmdbClient & {
         genres: [],
         status: "Ended",
         tvdbId: 81189,
-        seasons: [{ seasonNumber: 1, name: "Season 1", episodeCount: 7 }],
-      };
-    },
-  };
-}
-
-function createStubRadarr(): RadarrClient & { addMovieCalls: unknown[] } {
-  const addMovieCalls: unknown[] = [];
-  return {
-    addMovieCalls,
-    async getMovieByTmdbId() {
-      throw new Error("not used");
-    },
-    async addMovie(opts) {
-      addMovieCalls.push(opts);
-      return {
-        id: 42,
-        title: opts.title,
-        tmdbId: opts.tmdbId,
-        hasFile: false,
-        monitored: true,
-      };
-    },
-    async searchMovie() {},
-  };
-}
-
-function createStubSonarr(): SonarrClient {
-  return {
-    async getSeriesByTvdbId() {
-      throw new Error("not used");
-    },
-    async addSeries() {
-      return {
-        id: 99,
-        title: "Breaking Bad",
-        tvdbId: 81189,
-        monitored: true,
         seasons: [],
       };
     },
-    async searchSeries() {},
   };
 }
 
-const processConfig = {
-  radarrQualityProfileId: 4,
-  radarrRootFolder: "/movies",
-  radarrMinimumAvailability: "released",
-  sonarrQualityProfileId: 5,
-  sonarrRootFolder: "/tv",
-  sonarrLanguageProfileId: null as number | null,
-};
+function createApp(
+  seerr: RequestsRouterDeps["seerr"],
+  tmdb = createStubTmdb(),
+): express.Express {
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/requests",
+    requireAuth(SECRET),
+    createRequestsRouter({ seerr, tmdb, sessionSecret: SECRET }),
+  );
+  return app;
+}
 
-describe("POST /api/requests", () => {
-  let tmdb: ReturnType<typeof createStubTmdb>;
-  let radarr: ReturnType<typeof createStubRadarr>;
-  let app: express.Express;
-
-  beforeEach(() => {
-    openDatabase(":memory:");
-    tmdb = createStubTmdb();
-    radarr = createStubRadarr();
-    app = express();
-    app.use(express.json());
-    app.use(
-      "/api/requests",
-      requireAuth(SECRET),
-      createRequestsRouter({
-        tmdb,
-        radarr,
-        sonarr: createStubSonarr(),
-        config: processConfig,
-        sessionSecret: SECRET,
-      }),
-    );
-  });
-
-  afterEach(() => {
-    closeDatabase();
-  });
-
-  it("admin request auto-approves, calls addMovie, stores approved/processing", async () => {
-    const res = await fetchLocal(app, "POST", "/api/requests", {
-      cookie: sessionCookie(SEERR_PERM_ADMIN),
+describe("Seerr-backed request routes", () => {
+  it("creates a request in Seerr for the authenticated user", async () => {
+    const seerr = createStubSeerr();
+    const response = await fetchLocal(createApp(seerr), "POST", "/api/requests", {
+      cookie: sessionCookie(0, 44),
       body: { tmdbId: 603, mediaType: "movie" },
     });
 
-    assert.equal(res.status, 201);
-    const body = (await res.json()) as {
-      requestStatus: string;
-      mediaStatus: string;
-      radarrId: number | null;
-      title: string;
-    };
-    assert.equal(body.requestStatus, "approved");
-    assert.equal(body.mediaStatus, "processing");
-    assert.equal(body.radarrId, 42);
-    assert.equal(body.title, "The Matrix");
-    assert.equal(radarr.addMovieCalls.length, 1);
-    assert.deepEqual(radarr.addMovieCalls[0], {
+    assert.equal(response.status, 201);
+    assert.deepEqual(seerr.createCalls, [
+      { mediaType: "movie", tmdbId: 603, userId: 44 },
+    ]);
+    assert.deepEqual(await response.json(), {
+      id: 12,
       tmdbId: 603,
+      mediaType: "movie",
       title: "The Matrix",
-      year: 1999,
-      qualityProfileId: 4,
-      rootFolderPath: "/movies",
-      minimumAvailability: "released",
+      seasons: [],
+      requestStatus: "pending",
+      mediaStatus: "pending",
+      requestedById: 7,
+      requestedByName: "Tyler",
+      createdAt: "2026-07-15T00:00:00.000Z",
     });
-
-    const stored = listAllRequests();
-    assert.equal(stored.length, 1);
-    assert.equal(stored[0].requestStatus, "approved");
-    assert.equal(stored[0].mediaStatus, "processing");
   });
 
-  it("non-privileged request stores pending and does not call addMovie", async () => {
-    const res = await fetchLocal(app, "POST", "/api/requests", {
-      cookie: sessionCookie(0),
-      body: { tmdbId: 603, mediaType: "movie" },
+  it("lists only the authenticated user's requests and memoizes titles", async () => {
+    let listedUserId: number | undefined;
+    const seerr = createStubSeerr({
+      async listUserRequests(userId) {
+        listedUserId = userId;
+        return [seerrRequest({ id: 1 }), seerrRequest({ id: 2 })];
+      },
     });
+    const tmdb = createStubTmdb();
 
-    assert.equal(res.status, 201);
-    const body = (await res.json()) as {
-      requestStatus: string;
-      mediaStatus: string;
-      radarrId: number | null;
-    };
-    assert.equal(body.requestStatus, "pending");
-    assert.equal(body.mediaStatus, "unknown");
-    assert.equal(body.radarrId, null);
-    assert.equal(radarr.addMovieCalls.length, 0);
-  });
-
-  it("AUTO_APPROVE_MOVIE bit auto-approves movies", async () => {
-    const res = await fetchLocal(app, "POST", "/api/requests", {
-      cookie: sessionCookie(SEERR_PERM_AUTO_APPROVE_MOVIE),
-      body: { tmdbId: 603, mediaType: "movie" },
-    });
-    assert.equal(res.status, 201);
-    const body = (await res.json()) as { requestStatus: string };
-    assert.equal(body.requestStatus, "approved");
-    assert.equal(radarr.addMovieCalls.length, 1);
-  });
-
-  it("returns 409 on duplicate active request", async () => {
-    const cookie = sessionCookie(0);
-    const first = await fetchLocal(app, "POST", "/api/requests", {
-      cookie,
-      body: { tmdbId: 603, mediaType: "movie" },
-    });
-    assert.equal(first.status, 201);
-
-    const second = await fetchLocal(app, "POST", "/api/requests", {
-      cookie,
-      body: { tmdbId: 603, mediaType: "movie" },
-    });
-    assert.equal(second.status, 409);
-    const body = (await second.json()) as {
-      error: string;
-      request: { tmdbId: number };
-    };
-    assert.equal(body.error, "already requested");
-    assert.equal(body.request.tmdbId, 603);
-    assert.equal(listAllRequests().length, 1);
-  });
-
-  it("returns 401 without a session", async () => {
-    const res = await fetchLocal(app, "POST", "/api/requests", {
-      body: { tmdbId: 603, mediaType: "movie" },
-    });
-    assert.equal(res.status, 401);
-  });
-});
-
-describe("POST /api/requests/:id/approve", () => {
-  let radarr: ReturnType<typeof createStubRadarr>;
-  let app: express.Express;
-
-  beforeEach(() => {
-    openDatabase(":memory:");
-    radarr = createStubRadarr();
-    app = express();
-    app.use(express.json());
-    app.use(
+    const response = await fetchLocal(
+      createApp(seerr, tmdb),
+      "GET",
       "/api/requests",
-      requireAuth(SECRET),
-      createRequestsRouter({
-        tmdb: createStubTmdb(),
-        radarr,
-        sonarr: createStubSonarr(),
-        config: processConfig,
-        sessionSecret: SECRET,
-      }),
+      { cookie: sessionCookie(0, 44) },
     );
+    const body = (await response.json()) as { results: unknown[] };
+
+    assert.equal(response.status, 200);
+    assert.equal(listedUserId, 44);
+    assert.equal(body.results.length, 2);
+    assert.deepEqual(tmdb.movieCalls, [603]);
   });
 
-  afterEach(() => {
-    closeDatabase();
-  });
-
-  it("admin can approve a pending request and trigger Radarr", async () => {
-    const createRes = await fetchLocal(app, "POST", "/api/requests", {
-      cookie: sessionCookie(0, 7),
-      body: { tmdbId: 603, mediaType: "movie" },
+  it("requires admin and lists all Seerr requests", async () => {
+    let calls = 0;
+    const seerr = createStubSeerr({
+      async listAllRequests() {
+        calls += 1;
+        return [seerrRequest()];
+      },
     });
-    const created = (await createRes.json()) as { id: number };
-    assert.equal(radarr.addMovieCalls.length, 0);
+    const app = createApp(seerr);
 
-    const approveRes = await fetchLocal(
+    const forbidden = await fetchLocal(app, "GET", "/api/requests/all", {
+      cookie: sessionCookie(),
+    });
+    assert.equal(forbidden.status, 403);
+
+    const allowed = await fetchLocal(app, "GET", "/api/requests/all", {
+      cookie: sessionCookie(ADMIN_PERMISSION),
+    });
+    assert.equal(allowed.status, 200);
+    assert.equal(calls, 1);
+  });
+
+  it("approves and declines requests through Seerr for admins", async () => {
+    const seerr = createStubSeerr();
+    const app = createApp(seerr);
+    const options = { cookie: sessionCookie(ADMIN_PERMISSION) };
+
+    const approved = await fetchLocal(
       app,
       "POST",
-      `/api/requests/${created.id}/approve`,
-      { cookie: sessionCookie(SEERR_PERM_ADMIN, 1) },
+      "/api/requests/31/approve",
+      options,
     );
-    assert.equal(approveRes.status, 200);
-    const body = (await approveRes.json()) as {
-      requestStatus: string;
-      mediaStatus: string;
-      radarrId: number;
-      decidedBy: number;
-    };
-    assert.equal(body.requestStatus, "approved");
-    assert.equal(body.mediaStatus, "processing");
-    assert.equal(body.radarrId, 42);
-    assert.equal(body.decidedBy, 1);
-    assert.equal(radarr.addMovieCalls.length, 1);
-
-    const stored = getRequestById(created.id);
-    assert.equal(stored?.requestStatus, "approved");
-  });
-
-  it("returns 403 for non-admin approve", async () => {
-    const createRes = await fetchLocal(app, "POST", "/api/requests", {
-      cookie: sessionCookie(0),
-      body: { tmdbId: 603, mediaType: "movie" },
-    });
-    const created = (await createRes.json()) as { id: number };
-
-    const approveRes = await fetchLocal(
+    const declined = await fetchLocal(
       app,
       "POST",
-      `/api/requests/${created.id}/approve`,
-      { cookie: sessionCookie(0) },
+      "/api/requests/32/decline",
+      options,
     );
-    assert.equal(approveRes.status, 403);
+
+    assert.equal(approved.status, 200);
+    assert.equal(declined.status, 200);
+    assert.deepEqual(seerr.approveCalls, [31]);
+    assert.deepEqual(seerr.declineCalls, [32]);
+    assert.equal(
+      ((await approved.json()) as { requestStatus: string }).requestStatus,
+      "approved",
+    );
+    assert.equal(
+      ((await declined.json()) as { requestStatus: string }).requestStatus,
+      "declined",
+    );
+  });
+
+  it("maps a Seerr duplicate to 409 and other failures to 502", async () => {
+    const duplicate = createStubSeerr({
+      async createRequest() {
+        throw new SeerrUpstreamError("duplicate", 409);
+      },
+    });
+    const duplicateResponse = await fetchLocal(
+      createApp(duplicate),
+      "POST",
+      "/api/requests",
+      {
+        cookie: sessionCookie(),
+        body: { tmdbId: 603, mediaType: "movie" },
+      },
+    );
+    assert.equal(duplicateResponse.status, 409);
+
+    const unavailable = createStubSeerr({
+      async listUserRequests() {
+        throw new SeerrUpstreamError("unavailable", 503);
+      },
+    });
+    const unavailableResponse = await fetchLocal(
+      createApp(unavailable),
+      "GET",
+      "/api/requests",
+      { cookie: sessionCookie() },
+    );
+    assert.equal(unavailableResponse.status, 502);
   });
 });
 

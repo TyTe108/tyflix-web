@@ -8,21 +8,61 @@ export type SeerrUser = {
 };
 
 export type SeerrMedia = {
+  tmdbId: number;
+  tvdbId: number | null;
   status: number;
   ratingKey: string | number | null;
   mediaType: string | null;
 };
 
 export type SeerrRequestSeason = {
-  seasonNumber: number | null;
+  seasonNumber: number;
 };
 
 export type SeerrRequest = {
+  id: number;
+  status: number;
   type: "movie" | "tv";
   media: SeerrMedia;
   seasons: SeerrRequestSeason[];
   createdAt: string;
-  requestedBy: { id: number };
+  requestedBy: {
+    id: number;
+    displayName: string;
+    plexUsername: string;
+  };
+};
+
+export type RequestView = {
+  id: number;
+  tmdbId: number;
+  mediaType: "movie" | "tv";
+  title: string;
+  seasons: number[];
+  requestStatus:
+    | "pending"
+    | "approved"
+    | "declined"
+    | "failed"
+    | "completed";
+  mediaStatus:
+    | "unknown"
+    | "pending"
+    | "processing"
+    | "partially_available"
+    | "available"
+    | "blocklisted"
+    | "deleted";
+  requestedById: number;
+  requestedByName: string;
+  createdAt: string;
+};
+
+export type CreateSeerrRequestInput = {
+  mediaType: "movie" | "tv";
+  tmdbId: number;
+  seasons?: number[];
+  userId: number;
 };
 
 export class SeerrUpstreamError extends Error {
@@ -43,9 +83,11 @@ export type SeerrClientOptions = {
 export function createSeerrClient(options: SeerrClientOptions) {
   const { baseUrl, apiKey } = options;
 
-  async function getJson(
+  async function requestJson(
+    method: "GET" | "POST",
     path: string,
-    query: Record<string, string>,
+    query: Record<string, string> = {},
+    body?: unknown,
   ): Promise<unknown> {
     const url = new URL(`${baseUrl}${path}`);
     for (const [key, value] of Object.entries(query)) {
@@ -55,11 +97,13 @@ export function createSeerrClient(options: SeerrClientOptions) {
     let res: Response;
     try {
       res = await fetch(url, {
-        method: "GET",
+        method,
         headers: {
           "X-Api-Key": apiKey,
           Accept: "application/json",
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
+        body: body === undefined ? undefined : JSON.stringify(body),
       });
     } catch (err) {
       const message =
@@ -75,6 +119,17 @@ export function createSeerrClient(options: SeerrClientOptions) {
     }
 
     return res.json();
+  }
+
+  function getJson(
+    path: string,
+    query: Record<string, string> = {},
+  ): Promise<unknown> {
+    return requestJson("GET", path, query);
+  }
+
+  function postJson(path: string, body?: unknown): Promise<unknown> {
+    return requestJson("POST", path, {}, body);
   }
 
   async function getUserByPlexId(plexId: number): Promise<SeerrUser | null> {
@@ -128,20 +183,20 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return null;
   }
 
-  async function getRequestsByUser(
-    seerrUserId: number,
+  async function listRequests(
+    path: string,
+    query: Record<string, string> = {},
   ): Promise<SeerrRequest[]> {
     const take = 100;
     let skip = 0;
     let total = Number.POSITIVE_INFINITY;
-    const matched: SeerrRequest[] = [];
+    const requests: SeerrRequest[] = [];
 
     while (skip < total) {
-      const body = await getJson("/api/v1/request", {
+      const body = await getJson(path, {
         take: String(take),
         skip: String(skip),
-        filter: "all",
-        sort: "added",
+        ...query,
       });
 
       if (
@@ -152,7 +207,7 @@ export function createSeerrClient(options: SeerrClientOptions) {
         !Array.isArray((body as { results?: unknown }).results)
       ) {
         throw new SeerrUpstreamError(
-          "Seerr getRequestsByUser returned unexpected body",
+          `Seerr ${path} returned unexpected body`,
           502,
         );
       }
@@ -160,7 +215,7 @@ export function createSeerrClient(options: SeerrClientOptions) {
       const pageInfo = (body as { pageInfo: { results?: unknown } }).pageInfo;
       if (typeof pageInfo.results !== "number") {
         throw new SeerrUpstreamError(
-          "Seerr getRequestsByUser returned unexpected pageInfo",
+          `Seerr ${path} returned unexpected pageInfo`,
           502,
         );
       }
@@ -170,9 +225,13 @@ export function createSeerrClient(options: SeerrClientOptions) {
 
       for (const row of results) {
         const mapped = mapSeerrRequest(row);
-        if (mapped !== null && mapped.requestedBy.id === seerrUserId) {
-          matched.push(mapped);
+        if (mapped === null) {
+          throw new SeerrUpstreamError(
+            `Seerr ${path} returned an unexpected request`,
+            502,
+          );
         }
+        requests.push(mapped);
       }
 
       if (results.length === 0) {
@@ -181,13 +240,93 @@ export function createSeerrClient(options: SeerrClientOptions) {
       skip += take;
     }
 
-    return matched;
+    return requests;
   }
 
-  return { getUserByPlexId, getRequestsByUser };
+  function listAllRequests(): Promise<SeerrRequest[]> {
+    return listRequests("/api/v1/request", { sort: "added" });
+  }
+
+  function listUserRequests(userId: number): Promise<SeerrRequest[]> {
+    return listRequests(`/api/v1/user/${userId}/requests`);
+  }
+
+  async function createRequest(
+    input: CreateSeerrRequestInput,
+  ): Promise<SeerrRequest> {
+    const body = await postJson("/api/v1/request", {
+      mediaType: input.mediaType,
+      mediaId: input.tmdbId,
+      ...(input.mediaType === "tv" && input.seasons !== undefined
+        ? { seasons: input.seasons }
+        : {}),
+      userId: input.userId,
+    });
+    return requireSeerrRequest(body, "createRequest");
+  }
+
+  async function approveRequest(id: number): Promise<SeerrRequest> {
+    const body = await postJson(`/api/v1/request/${id}/approve`);
+    return requireSeerrRequest(body, "approveRequest");
+  }
+
+  async function declineRequest(id: number): Promise<SeerrRequest> {
+    const body = await postJson(`/api/v1/request/${id}/decline`);
+    return requireSeerrRequest(body, "declineRequest");
+  }
+
+  return {
+    getUserByPlexId,
+    listAllRequests,
+    listUserRequests,
+    getRequestsByUser: listUserRequests,
+    createRequest,
+    approveRequest,
+    declineRequest,
+  };
 }
 
 export type SeerrClient = ReturnType<typeof createSeerrClient>;
+
+const REQUEST_STATUS = {
+  1: "pending",
+  2: "approved",
+  3: "declined",
+  4: "failed",
+  5: "completed",
+} as const;
+
+const MEDIA_STATUS = {
+  1: "unknown",
+  2: "pending",
+  3: "processing",
+  4: "partially_available",
+  5: "available",
+  6: "blocklisted",
+  7: "deleted",
+} as const;
+
+export function toRequestView(req: SeerrRequest, title: string): RequestView {
+  const requestStatus = REQUEST_STATUS[req.status as keyof typeof REQUEST_STATUS];
+  const mediaStatus = MEDIA_STATUS[req.media.status as keyof typeof MEDIA_STATUS];
+  if (requestStatus === undefined || mediaStatus === undefined) {
+    throw new SeerrUpstreamError("Seerr request returned an unknown status", 502);
+  }
+
+  return {
+    id: req.id,
+    tmdbId: req.media.tmdbId,
+    mediaType: req.type,
+    title,
+    seasons: req.seasons.map((season) => season.seasonNumber),
+    requestStatus,
+    mediaStatus,
+    requestedById: req.requestedBy.id,
+    requestedByName:
+      req.requestedBy.displayName || req.requestedBy.plexUsername,
+    createdAt: req.createdAt,
+  };
+}
 
 function mapSeerrUser(row: unknown): SeerrUser | null {
   if (typeof row !== "object" || row === null) {
@@ -226,13 +365,19 @@ function mapSeerrRequest(row: unknown): SeerrRequest | null {
     return null;
   }
 
+  const id = (row as { id?: unknown }).id;
+  const requestStatus = (row as { status?: unknown }).status;
   const type = (row as { type?: unknown }).type;
   const createdAt = (row as { createdAt?: unknown }).createdAt;
   const mediaRaw = (row as { media?: unknown }).media;
   const requestedByRaw = (row as { requestedBy?: unknown }).requestedBy;
   const seasonsRaw = (row as { seasons?: unknown }).seasons;
 
-  if (type !== "movie" && type !== "tv") {
+  if (
+    typeof id !== "number" ||
+    typeof requestStatus !== "number" ||
+    (type !== "movie" && type !== "tv")
+  ) {
     return null;
   }
   if (typeof createdAt !== "string") {
@@ -246,12 +391,26 @@ function mapSeerrRequest(row: unknown): SeerrRequest | null {
   }
 
   const requestedById = (requestedByRaw as { id?: unknown }).id;
-  if (typeof requestedById !== "number") {
+  const displayName = (requestedByRaw as { displayName?: unknown }).displayName;
+  const plexUsername = (requestedByRaw as { plexUsername?: unknown }).plexUsername;
+  if (
+    typeof requestedById !== "number" ||
+    typeof displayName !== "string" ||
+    typeof plexUsername !== "string"
+  ) {
     return null;
   }
 
-  const status = (mediaRaw as { status?: unknown }).status;
-  if (typeof status !== "number") {
+  const mediaStatus = (mediaRaw as { status?: unknown }).status;
+  const tmdbId = (mediaRaw as { tmdbId?: unknown }).tmdbId;
+  const tvdbIdRaw = (mediaRaw as { tvdbId?: unknown }).tvdbId;
+  if (
+    typeof mediaStatus !== "number" ||
+    typeof tmdbId !== "number" ||
+    (typeof tvdbIdRaw !== "number" &&
+      tvdbIdRaw !== null &&
+      tvdbIdRaw !== undefined)
+  ) {
     return null;
   }
 
@@ -277,21 +436,38 @@ function mapSeerrRequest(row: unknown): SeerrRequest | null {
       const seasonNumber = (season as { seasonNumber?: unknown }).seasonNumber;
       if (typeof seasonNumber === "number") {
         seasons.push({ seasonNumber });
-      } else if (seasonNumber === null || seasonNumber === undefined) {
-        seasons.push({ seasonNumber: null });
       }
     }
   }
 
   return {
+    id,
+    status: requestStatus,
     type,
     createdAt,
     media: {
-      status,
+      tmdbId,
+      tvdbId: typeof tvdbIdRaw === "number" ? tvdbIdRaw : null,
+      status: mediaStatus,
       ratingKey,
       mediaType,
     },
     seasons,
-    requestedBy: { id: requestedById },
+    requestedBy: {
+      id: requestedById,
+      displayName,
+      plexUsername,
+    },
   };
+}
+
+function requireSeerrRequest(body: unknown, operation: string): SeerrRequest {
+  const request = mapSeerrRequest(body);
+  if (request === null) {
+    throw new SeerrUpstreamError(
+      `Seerr ${operation} returned unexpected body`,
+      502,
+    );
+  }
+  return request;
 }

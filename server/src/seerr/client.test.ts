@@ -3,6 +3,8 @@ import { afterEach, describe, it } from "node:test";
 import {
   SeerrUpstreamError,
   createSeerrClient,
+  toRequestView,
+  type SeerrRequest,
 } from "./client";
 
 const originalFetch = globalThis.fetch;
@@ -33,6 +35,31 @@ function userRow(overrides: Partial<{
     displayName: "Alice",
     email: "a@example.com",
     permissions: 0,
+    ...overrides,
+  };
+}
+
+function requestRow(
+  overrides: Partial<SeerrRequest> = {},
+): SeerrRequest {
+  return {
+    id: 12,
+    status: 1,
+    type: "movie",
+    seasons: [],
+    createdAt: "2026-07-15T00:00:00.000Z",
+    requestedBy: {
+      id: 7,
+      displayName: "Alice",
+      plexUsername: "alice",
+    },
+    media: {
+      tmdbId: 603,
+      tvdbId: null,
+      mediaType: "movie",
+      status: 1,
+      ratingKey: null,
+    },
     ...overrides,
   };
 }
@@ -152,6 +179,123 @@ describe("createSeerrClient().getUserByPlexId", () => {
       (err: unknown) =>
         err instanceof SeerrUpstreamError &&
         err.message.includes("network down"),
+    );
+  });
+});
+
+describe("Seerr requests client", () => {
+  it("maps every request and media status to its label", () => {
+    const requestStatuses = [
+      "pending",
+      "approved",
+      "declined",
+      "failed",
+      "completed",
+    ];
+    const mediaStatuses = [
+      "unknown",
+      "pending",
+      "processing",
+      "partially_available",
+      "available",
+      "blocklisted",
+      "deleted",
+    ];
+
+    for (let status = 1; status <= requestStatuses.length; status += 1) {
+      const view = toRequestView(requestRow({ status }), "The Matrix");
+      assert.equal(view.requestStatus, requestStatuses[status - 1]);
+    }
+    for (let status = 1; status <= mediaStatuses.length; status += 1) {
+      const request = requestRow({
+        media: { ...requestRow().media, status },
+      });
+      const view = toRequestView(request, "The Matrix");
+      assert.equal(view.mediaStatus, mediaStatuses[status - 1]);
+    }
+  });
+
+  it("creates a TV request with mediaId, userId, and seasons", async () => {
+    let call:
+      | { url: string; method: string | undefined; body: string | undefined }
+      | undefined;
+    globalThis.fetch = async (input, init) => {
+      call = {
+        url: String(input),
+        method: init?.method,
+        body: typeof init?.body === "string" ? init.body : undefined,
+      };
+      return jsonResponse(
+        201,
+        requestRow({
+          type: "tv",
+          seasons: [{ seasonNumber: 1 }, { seasonNumber: 2 }],
+          media: {
+            ...requestRow().media,
+            tmdbId: 1396,
+            mediaType: "tv",
+          },
+        }),
+      );
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    await seerr.createRequest({
+      mediaType: "tv",
+      tmdbId: 1396,
+      seasons: [1, 2],
+      userId: 7,
+    });
+
+    assert.ok(call);
+    assert.equal(call.url, "http://seerr:5055/api/v1/request");
+    assert.equal(call.method, "POST");
+    assert.deepEqual(JSON.parse(call.body ?? ""), {
+      mediaType: "tv",
+      mediaId: 1396,
+      seasons: [1, 2],
+      userId: 7,
+    });
+  });
+
+  it("lists requests from the per-user endpoint", async () => {
+    const urls: string[] = [];
+    globalThis.fetch = async (input) => {
+      urls.push(String(input));
+      return jsonResponse(200, {
+        pageInfo: { results: 1 },
+        results: [requestRow()],
+      });
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    const requests = await seerr.listUserRequests(7);
+
+    assert.equal(requests.length, 1);
+    assert.equal(
+      urls[0],
+      "http://seerr:5055/api/v1/user/7/requests?take=100&skip=0",
+    );
+  });
+
+  it("throws SeerrUpstreamError for request API failures", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse(503, { message: "unavailable" });
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    await assert.rejects(
+      () => seerr.listAllRequests(),
+      (err: unknown) =>
+        err instanceof SeerrUpstreamError && err.status === 503,
     );
   });
 });
