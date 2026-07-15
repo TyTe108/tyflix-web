@@ -35,6 +35,14 @@ import {
   requestStatusBadgeClass,
   type RequestView,
 } from "../api/requests";
+import {
+  fetchAllIssues,
+  formatIssueDate,
+  issueStatusBadgeClass,
+  issueStatusLabel,
+  issueTypeLabel,
+  type IssueView,
+} from "../api/issues";
 
 type LoadStatus = "loading" | "ready" | "error";
 
@@ -110,6 +118,8 @@ export function AdminPage() {
       </section>
 
       <RequestsPanel />
+
+      <IssuesPanel />
 
       <UsersPanel />
 
@@ -277,6 +287,95 @@ function RequestsPanel() {
               </li>
             );
           })}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
+function IssuesPanel() {
+  const [issues, setIssues] = useState<IssueView[]>([]);
+  const [status, setStatus] = useState<LoadStatus>("loading");
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const retry = useCallback(() => {
+    setReloadKey((value) => value + 1);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setStatus("loading");
+    setError(null);
+
+    void fetchAllIssues()
+      .then((rows) => {
+        if (cancelled) {
+          return;
+        }
+        setIssues(rows);
+        setStatus("ready");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        setIssues([]);
+        setStatus("error");
+        setError(
+          err instanceof Error ? err.message : "Failed to load issues",
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey]);
+
+  return (
+    <section className="admin-section" aria-labelledby="issues-heading">
+      <h2 id="issues-heading">Issues</h2>
+
+      {status === "loading" ? (
+        <p className="muted">Loading issues…</p>
+      ) : null}
+
+      {status === "error" ? (
+        <div className="stats-error">
+          <p className="error">{error ?? "Failed to load issues"}</p>
+          <button type="button" className="btn secondary" onClick={retry}>
+            Retry
+          </button>
+        </div>
+      ) : null}
+
+      {status === "ready" && issues.length === 0 ? (
+        <p className="muted">No issues yet.</p>
+      ) : null}
+
+      {status === "ready" && issues.length > 0 ? (
+        <ul className="admin-requests-list">
+          {issues.map((issue) => (
+            <li key={issue.id} className="admin-request-row">
+              <Link to={`/issues/${issue.id}`} className="admin-issue-link">
+                <div className="admin-request-main">
+                  <span className="admin-request-title">
+                    {issue.media.title ?? `TMDB #${issue.media.tmdbId}`}
+                  </span>
+                  <span className="stats-tag">
+                    {issueTypeLabel(issue.issueType)}
+                  </span>
+                  <span className={issueStatusBadgeClass(issue.status)}>
+                    {issueStatusLabel(issue.status)}
+                  </span>
+                </div>
+                <div className="admin-request-meta muted">
+                  <span>Reported by {issue.createdBy.displayName}</span>
+                  <span>Reported {formatIssueDate(issue.createdAt)}</span>
+                </div>
+              </Link>
+            </li>
+          ))}
         </ul>
       ) : null}
     </section>

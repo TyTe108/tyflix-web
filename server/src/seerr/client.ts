@@ -382,6 +382,7 @@ export function createSeerrClient(options: SeerrClientOptions) {
         take: String(take),
         skip: String(skip),
         sort: "added",
+        filter: "all",
       });
 
       if (

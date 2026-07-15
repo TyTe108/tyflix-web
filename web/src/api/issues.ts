@@ -54,6 +54,56 @@ export async function fetchMyIssues(): Promise<IssueView[]> {
   return body.results;
 }
 
+export async function fetchIssue(id: number): Promise<IssueView> {
+  const res = await fetch(`/api/issues/${id}`);
+  if (res.status === 403 || res.status === 404) {
+    throw new Error("Issue not found or you don't have access");
+  }
+  if (!res.ok) {
+    throw new Error(`Failed to load issue (${res.status})`);
+  }
+  return (await res.json()) as IssueView;
+}
+
+export async function fetchAllIssues(): Promise<IssueView[]> {
+  const res = await fetch("/api/issues/all");
+  if (!res.ok) {
+    throw new Error(`Failed to load issues (${res.status})`);
+  }
+  const body = (await res.json()) as { results: IssueView[] };
+  return body.results;
+}
+
+export async function addIssueComment(
+  id: number,
+  message: string,
+): Promise<IssueView> {
+  const res = await fetch(`/api/issues/${id}/comment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to add comment (${res.status})`);
+  }
+  return (await res.json()) as IssueView;
+}
+
+export async function setIssueStatus(
+  id: number,
+  status: IssueStatus,
+): Promise<IssueView> {
+  const res = await fetch(`/api/issues/${id}/status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to update issue (${res.status})`);
+  }
+  return (await res.json()) as IssueView;
+}
+
 export async function createIssue(
   input: CreateIssueInput,
 ): Promise<CreateIssueResult> {

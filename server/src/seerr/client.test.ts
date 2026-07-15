@@ -388,8 +388,29 @@ describe("Seerr issues client", () => {
     for (const url of urls) {
       assert.equal(url.searchParams.get("sort"), "added");
       assert.equal(url.searchParams.has("createdBy"), false);
-      assert.equal(url.searchParams.has("filter"), false);
+      assert.equal(url.searchParams.get("filter"), "all");
     }
+  });
+
+  it("requests all statuses and returns resolved issues", async () => {
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      assert.equal(url.searchParams.get("filter"), "all");
+      return jsonResponse(200, {
+        pageInfo: { results: 1 },
+        results: [issueRow({ id: 54, status: 2 })],
+      });
+    };
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    const issues = await seerr.listIssues();
+
+    assert.equal(issues.length, 1);
+    assert.equal(issues[0].id, 54);
+    assert.equal(issues[0].status, "resolved");
   });
 
   it("creates an issue with numeric type, userId, and problem location", async () => {

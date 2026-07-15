@@ -3,6 +3,7 @@ import { AdminRoute, ProtectedRoute } from "./auth/ProtectedRoute";
 import { AdminPage } from "./pages/AdminPage";
 import { DiscoverPage } from "./pages/DiscoverPage";
 import { HomePage } from "./pages/HomePage";
+import { IssueDetailPage } from "./pages/IssueDetailPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MediaDetailPage } from "./pages/MediaDetailPage";
 import { MyIssuesPage } from "./pages/MyIssuesPage";
@@ -19,6 +20,7 @@ export function App() {
         <Route path="/watchlist" element={<WatchlistPage />} />
         <Route path="/requests" element={<MyRequestsPage />} />
         <Route path="/issues" element={<MyIssuesPage />} />
+        <Route path="/issues/:id" element={<IssueDetailPage />} />
         <Route path="/media/:type/:id" element={<MediaDetailPage />} />
       </Route>
       <Route element={<AdminRoute />}>

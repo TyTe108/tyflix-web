@@ -1124,6 +1124,143 @@ a {
   margin: 0;
 }
 
+.issue-detail-loading,
+.issue-detail-error,
+.issue-detail {
+  margin-top: 1.5rem;
+}
+
+.issue-detail-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.issue-detail-poster {
+  width: 5rem;
+  aspect-ratio: 2 / 3;
+  flex: 0 0 auto;
+  border-radius: 0.35rem;
+  object-fit: cover;
+}
+
+.issue-detail-heading {
+  min-width: 0;
+}
+
+.issue-detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.45rem;
+}
+
+.issue-detail-heading h1 {
+  margin-bottom: 0.35rem;
+  overflow-wrap: anywhere;
+}
+
+.issue-detail-heading h1 a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.issue-detail-heading h1 a:hover {
+  color: #1f3d2d;
+  text-decoration: underline;
+}
+
+.issue-detail-meta {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.issue-comments,
+.issue-actions {
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgba(31, 61, 45, 0.15);
+}
+
+.issue-comments h2 {
+  font-family: "Fraunces", "Iowan Old Style", Georgia, serif;
+  font-weight: 600;
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.75rem;
+}
+
+.issue-comment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.issue-comment-list li {
+  padding: 0.85rem 0;
+  border-bottom: 1px solid rgba(31, 61, 45, 0.1);
+}
+
+.issue-comment-list li:last-child {
+  border-bottom: 0;
+}
+
+.issue-comment-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0 0 0.3rem;
+  font-size: 0.85rem;
+}
+
+.issue-comment-meta strong {
+  color: #1a1a1a;
+}
+
+.issue-comment-message {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.issue-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.issue-comment-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.65rem;
+  width: 100%;
+}
+
+.issue-comment-form label {
+  font-weight: 600;
+}
+
+.issue-comment-form textarea {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(31, 61, 45, 0.35);
+  border-radius: 0.4rem;
+  background: rgba(255, 255, 255, 0.7);
+  color: inherit;
+}
+
+.issue-comment-note,
+.issue-action-error {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
 .my-issues-list {
   list-style: none;
   margin: 1.25rem 0 0;
@@ -1262,6 +1399,17 @@ a {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+.admin-issue-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.admin-issue-link:hover .admin-request-title {
+  color: #1f3d2d;
+  text-decoration: underline;
 }
 
 .admin-request-row {

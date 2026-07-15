@@ -123,7 +123,8 @@ export function MyIssuesPage() {
                     </span>
                   </div>
                   <p className="my-issues-meta muted">
-                    Reported {formatIssueDate(issue.createdAt)}
+                    Reported {formatIssueDate(issue.createdAt)} ·{" "}
+                    <Link to={`/issues/${issue.id}`}>View issue</Link>
                   </p>
                 </div>
               </li>
