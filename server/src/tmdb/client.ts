@@ -159,6 +159,51 @@ export function createTmdbClient(options: TmdbClientOptions) {
     return results;
   }
 
+  async function recommendations(
+    mediaType: "movie" | "tv",
+    id: number,
+  ): Promise<MediaSummary[]> {
+    const mapResults = (
+      body: unknown,
+      defaultMediaType?: "movie" | "tv",
+    ): MediaSummary[] => {
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        !Array.isArray((body as { results?: unknown }).results)
+      ) {
+        throw new TmdbUpstreamError(
+          "TMDB recommendations returned unexpected body",
+          502,
+        );
+      }
+
+      const results: MediaSummary[] = [];
+      for (const row of (body as { results: unknown[] }).results) {
+        const mapped = mapMediaSummary(row, defaultMediaType);
+        if (mapped !== null && mapped.tmdbId !== id) {
+          results.push(mapped);
+        }
+        if (results.length === 20) {
+          break;
+        }
+      }
+      return results;
+    };
+
+    const recommended = mapResults(
+      await getJson(`/${mediaType}/${id}/recommendations`),
+    );
+    if (recommended.length > 0) {
+      return recommended;
+    }
+
+    return mapResults(
+      await getJson(`/${mediaType}/${id}/similar`),
+      mediaType,
+    );
+  }
+
   async function movieDetail(id: number): Promise<MovieDetail> {
     const body = await getJson(`/movie/${id}`, {
       append_to_response: "external_ids",
@@ -260,7 +305,7 @@ export function createTmdbClient(options: TmdbClientOptions) {
     };
   }
 
-  return { search, trending, movieDetail, tvDetail };
+  return { search, trending, recommendations, movieDetail, tvDetail };
 }
 
 export type TmdbClient = ReturnType<typeof createTmdbClient>;
@@ -326,12 +371,17 @@ function mapTvSeasons(seasons: unknown): TvSeasonSummary[] {
   return mapped;
 }
 
-function mapMediaSummary(row: unknown): MediaSummary | null {
+export function mapMediaSummary(
+  row: unknown,
+  defaultMediaType?: "movie" | "tv",
+): MediaSummary | null {
   if (typeof row !== "object" || row === null) {
     return null;
   }
 
-  const mediaType = (row as { media_type?: unknown }).media_type;
+  const rowMediaType = (row as { media_type?: unknown }).media_type;
+  const mediaType =
+    rowMediaType === undefined ? defaultMediaType : rowMediaType;
   if (mediaType !== "movie" && mediaType !== "tv") {
     return null;
   }

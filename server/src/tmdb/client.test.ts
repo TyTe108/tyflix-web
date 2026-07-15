@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { TmdbUpstreamError, createTmdbClient } from "./client";
+import {
+  TmdbUpstreamError,
+  createTmdbClient,
+  mapMediaSummary,
+} from "./client";
 
 const originalFetch = globalThis.fetch;
 
@@ -102,6 +106,115 @@ describe("createTmdbClient().search", () => {
         err.status === 503 &&
         err.message.includes("503"),
     );
+  });
+});
+
+describe("mapMediaSummary", () => {
+  it("uses the default media type when media_type is absent", () => {
+    assert.deepEqual(
+      mapMediaSummary(
+        {
+          id: 42,
+          name: "A Similar Show",
+          first_air_date: "2024-01-02",
+          poster_path: null,
+          overview: "Related television.",
+        },
+        "tv",
+      ),
+      {
+        tmdbId: 42,
+        mediaType: "tv",
+        title: "A Similar Show",
+        year: 2024,
+        posterUrl: null,
+        overview: "Related television.",
+      },
+    );
+  });
+});
+
+describe("createTmdbClient().recommendations", () => {
+  it("maps recommendation media types, excludes the source, and caps at 20", async () => {
+    const rows = [
+      {
+        media_type: "movie",
+        id: 603,
+        title: "The Matrix",
+      },
+      ...Array.from({ length: 21 }, (_, index) => ({
+        media_type: index === 0 ? "tv" : "movie",
+        id: 700 + index,
+        ...(index === 0
+          ? { name: "Related Show", first_air_date: "2020-01-01" }
+          : { title: `Related Movie ${index}`, release_date: "2021-01-01" }),
+      })),
+    ];
+    globalThis.fetch = async (input) => {
+      assert.match(String(input), /\/movie\/603\/recommendations\?/);
+      return jsonResponse(200, { results: rows, total_pages: 1 });
+    };
+
+    const results = await createTmdbClient({ apiKey: "k" }).recommendations(
+      "movie",
+      603,
+    );
+
+    assert.equal(results.length, 20);
+    assert.equal(results.some((item) => item.tmdbId === 603), false);
+    assert.deepEqual(results[0], {
+      tmdbId: 700,
+      mediaType: "tv",
+      title: "Related Show",
+      year: 2020,
+      posterUrl: null,
+      overview: "",
+    });
+    assert.equal(results[19].tmdbId, 719);
+  });
+
+  it("falls back to similar and supplies its implied media type", async () => {
+    const calls: string[] = [];
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      calls.push(new URL(url).pathname);
+      if (url.includes("/recommendations")) {
+        return jsonResponse(200, { results: [], total_pages: 1 });
+      }
+      return jsonResponse(200, {
+        results: [
+          { id: 1396, name: "Source" },
+          {
+            id: 60059,
+            name: "Better Call Saul",
+            first_air_date: "2015-02-08",
+            poster_path: "/bcs.jpg",
+            overview: "A lawyer's story.",
+          },
+        ],
+        total_pages: 1,
+      });
+    };
+
+    const results = await createTmdbClient({ apiKey: "k" }).recommendations(
+      "tv",
+      1396,
+    );
+
+    assert.deepEqual(calls, [
+      "/3/tv/1396/recommendations",
+      "/3/tv/1396/similar",
+    ]);
+    assert.deepEqual(results, [
+      {
+        tmdbId: 60059,
+        mediaType: "tv",
+        title: "Better Call Saul",
+        year: 2015,
+        posterUrl: "https://image.tmdb.org/t/p/w500/bcs.jpg",
+        overview: "A lawyer's story.",
+      },
+    ]);
   });
 });
 

@@ -7,10 +7,12 @@ import {
 import { Link, useParams } from "react-router-dom";
 import {
   fetchMovie,
+  fetchRecommendations,
   fetchTv,
   formatRuntime,
   canRequest,
   mediaStatusBadgeClass,
+  type MediaSummary,
   type MovieDetail,
   type TvDetail,
 } from "../api/discover";
@@ -19,6 +21,7 @@ import {
   type IssueType,
 } from "../api/issues";
 import { createRequest, mediaStatusLabel } from "../api/requests";
+import { MediaCard } from "../components/MediaCard";
 
 type LoadStatus = "loading" | "ready" | "error";
 type MediaDetail = MovieDetail | TvDetail;
@@ -134,6 +137,28 @@ export function MediaDetailPage() {
 function DetailBody({ detail }: { detail: MediaDetail }) {
   const heroUrl = detail.backdropUrl ?? detail.posterUrl;
   const yearLabel = detail.year !== null ? ` (${detail.year})` : "";
+  const [recommendations, setRecommendations] = useState<MediaSummary[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRecommendations([]);
+
+    void fetchRecommendations(detail.mediaType, detail.tmdbId)
+      .then((items) => {
+        if (!cancelled) {
+          setRecommendations(items);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRecommendations([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.mediaType, detail.tmdbId]);
 
   return (
     <article className="media-detail">
@@ -212,6 +237,22 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
                 ))}
               </ul>
             )}
+          </section>
+        ) : null}
+
+        {recommendations.length > 0 ? (
+          <section
+            className="media-detail-recommendations"
+            aria-labelledby="recommendations-heading"
+          >
+            <h2 id="recommendations-heading">More like this</h2>
+            <ul className="media-grid">
+              {recommendations.map((item) => (
+                <li key={`${item.mediaType}:${item.tmdbId}`}>
+                  <MediaCard item={item} />
+                </li>
+              ))}
+            </ul>
           </section>
         ) : null}
       </div>

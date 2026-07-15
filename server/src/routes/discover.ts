@@ -51,6 +51,40 @@ export function createDiscoverRouter(deps: DiscoverRouterDeps): Router {
     }
   });
 
+  router.get("/:mediaType/:id/recommendations", async (req, res) => {
+    const mediaType = req.params.mediaType;
+    if (mediaType !== "movie" && mediaType !== "tv") {
+      res.status(400).json({ error: "invalid media type" });
+      return;
+    }
+
+    const id = parseNumericId(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: `invalid ${mediaType} id` });
+      return;
+    }
+
+    try {
+      const results = await tmdb.recommendations(mediaType, id);
+      let statuses: ReadonlyMap<string, MediaAvailability>;
+      try {
+        statuses = await mediaStatus.getStatusMap();
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : "Seerr media status request failed";
+        console.error(`Unable to load Seerr media statuses: ${message}`);
+        statuses = new Map();
+      }
+      res.json({
+        results: results.map((item) => annotateMediaStatus(item, statuses)),
+      });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
   router.get("/movie/:id", async (req, res) => {
     const id = parseNumericId(req.params.id);
     if (id === null) {

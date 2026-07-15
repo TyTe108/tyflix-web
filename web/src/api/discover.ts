@@ -57,6 +57,10 @@ export type TrendingResponse = {
   results: MediaSummary[];
 };
 
+export type RecommendationsResponse = {
+  results: MediaSummary[];
+};
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) {
@@ -87,6 +91,16 @@ export async function fetchMovie(id: number): Promise<MovieDetail> {
 
 export async function fetchTv(id: number): Promise<TvDetail> {
   return getJson<TvDetail>(`/api/discover/tv/${id}`);
+}
+
+export async function fetchRecommendations(
+  mediaType: MediaType,
+  id: number,
+): Promise<MediaSummary[]> {
+  const body = await getJson<RecommendationsResponse>(
+    `/api/discover/${mediaType}/${id}/recommendations`,
+  );
+  return body.results;
 }
 
 export function canRequest(

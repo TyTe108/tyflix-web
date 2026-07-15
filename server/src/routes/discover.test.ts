@@ -46,6 +46,26 @@ function createStubTmdb(): DiscoverRouterDeps["tmdb"] {
         },
       ];
     },
+    async recommendations(_mediaType, _id) {
+      return [
+        {
+          tmdbId: 603,
+          mediaType: "movie",
+          title: "The Matrix",
+          year: 1999,
+          posterUrl: null,
+          overview: "",
+        },
+        {
+          tmdbId: 60059,
+          mediaType: "tv",
+          title: "Better Call Saul",
+          year: 2015,
+          posterUrl: null,
+          overview: "",
+        },
+      ];
+    },
     async movieDetail(id) {
       return {
         tmdbId: id,
@@ -128,6 +148,10 @@ describe("discovery media status annotation", () => {
     );
     const movie = await fetchLocal(app, "/api/discover/movie/603");
     const tv = await fetchLocal(app, "/api/discover/tv/1396");
+    const recommendations = await fetchLocal(
+      app,
+      "/api/discover/tv/1396/recommendations",
+    );
 
     assert.equal(trending.status, 200);
     assert.deepEqual(
@@ -150,6 +174,14 @@ describe("discovery media status annotation", () => {
     assert.equal(
       ((await tv.json()) as { mediaStatus: unknown }).mediaStatus,
       "partially_available",
+    );
+    assert.deepEqual(
+      (
+        (await recommendations.json()) as {
+          results: Array<{ mediaStatus: unknown }>;
+        }
+      ).results.map((item) => item.mediaStatus),
+      ["available", null],
     );
     assert.equal(mediaCalls, 1);
   });
@@ -176,6 +208,69 @@ describe("discovery media status annotation", () => {
         body.results.map((item) => item.mediaStatus),
         [null, null],
       );
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+});
+
+describe("GET /api/discover/:mediaType/:id/recommendations", () => {
+  it("returns null statuses when the media status provider rejects", async () => {
+    const app = createApp({
+      tmdb: createStubTmdb(),
+      mediaStatus: {
+        async getStatusMap() {
+          throw new Error("Seerr unavailable");
+        },
+        async getMediaId() {
+          return null;
+        },
+      },
+    });
+    const originalConsoleError = console.error;
+    console.error = () => undefined;
+    try {
+      const response = await fetchLocal(
+        app,
+        "/api/discover/movie/603/recommendations",
+      );
+      const body = (await response.json()) as {
+        results: Array<{ mediaStatus: unknown }>;
+      };
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(
+        body.results.map((item) => item.mediaStatus),
+        [null, null],
+      );
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
+  it("returns 502 when TMDB fails", async () => {
+    const tmdb = createStubTmdb();
+    tmdb.recommendations = async () => {
+      throw new Error("TMDB unavailable");
+    };
+    const app = createApp({
+      tmdb,
+      mediaStatus: createMediaStatusProvider({
+        async listMedia() {
+          return [];
+        },
+      }),
+    });
+    const originalConsoleError = console.error;
+    console.error = () => undefined;
+    try {
+      const response = await fetchLocal(
+        app,
+        "/api/discover/tv/1396/recommendations",
+      );
+
+      assert.equal(response.status, 502);
+      assert.deepEqual(await response.json(), { error: "TMDB unavailable" });
     } finally {
       console.error = originalConsoleError;
     }
