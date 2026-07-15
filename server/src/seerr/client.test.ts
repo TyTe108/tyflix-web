@@ -7,6 +7,12 @@ import {
   toRequestView,
   type SeerrRequest,
 } from "./client";
+import {
+  issueStatusFromCode,
+  issueTypeFromCode,
+  issueTypeToCode,
+  mapSeerrIssue,
+} from "./issues";
 
 const originalFetch = globalThis.fetch;
 
@@ -61,6 +67,37 @@ function requestRow(
       status: 1,
       ratingKey: null,
     },
+    ...overrides,
+  };
+}
+
+function issueRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 51,
+    issueType: 1,
+    status: 1,
+    createdAt: "2026-07-15T00:00:00.000Z",
+    updatedAt: "2026-07-15T01:00:00.000Z",
+    problemSeason: null,
+    problemEpisode: null,
+    media: {
+      id: 10,
+      tmdbId: 603,
+      mediaType: "movie",
+    },
+    createdBy: {
+      id: 7,
+      displayName: "Alice",
+      plexUsername: "alice",
+    },
+    comments: [
+      {
+        id: 91,
+        message: "Playback stutters",
+        createdAt: "2026-07-15T00:05:00.000Z",
+        user: { id: 7, displayName: "Alice" },
+      },
+    ],
     ...overrides,
   };
 }
@@ -194,16 +231,16 @@ describe("Seerr media client", () => {
         return jsonResponse(200, {
           pageInfo: { results: 101 },
           results: [
-            { tmdbId: 603, mediaType: "movie", status: 5, tvdbId: null },
-            { tmdbId: "bad", mediaType: "movie", status: 2 },
-            { tmdbId: 1, mediaType: "tv" },
-            { tmdbId: 2, mediaType: "person", status: 5 },
+            { id: 10, tmdbId: 603, mediaType: "movie", status: 5, tvdbId: null },
+            { id: 11, tmdbId: "bad", mediaType: "movie", status: 2 },
+            { id: 12, tmdbId: 1, mediaType: "tv" },
+            { id: 13, tmdbId: 2, mediaType: "person", status: 5 },
           ],
         });
       }
       return jsonResponse(200, {
         pageInfo: { results: 101 },
-        results: [{ tmdbId: 1396, mediaType: "tv", status: 4 }],
+        results: [{ id: 20, tmdbId: 1396, mediaType: "tv", status: 4 }],
       });
     };
 
@@ -213,8 +250,8 @@ describe("Seerr media client", () => {
     });
 
     assert.deepEqual(await seerr.listMedia(), [
-      { tmdbId: 603, mediaType: "movie", status: 5 },
-      { tmdbId: 1396, mediaType: "tv", status: 4 },
+      { id: 10, tmdbId: 603, mediaType: "movie", status: 5 },
+      { id: 20, tmdbId: 1396, mediaType: "tv", status: 4 },
     ]);
     assert.deepEqual(calls, ["?take=100&skip=0", "?take=100&skip=100"]);
   });
@@ -297,6 +334,101 @@ describe("Seerr watchlist client", () => {
       { tmdbId: 1396, mediaType: "tv", title: "Breaking Bad" },
     ]);
     assert.deepEqual(pages, ["1", "2"]);
+  });
+});
+
+describe("Seerr issues client", () => {
+  it("maps issue type and status codes", () => {
+    assert.deepEqual(
+      [1, 2, 3, 4, 5].map(issueTypeFromCode),
+      ["video", "audio", "subtitles", "other", null],
+    );
+    assert.deepEqual(
+      ["video", "audio", "subtitles", "other"].map((type) =>
+        issueTypeToCode(type as "video" | "audio" | "subtitles" | "other"),
+      ),
+      [1, 2, 3, 4],
+    );
+    assert.deepEqual(
+      [1, 2, 3].map(issueStatusFromCode),
+      ["open", "resolved", null],
+    );
+    assert.equal(mapSeerrIssue(issueRow())?.comments[0].message, "Playback stutters");
+  });
+
+  it("paginates issues, maps valid rows, and skips malformed rows", async () => {
+    const urls: URL[] = [];
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      urls.push(url);
+      if (url.searchParams.get("skip") === "0") {
+        return jsonResponse(200, {
+          pageInfo: { results: 101 },
+          results: [issueRow(), issueRow({ id: 52, issueType: 99 })],
+        });
+      }
+      return jsonResponse(200, {
+        pageInfo: { results: 101 },
+        results: [issueRow({ id: 53, status: 2, comments: undefined })],
+      });
+    };
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    const issues = await seerr.listIssues();
+
+    assert.deepEqual(issues.map((issue) => issue.id), [51, 53]);
+    assert.equal(issues[1].status, "resolved");
+    assert.deepEqual(
+      urls.map((url) => url.searchParams.get("skip")),
+      ["0", "100"],
+    );
+    for (const url of urls) {
+      assert.equal(url.searchParams.get("sort"), "added");
+      assert.equal(url.searchParams.has("createdBy"), false);
+      assert.equal(url.searchParams.has("filter"), false);
+    }
+  });
+
+  it("creates an issue with numeric type, userId, and problem location", async () => {
+    let call:
+      | { url: string; method: string | undefined; body: string | undefined }
+      | undefined;
+    globalThis.fetch = async (input, init) => {
+      call = {
+        url: String(input),
+        method: init?.method,
+        body: typeof init?.body === "string" ? init.body : undefined,
+      };
+      return jsonResponse(201, issueRow({ issueType: 3 }));
+    };
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    await seerr.createIssue({
+      issueType: "subtitles",
+      message: "Subtitle timing is wrong",
+      mediaId: 10,
+      userId: 44,
+      problemSeason: 2,
+      problemEpisode: 3,
+    });
+
+    assert.ok(call);
+    assert.equal(call.url, "http://seerr:5055/api/v1/issue");
+    assert.equal(call.method, "POST");
+    assert.deepEqual(JSON.parse(call.body ?? ""), {
+      issueType: 3,
+      message: "Subtitle timing is wrong",
+      mediaId: 10,
+      userId: 44,
+      problemSeason: 2,
+      problemEpisode: 3,
+    });
   });
 });
 

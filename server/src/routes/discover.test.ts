@@ -114,8 +114,8 @@ describe("discovery media status annotation", () => {
         async listMedia() {
           mediaCalls += 1;
           return [
-            { tmdbId: 603, mediaType: "movie", status: 5 },
-            { tmdbId: 1396, mediaType: "tv", status: 4 },
+            { id: 10, tmdbId: 603, mediaType: "movie", status: 5 },
+            { id: 20, tmdbId: 1396, mediaType: "tv", status: 4 },
           ];
         },
       }),

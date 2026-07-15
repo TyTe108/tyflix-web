@@ -8,6 +8,7 @@ import { createPlexServerClient } from "./plex/server";
 import { createAdminRouter } from "./routes/admin";
 import { createAuthRouter } from "./routes/auth";
 import { createDiscoverRouter } from "./routes/discover";
+import { createIssuesRouter } from "./routes/issues";
 import { createMeRouter } from "./routes/me";
 import { createRequestsRouter } from "./routes/requests";
 import { createWatchlistRouter } from "./routes/watchlist";
@@ -90,6 +91,12 @@ app.use(
   "/api/watchlist",
   requireAuth(config.sessionSecret),
   createWatchlistRouter({ seerr, mediaStatus }),
+);
+
+app.use(
+  "/api/issues",
+  requireAuth(config.sessionSecret),
+  createIssuesRouter({ seerr, mediaStatus }),
 );
 
 app.use(

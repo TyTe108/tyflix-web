@@ -1,3 +1,11 @@
+import {
+  issueTypeToCode,
+  mapSeerrIssue,
+  type IssueStatus,
+  type IssueType,
+  type IssueView,
+} from "./issues";
+
 export type SeerrUser = {
   id: number;
   plexId: number;
@@ -25,6 +33,7 @@ export type MediaAvailability =
   | "deleted";
 
 export type SeerrMediaListItem = {
+  id: number;
   tmdbId: number;
   mediaType: "movie" | "tv";
   status: number;
@@ -77,6 +86,15 @@ export type CreateSeerrRequestInput = {
   tmdbId: number;
   seasons?: number[];
   userId: number;
+};
+
+export type CreateSeerrIssueInput = {
+  issueType: IssueType;
+  message: string;
+  mediaId: number;
+  userId: number;
+  problemSeason?: number;
+  problemEpisode?: number;
 };
 
 export class SeerrUpstreamError extends Error {
@@ -353,6 +371,99 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return watchlist;
   }
 
+  async function listIssues(): Promise<IssueView[]> {
+    const take = 100;
+    let skip = 0;
+    let total = Number.POSITIVE_INFINITY;
+    const issues: IssueView[] = [];
+
+    while (skip < total) {
+      const body = await getJson("/api/v1/issue", {
+        take: String(take),
+        skip: String(skip),
+        sort: "added",
+      });
+
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        typeof (body as { pageInfo?: unknown }).pageInfo !== "object" ||
+        (body as { pageInfo: unknown }).pageInfo === null ||
+        !Array.isArray((body as { results?: unknown }).results)
+      ) {
+        throw new SeerrUpstreamError(
+          "Seerr /api/v1/issue returned unexpected body",
+          502,
+        );
+      }
+
+      const pageInfo = (body as { pageInfo: { results?: unknown } }).pageInfo;
+      if (typeof pageInfo.results !== "number") {
+        throw new SeerrUpstreamError(
+          "Seerr /api/v1/issue returned unexpected pageInfo",
+          502,
+        );
+      }
+
+      total = pageInfo.results;
+      const results = (body as { results: unknown[] }).results;
+      for (const row of results) {
+        const mapped = mapSeerrIssue(row);
+        if (mapped !== null) {
+          issues.push(mapped);
+        }
+      }
+
+      if (results.length === 0) {
+        break;
+      }
+      skip += take;
+    }
+
+    return issues;
+  }
+
+  async function getIssue(id: number): Promise<IssueView> {
+    const body = await getJson(`/api/v1/issue/${id}`);
+    return requireSeerrIssue(body, "getIssue");
+  }
+
+  async function createIssue(
+    input: CreateSeerrIssueInput,
+  ): Promise<IssueView> {
+    const body = await postJson("/api/v1/issue", {
+      issueType: issueTypeToCode(input.issueType),
+      message: input.message,
+      mediaId: input.mediaId,
+      userId: input.userId,
+      ...(input.problemSeason === undefined
+        ? {}
+        : { problemSeason: input.problemSeason }),
+      ...(input.problemEpisode === undefined
+        ? {}
+        : { problemEpisode: input.problemEpisode }),
+    });
+    return requireSeerrIssue(body, "createIssue");
+  }
+
+  async function addIssueComment(
+    issueId: number,
+    message: string,
+  ): Promise<IssueView> {
+    const body = await postJson(`/api/v1/issue/${issueId}/comment`, {
+      message,
+    });
+    return requireSeerrIssue(body, "addIssueComment");
+  }
+
+  async function setIssueStatus(
+    issueId: number,
+    status: IssueStatus,
+  ): Promise<IssueView> {
+    const body = await postJson(`/api/v1/issue/${issueId}/${status}`);
+    return requireSeerrIssue(body, "setIssueStatus");
+  }
+
   async function createRequest(
     input: CreateSeerrRequestInput,
   ): Promise<SeerrRequest> {
@@ -384,6 +495,11 @@ export function createSeerrClient(options: SeerrClientOptions) {
     getRequestsByUser: listUserRequests,
     listMedia,
     listUserWatchlist,
+    listIssues,
+    getIssue,
+    createIssue,
+    addIssueComment,
+    setIssueStatus,
     createRequest,
     approveRequest,
     declineRequest,
@@ -441,10 +557,13 @@ function mapSeerrMediaListItem(row: unknown): SeerrMediaListItem | null {
     return null;
   }
 
+  const id = (row as { id?: unknown }).id;
   const tmdbId = (row as { tmdbId?: unknown }).tmdbId;
   const mediaType = (row as { mediaType?: unknown }).mediaType;
   const status = (row as { status?: unknown }).status;
   if (
+    typeof id !== "number" ||
+    !Number.isFinite(id) ||
     typeof tmdbId !== "number" ||
     !Number.isFinite(tmdbId) ||
     (mediaType !== "movie" && mediaType !== "tv") ||
@@ -454,7 +573,7 @@ function mapSeerrMediaListItem(row: unknown): SeerrMediaListItem | null {
     return null;
   }
 
-  return { tmdbId, mediaType, status };
+  return { id, tmdbId, mediaType, status };
 }
 
 function mapSeerrWatchlistItem(row: unknown): SeerrWatchlistItem | null {
@@ -619,4 +738,15 @@ function requireSeerrRequest(body: unknown, operation: string): SeerrRequest {
     );
   }
   return request;
+}
+
+function requireSeerrIssue(body: unknown, operation: string): IssueView {
+  const issue = mapSeerrIssue(body);
+  if (issue === null) {
+    throw new SeerrUpstreamError(
+      `Seerr ${operation} returned unexpected body`,
+      502,
+    );
+  }
+  return issue;
 }

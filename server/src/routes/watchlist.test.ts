@@ -34,6 +34,9 @@ describe("watchlist route", () => {
         async getStatusMap() {
           return new Map([["movie:603", "available" as const]]);
         },
+        async getMediaId() {
+          return null;
+        },
       },
     });
 
@@ -67,6 +70,9 @@ describe("watchlist route", () => {
       mediaStatus: {
         async getStatusMap() {
           return new Map();
+        },
+        async getMediaId() {
+          return null;
         },
       },
     });

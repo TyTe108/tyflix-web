@@ -9,9 +9,9 @@ describe("createMediaStatusProvider", () => {
       async listMedia() {
         calls += 1;
         return [
-          { tmdbId: 603, mediaType: "movie", status: 5 },
-          { tmdbId: 1396, mediaType: "tv", status: 4 },
-          { tmdbId: 1, mediaType: "movie", status: 99 },
+          { id: 10, tmdbId: 603, mediaType: "movie", status: 5 },
+          { id: 20, tmdbId: 1396, mediaType: "tv", status: 4 },
+          { id: 30, tmdbId: 1, mediaType: "movie", status: 99 },
         ];
       },
     });
@@ -23,6 +23,8 @@ describe("createMediaStatusProvider", () => {
     assert.equal(first.get("tv:1396"), "partially_available");
     assert.equal(first.has("movie:1"), false);
     assert.equal(second, first);
+    assert.equal(await provider.getMediaId("movie", 603), 10);
+    assert.equal(await provider.getMediaId("tv", 603), null);
     assert.equal(calls, 1);
   });
 
@@ -37,6 +39,7 @@ describe("createMediaStatusProvider", () => {
     try {
       const statuses = await provider.getStatusMap();
       assert.equal(statuses.size, 0);
+      assert.equal(await provider.getMediaId("movie", 603), null);
     } finally {
       console.error = originalConsoleError;
     }
