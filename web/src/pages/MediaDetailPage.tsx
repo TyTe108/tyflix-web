@@ -270,27 +270,32 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
             <h2 id="cast-heading">Cast</h2>
             <ul className="media-cast-list">
               {currentCredits.cast.map((person) => (
-                <li className="media-cast-card" key={person.id}>
-                  {person.profileUrl !== null ? (
-                    <img
-                      className="media-cast-photo"
-                      src={person.profileUrl}
-                      alt=""
-                    />
-                  ) : (
-                    <div
-                      className="media-cast-photo media-cast-placeholder"
-                      aria-hidden="true"
-                    >
-                      {person.name.slice(0, 1)}
-                    </div>
-                  )}
-                  <span className="media-cast-name">{person.name}</span>
-                  {person.character ? (
-                    <span className="media-cast-character muted">
-                      {person.character}
-                    </span>
-                  ) : null}
+                <li key={person.id}>
+                  <Link
+                    className="media-cast-card"
+                    to={`/person/${person.id}`}
+                  >
+                    {person.profileUrl !== null ? (
+                      <img
+                        className="media-cast-photo"
+                        src={person.profileUrl}
+                        alt=""
+                      />
+                    ) : (
+                      <div
+                        className="media-cast-photo media-cast-placeholder"
+                        aria-hidden="true"
+                      >
+                        {person.name.slice(0, 1)}
+                      </div>
+                    )}
+                    <span className="media-cast-name">{person.name}</span>
+                    {person.character ? (
+                      <span className="media-cast-character muted">
+                        {person.character}
+                      </span>
+                    ) : null}
+                  </Link>
                 </li>
               ))}
             </ul>

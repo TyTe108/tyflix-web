@@ -26,6 +26,21 @@ export type CreditsResponse = {
   crew: CrewCredit[];
 };
 
+export type PersonDetail = {
+  id: number;
+  name: string;
+  biography: string;
+  profileUrl: string | null;
+  knownForDepartment: string;
+  birthday: string | null;
+  placeOfBirth: string | null;
+};
+
+export type PersonResponse = {
+  person: PersonDetail;
+  credits: MediaSummary[];
+};
+
 export type MediaSummary = {
   tmdbId: number;
   mediaType: MediaType;
@@ -159,6 +174,10 @@ export async function fetchCredits(
   return getJson<CreditsResponse>(
     `/api/discover/${mediaType}/${id}/credits`,
   );
+}
+
+export async function fetchPerson(id: number): Promise<PersonResponse> {
+  return getJson<PersonResponse>(`/api/discover/person/${id}`);
 }
 
 export function canRequest(

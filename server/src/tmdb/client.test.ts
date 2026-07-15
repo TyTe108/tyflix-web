@@ -377,6 +377,137 @@ describe("createTmdbClient().credits", () => {
   });
 });
 
+describe("createTmdbClient().person", () => {
+  it("maps person fields and handles missing profile paths", async () => {
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      assert.equal(url.searchParams.get("api_key"), "k");
+      if (url.pathname === "/3/person/3") {
+        return jsonResponse(200, {
+          id: 3,
+          name: "Harrison Ford",
+          biography: "An American actor.",
+          birthday: "1942-07-13",
+          place_of_birth: "Chicago, Illinois, USA",
+          known_for_department: "Acting",
+          profile_path: "/ford.jpg",
+        });
+      }
+      assert.equal(url.pathname, "/3/person/4");
+      return jsonResponse(200, {
+        id: 4,
+        name: "No Photo",
+        biography: null,
+        birthday: null,
+        place_of_birth: null,
+        known_for_department: "Directing",
+        profile_path: null,
+      });
+    };
+
+    const tmdb = createTmdbClient({ apiKey: "k" });
+
+    assert.deepEqual(await tmdb.person(3), {
+      id: 3,
+      name: "Harrison Ford",
+      biography: "An American actor.",
+      profileUrl: "https://image.tmdb.org/t/p/w500/ford.jpg",
+      knownForDepartment: "Acting",
+      birthday: "1942-07-13",
+      placeOfBirth: "Chicago, Illinois, USA",
+    });
+    assert.deepEqual(await tmdb.person(4), {
+      id: 4,
+      name: "No Photo",
+      biography: "",
+      profileUrl: null,
+      knownForDepartment: "Directing",
+      birthday: null,
+      placeOfBirth: null,
+    });
+  });
+});
+
+describe("createTmdbClient().personCredits", () => {
+  it("maps, deduplicates, filters Self roles, sorts, and caps at 24", async () => {
+    const movies = Array.from({ length: 26 }, (_, index) => ({
+      id: 100 + index,
+      media_type: "movie",
+      title: `Movie ${index}`,
+      release_date: "2000-01-01",
+      poster_path: index === 1 ? "/movie.jpg" : null,
+      overview: "",
+      character: "A character",
+      popularity: 26 - index,
+    }));
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/3/person/3/combined_credits");
+      return jsonResponse(200, {
+        cast: [
+          ...movies,
+          {
+            ...movies[0],
+            title: "Most Popular Version",
+            popularity: 200,
+          },
+          {
+            id: 500,
+            media_type: "tv",
+            name: "Popular Show",
+            first_air_date: "2022-01-01",
+            character: "Lead",
+            popularity: 100,
+          },
+          {
+            id: 900,
+            media_type: "tv",
+            name: "Talk Show",
+            character: "Self",
+            popularity: 999,
+          },
+          {
+            id: 901,
+            media_type: "tv",
+            name: "Interview",
+            character: "Self - Guest",
+            popularity: 998,
+          },
+          { id: 902, media_type: "person", popularity: 997 },
+        ],
+      });
+    };
+
+    const results = await createTmdbClient({ apiKey: "k" }).personCredits(3);
+
+    assert.equal(results.length, 24);
+    assert.deepEqual(results[0], {
+      tmdbId: 100,
+      mediaType: "movie",
+      title: "Most Popular Version",
+      year: 2000,
+      posterUrl: null,
+      overview: "",
+    });
+    assert.deepEqual(results[1], {
+      tmdbId: 500,
+      mediaType: "tv",
+      title: "Popular Show",
+      year: 2022,
+      posterUrl: null,
+      overview: "",
+    });
+    assert.equal(results[2].posterUrl, "https://image.tmdb.org/t/p/w500/movie.jpg");
+    assert.equal(results[results.length - 1].tmdbId, 122);
+    assert.equal(results.some((item) => item.tmdbId === 900), false);
+    assert.equal(
+      results.filter((item) => item.mediaType === "movie" && item.tmdbId === 100)
+        .length,
+      1,
+    );
+  });
+});
+
 describe("createTmdbClient().tvDetail", () => {
   it("maps seasons (excludes season 0) and reads tvdbId from external_ids", async () => {
     globalThis.fetch = async (input) => {

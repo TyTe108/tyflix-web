@@ -144,6 +144,28 @@ export function createDiscoverRouter(deps: DiscoverRouterDeps): Router {
     }
   });
 
+  router.get("/person/:id", async (req, res) => {
+    const id = parseNumericId(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: "invalid person id" });
+      return;
+    }
+
+    try {
+      const [person, credits] = await Promise.all([
+        tmdb.person(id),
+        tmdb.personCredits(id),
+      ]);
+      const statuses = await getStatusMapOrEmpty(mediaStatus);
+      res.json({
+        person,
+        credits: credits.map((item) => annotateMediaStatus(item, statuses)),
+      });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
   router.get("/movie/:id", async (req, res) => {
     const id = parseNumericId(req.params.id);
     if (id === null) {

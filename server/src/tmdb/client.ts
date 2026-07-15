@@ -68,6 +68,16 @@ export type CrewCredit = {
   profileUrl: string | null;
 };
 
+export type PersonDetail = {
+  id: number;
+  name: string;
+  biography: string;
+  profileUrl: string | null;
+  knownForDepartment: string;
+  birthday: string | null;
+  placeOfBirth: string | null;
+};
+
 export type DiscoverOptions = {
   genreId?: number;
   page?: number;
@@ -400,6 +410,109 @@ export function createTmdbClient(options: TmdbClientOptions) {
     return { cast, crew };
   }
 
+  async function person(id: number): Promise<PersonDetail> {
+    const body = await getJson(`/person/${id}`);
+    if (typeof body !== "object" || body === null) {
+      throw new TmdbUpstreamError(
+        "TMDB person returned unexpected body",
+        502,
+      );
+    }
+    const row = body as {
+      id?: unknown;
+      name?: unknown;
+      biography?: unknown;
+      profile_path?: unknown;
+      known_for_department?: unknown;
+      birthday?: unknown;
+      place_of_birth?: unknown;
+    };
+    if (
+      typeof row.id !== "number" ||
+      typeof row.name !== "string" ||
+      row.name.trim() === ""
+    ) {
+      throw new TmdbUpstreamError(
+        "TMDB person returned unexpected body",
+        502,
+      );
+    }
+
+    return {
+      id: row.id,
+      name: row.name,
+      biography: typeof row.biography === "string" ? row.biography : "",
+      profileUrl: imageUrl(row.profile_path),
+      knownForDepartment:
+        typeof row.known_for_department === "string"
+          ? row.known_for_department
+          : "",
+      birthday:
+        typeof row.birthday === "string" && row.birthday !== ""
+          ? row.birthday
+          : null,
+      placeOfBirth:
+        typeof row.place_of_birth === "string" && row.place_of_birth !== ""
+          ? row.place_of_birth
+          : null,
+    };
+  }
+
+  async function personCredits(id: number): Promise<MediaSummary[]> {
+    const body = await getJson(`/person/${id}/combined_credits`);
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      !Array.isArray((body as { cast?: unknown }).cast)
+    ) {
+      throw new TmdbUpstreamError(
+        "TMDB person credits returned unexpected body",
+        502,
+      );
+    }
+
+    const mapped = (body as { cast: unknown[] }).cast.flatMap((row) => {
+      if (typeof row !== "object" || row === null) {
+        return [];
+      }
+      const character = (row as { character?: unknown }).character;
+      if (
+        typeof character === "string" &&
+        (character === "Self" || character.startsWith("Self "))
+      ) {
+        return [];
+      }
+      const media = mapMediaSummary(row);
+      if (media === null) {
+        return [];
+      }
+      const popularity = (row as { popularity?: unknown }).popularity;
+      return [{
+        media,
+        popularity:
+          typeof popularity === "number" && Number.isFinite(popularity)
+            ? popularity
+            : 0,
+      }];
+    });
+    mapped.sort((a, b) => b.popularity - a.popularity);
+
+    const seen = new Set<string>();
+    const results: MediaSummary[] = [];
+    for (const { media } of mapped) {
+      const key = `${media.mediaType}:${media.tmdbId}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      results.push(media);
+      if (results.length === 24) {
+        break;
+      }
+    }
+    return results;
+  }
+
   async function movieDetail(id: number): Promise<MovieDetail> {
     const body = await getJson(`/movie/${id}`, {
       append_to_response: "external_ids",
@@ -508,6 +621,8 @@ export function createTmdbClient(options: TmdbClientOptions) {
     discover,
     recommendations,
     credits,
+    person,
+    personCredits,
     movieDetail,
     tvDetail,
   };

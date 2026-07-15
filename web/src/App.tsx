@@ -8,6 +8,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { MediaDetailPage } from "./pages/MediaDetailPage";
 import { MyIssuesPage } from "./pages/MyIssuesPage";
 import { MyRequestsPage } from "./pages/MyRequestsPage";
+import { PersonPage } from "./pages/PersonPage";
 import { WatchlistPage } from "./pages/WatchlistPage";
 
 export function App() {
@@ -22,6 +23,7 @@ export function App() {
         <Route path="/issues" element={<MyIssuesPage />} />
         <Route path="/issues/:id" element={<IssueDetailPage />} />
         <Route path="/media/:type/:id" element={<MediaDetailPage />} />
+        <Route path="/person/:id" element={<PersonPage />} />
       </Route>
       <Route element={<AdminRoute />}>
         <Route path="/admin" element={<AdminPage />} />
