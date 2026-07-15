@@ -91,6 +91,20 @@ export function createMeRouter(deps: MeRouterDeps): Router {
     }
   });
 
+  router.get("/quota", async (_req, res) => {
+    const session = res.locals.session as SessionPayload | undefined;
+    if (!session) {
+      res.status(401).json({ error: "not authenticated" });
+      return;
+    }
+
+    try {
+      res.json(await seerr.getUserQuota(session.seerrUserId));
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
   return router;
 }
 

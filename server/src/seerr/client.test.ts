@@ -221,6 +221,52 @@ describe("createSeerrClient().getUserByPlexId", () => {
   });
 });
 
+describe("createSeerrClient().getUserQuota", () => {
+  it("maps movie and TV quota axes", async () => {
+    globalThis.fetch = async (input) => {
+      assert.equal(
+        String(input),
+        "http://seerr:5055/api/v1/user/44/quota",
+      );
+      return jsonResponse(200, {
+        movie: { days: 7, limit: 5, used: 2, restricted: false },
+        tv: { days: 30, limit: 0, used: 0, restricted: false },
+      });
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    assert.deepEqual(await seerr.getUserQuota(44), {
+      movie: { days: 7, limit: 5, used: 2, restricted: false },
+      tv: { days: 30, limit: 0, used: 0, restricted: false },
+    });
+  });
+
+  it("throws a 502 SeerrUpstreamError for an unexpected quota shape", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse(200, {
+        movie: { days: 7, limit: "five", used: 2, restricted: false },
+        tv: { days: 30, limit: 0, used: 0, restricted: false },
+      });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    await assert.rejects(
+      () => seerr.getUserQuota(44),
+      (err: unknown) =>
+        err instanceof SeerrUpstreamError &&
+        err.status === 502 &&
+        err.message.includes("unexpected body"),
+    );
+  });
+});
+
 describe("Seerr media client", () => {
   it("paginates media, maps valid rows, and skips malformed rows", async () => {
     const calls: string[] = [];

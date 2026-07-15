@@ -7,6 +7,11 @@ import {
   requestStatusBadgeClass,
   type RequestView,
 } from "../api/requests";
+import {
+  fetchMyQuota,
+  formatQuota,
+  type MyQuota,
+} from "../api/me";
 import { useAuth } from "../auth/AuthContext";
 
 type LoadStatus = "loading" | "ready" | "error";
@@ -17,6 +22,7 @@ export function MyRequestsPage() {
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [quota, setQuota] = useState<MyQuota | null | undefined>(undefined);
 
   const retry = useCallback(() => {
     setReloadKey((n) => n + 1);
@@ -51,6 +57,29 @@ export function MyRequestsPage() {
     };
   }, [reloadKey]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    void fetchMyQuota()
+      .then((value) => {
+        if (!cancelled) {
+          setQuota(value);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setQuota(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const movieQuota = quota ? formatQuota(quota.movie) : null;
+  const tvQuota = quota ? formatQuota(quota.tv) : null;
+
   return (
     <main className="page page-wide">
       <header className="row">
@@ -70,6 +99,22 @@ export function MyRequestsPage() {
           </button>
         </div>
       </header>
+
+      {quota === undefined ? (
+        <p className="muted">Loading request quota…</p>
+      ) : quota ? (
+        <section aria-labelledby="request-quota-heading">
+          <h2 id="request-quota-heading">Request quota</h2>
+          <div className="muted">
+            <div className={movieQuota?.restricted ? "error" : undefined}>
+              Movies: {movieQuota?.text}
+            </div>
+            <div className={tvQuota?.restricted ? "error" : undefined}>
+              TV: {tvQuota?.text}
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       <section aria-labelledby="my-requests-heading">
         <h2 id="my-requests-heading" className="visually-hidden">

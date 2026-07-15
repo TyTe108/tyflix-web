@@ -45,6 +45,18 @@ export type SeerrWatchlistItem = {
   title: string;
 };
 
+export type QuotaAxis = {
+  days: number;
+  limit: number;
+  used: number;
+  restricted: boolean;
+};
+
+export type UserQuota = {
+  movie: QuotaAxis;
+  tv: QuotaAxis;
+};
+
 export type SeerrRequestSeason = {
   seasonNumber: number;
 };
@@ -282,6 +294,27 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return listRequests(`/api/v1/user/${userId}/requests`);
   }
 
+  async function getUserQuota(userId: number): Promise<UserQuota> {
+    const body = await getJson(`/api/v1/user/${userId}/quota`);
+    if (typeof body !== "object" || body === null) {
+      throw new SeerrUpstreamError(
+        "Seerr getUserQuota returned unexpected body",
+        502,
+      );
+    }
+
+    const movie = mapQuotaAxis((body as { movie?: unknown }).movie);
+    const tv = mapQuotaAxis((body as { tv?: unknown }).tv);
+    if (movie === null || tv === null) {
+      throw new SeerrUpstreamError(
+        "Seerr getUserQuota returned unexpected body",
+        502,
+      );
+    }
+
+    return { movie, tv };
+  }
+
   async function listMedia(): Promise<SeerrMediaListItem[]> {
     const take = 100;
     let skip = 0;
@@ -494,6 +527,7 @@ export function createSeerrClient(options: SeerrClientOptions) {
     listAllRequests,
     listUserRequests,
     getRequestsByUser: listUserRequests,
+    getUserQuota,
     listMedia,
     listUserWatchlist,
     listIssues,
@@ -595,6 +629,30 @@ function mapSeerrWatchlistItem(row: unknown): SeerrWatchlistItem | null {
   }
 
   return { tmdbId, mediaType, title };
+}
+
+function mapQuotaAxis(row: unknown): QuotaAxis | null {
+  if (typeof row !== "object" || row === null) {
+    return null;
+  }
+
+  const days = (row as { days?: unknown }).days;
+  const limit = (row as { limit?: unknown }).limit;
+  const used = (row as { used?: unknown }).used;
+  const restricted = (row as { restricted?: unknown }).restricted;
+  if (
+    typeof days !== "number" ||
+    !Number.isFinite(days) ||
+    typeof limit !== "number" ||
+    !Number.isFinite(limit) ||
+    typeof used !== "number" ||
+    !Number.isFinite(used) ||
+    typeof restricted !== "boolean"
+  ) {
+    return null;
+  }
+
+  return { days, limit, used, restricted };
 }
 
 function mapSeerrUser(row: unknown): SeerrUser | null {
