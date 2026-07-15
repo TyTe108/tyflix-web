@@ -140,6 +140,16 @@ export async function fetchTrending(): Promise<MediaSummary[]> {
   return body.results;
 }
 
+export async function fetchUpcoming(
+  mediaType: MediaType,
+): Promise<MediaSummary[]> {
+  const params = new URLSearchParams({ mediaType });
+  const body = await getJson<TrendingResponse>(
+    `/api/discover/upcoming?${params}`,
+  );
+  return body.results;
+}
+
 export async function fetchGenres(mediaType: MediaType): Promise<Genre[]> {
   const params = new URLSearchParams({ mediaType });
   const body = await getJson<GenresResponse>(`/api/discover/genres?${params}`);

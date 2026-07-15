@@ -134,6 +134,43 @@ describe("mapMediaSummary", () => {
   });
 });
 
+describe("createTmdbClient().upcoming", () => {
+  it("uses the media endpoint, supplies the media type, and caps at 20", async () => {
+    const calls: string[] = [];
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      calls.push(url.pathname);
+      const mediaType = url.pathname.includes("/movie/") ? "movie" : "tv";
+      return jsonResponse(200, {
+        results: Array.from({ length: 22 }, (_, index) => ({
+          id: 100 + index,
+          ...(mediaType === "movie"
+            ? { title: `Movie ${index}`, release_date: "2026-01-01" }
+            : { name: `Show ${index}`, first_air_date: "2026-01-01" }),
+          poster_path: index === 0 ? "/poster.jpg" : null,
+          overview: "",
+        })),
+      });
+    };
+
+    const tmdb = createTmdbClient({ apiKey: "k" });
+    const movies = await tmdb.upcoming("movie");
+    const tv = await tmdb.upcoming("tv");
+
+    assert.deepEqual(calls, ["/3/movie/upcoming", "/3/tv/on_the_air"]);
+    assert.equal(movies.length, 20);
+    assert.equal(tv.length, 20);
+    assert.equal(movies[0].mediaType, "movie");
+    assert.equal(movies[0].title, "Movie 0");
+    assert.equal(tv[0].mediaType, "tv");
+    assert.equal(tv[0].title, "Show 0");
+    assert.equal(
+      tv[0].posterUrl,
+      "https://image.tmdb.org/t/p/w500/poster.jpg",
+    );
+  });
+});
+
 describe("createTmdbClient().genres", () => {
   it("maps valid genres and skips malformed rows", async () => {
     globalThis.fetch = async (input) => {

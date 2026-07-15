@@ -208,6 +208,36 @@ export function createTmdbClient(options: TmdbClientOptions) {
     return results;
   }
 
+  async function upcoming(
+    mediaType: "movie" | "tv",
+  ): Promise<MediaSummary[]> {
+    const path =
+      mediaType === "movie" ? "/movie/upcoming" : "/tv/on_the_air";
+    const body = await getJson(path);
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      !Array.isArray((body as { results?: unknown }).results)
+    ) {
+      throw new TmdbUpstreamError(
+        "TMDB upcoming returned unexpected body",
+        502,
+      );
+    }
+
+    const results: MediaSummary[] = [];
+    for (const row of (body as { results: unknown[] }).results) {
+      const mapped = mapMediaSummary(row, mediaType);
+      if (mapped !== null) {
+        results.push(mapped);
+      }
+      if (results.length === 20) {
+        break;
+      }
+    }
+    return results;
+  }
+
   async function genres(mediaType: "movie" | "tv"): Promise<Genre[]> {
     const body = await getJson(`/genre/${mediaType}/list`);
     if (
@@ -713,6 +743,7 @@ export function createTmdbClient(options: TmdbClientOptions) {
   return {
     search,
     trending,
+    upcoming,
     genres,
     discover,
     recommendations,

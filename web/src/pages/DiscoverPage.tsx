@@ -5,6 +5,7 @@ import {
   fetchGenres,
   fetchStudios,
   fetchTrending,
+  fetchUpcoming,
   searchMedia,
   type Genre,
   type MediaSummary,
@@ -16,6 +17,7 @@ import { MediaCard } from "../components/MediaCard";
 
 type LoadStatus = "loading" | "ready" | "error";
 type BrowseMediaType = "all" | MediaType;
+type BrowseMode = "popular" | "upcoming";
 
 const SEARCH_DEBOUNCE_MS = 400;
 
@@ -28,6 +30,7 @@ export function DiscoverPage() {
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [mediaType, setMediaType] = useState<BrowseMediaType>("all");
+  const [browseMode, setBrowseMode] = useState<BrowseMode>("popular");
   const [genres, setGenres] = useState<Genre[]>([]);
   const [selectedGenreId, setSelectedGenreId] = useState<number | null>(null);
   const [genresLoading, setGenresLoading] = useState(false);
@@ -108,17 +111,19 @@ export function DiscoverPage() {
         ? searchMedia(debouncedQuery).then((body) => body.results)
         : mediaType === "all"
           ? fetchTrending()
-          : browseMedia(mediaType, {
-              ...(selectedGenreId !== null
-                ? { genreId: selectedGenreId }
-                : {}),
-              ...(mediaType === "movie" && selectedSourceId !== null
-                ? { companyId: selectedSourceId }
-                : {}),
-              ...(mediaType === "tv" && selectedSourceId !== null
-                ? { networkId: selectedSourceId }
-                : {}),
-            }).then((body) => body.results);
+          : browseMode === "upcoming"
+            ? fetchUpcoming(mediaType)
+            : browseMedia(mediaType, {
+                ...(selectedGenreId !== null
+                  ? { genreId: selectedGenreId }
+                  : {}),
+                ...(mediaType === "movie" && selectedSourceId !== null
+                  ? { companyId: selectedSourceId }
+                  : {}),
+                ...(mediaType === "tv" && selectedSourceId !== null
+                  ? { networkId: selectedSourceId }
+                  : {}),
+              }).then((body) => body.results);
 
     void load
       .then((items) => {
@@ -145,6 +150,7 @@ export function DiscoverPage() {
   }, [
     debouncedQuery,
     mediaType,
+    browseMode,
     selectedGenreId,
     selectedSourceId,
     reloadKey,
@@ -163,13 +169,16 @@ export function DiscoverPage() {
       ? `Results for “${debouncedQuery}”`
       : mediaType === "all"
         ? "Trending this week"
-        : selectedSource
-          ? `Popular ${selectedSource.name} ${mediaTypeLabel}`
-          : `Popular ${selectedGenre ? `${selectedGenre.name} ` : ""}${mediaTypeLabel}`;
+        : browseMode === "upcoming"
+          ? `Upcoming ${mediaTypeLabel}`
+          : selectedSource
+            ? `Popular ${selectedSource.name} ${mediaTypeLabel}`
+            : `Popular ${selectedGenre ? `${selectedGenre.name} ` : ""}${mediaTypeLabel}`;
   const showFilters = query.trim() === "" && debouncedQuery === "";
 
   function selectMediaType(nextMediaType: BrowseMediaType) {
     setMediaType(nextMediaType);
+    setBrowseMode("popular");
     setSelectedGenreId(null);
     setSelectedSourceId(null);
   }
@@ -231,6 +240,31 @@ export function DiscoverPage() {
           </div>
 
           {mediaType !== "all" ? (
+            <div className="discover-media-toggle" aria-label="Browse mode">
+              {(
+                [
+                  ["popular", "Popular"],
+                  ["upcoming", "Upcoming"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={
+                    browseMode === value
+                      ? "discover-filter-button active"
+                      : "discover-filter-button"
+                  }
+                  aria-pressed={browseMode === value}
+                  onClick={() => setBrowseMode(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          {mediaType !== "all" && browseMode === "popular" ? (
             <>
               <label className="discover-genre-filter">
                 <span>Genre</span>

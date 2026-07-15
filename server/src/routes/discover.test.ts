@@ -47,6 +47,18 @@ function createStubTmdb(): DiscoverRouterDeps["tmdb"] {
         },
       ];
     },
+    async upcoming(mediaType) {
+      return [
+        {
+          tmdbId: mediaType === "movie" ? 123 : 456,
+          mediaType,
+          title: mediaType === "movie" ? "Upcoming Movie" : "Upcoming Show",
+          year: 2026,
+          posterUrl: null,
+          overview: "",
+        },
+      ];
+    },
     async genres(mediaType) {
       return mediaType === "movie"
         ? [{ id: 28, name: "Action" }]
@@ -451,6 +463,76 @@ describe("GET /api/discover/studios", () => {
       studios: STUDIOS,
       networks: NETWORKS,
     });
+  });
+});
+
+describe("GET /api/discover/upcoming", () => {
+  it("returns upcoming media with annotated statuses", async () => {
+    const app = createApp({
+      tmdb: createStubTmdb(),
+      mediaStatus: createMediaStatusProvider({
+        async listMedia() {
+          return [{ id: 10, tmdbId: 123, mediaType: "movie", status: 5 }];
+        },
+      }),
+    });
+
+    const response = await fetchLocal(
+      app,
+      "/api/discover/upcoming?mediaType=movie",
+    );
+    const body = (await response.json()) as {
+      results: Array<{ mediaStatus: unknown }>;
+    };
+
+    assert.equal(response.status, 200);
+    assert.equal(body.results[0].mediaStatus, "available");
+  });
+
+  it("validates media type", async () => {
+    const app = createApp({
+      tmdb: createStubTmdb(),
+      mediaStatus: createMediaStatusProvider({
+        async listMedia() {
+          return [];
+        },
+      }),
+    });
+
+    const response = await fetchLocal(
+      app,
+      "/api/discover/upcoming?mediaType=person",
+    );
+
+    assert.equal(response.status, 400);
+  });
+
+  it("returns 502 when TMDB fails", async () => {
+    const tmdb = createStubTmdb();
+    tmdb.upcoming = async () => {
+      throw new Error("TMDB unavailable");
+    };
+    const app = createApp({
+      tmdb,
+      mediaStatus: createMediaStatusProvider({
+        async listMedia() {
+          return [];
+        },
+      }),
+    });
+    const originalConsoleError = console.error;
+    console.error = () => undefined;
+    try {
+      const response = await fetchLocal(
+        app,
+        "/api/discover/upcoming?mediaType=tv",
+      );
+
+      assert.equal(response.status, 502);
+      assert.deepEqual(await response.json(), { error: "TMDB unavailable" });
+    } finally {
+      console.error = originalConsoleError;
+    }
   });
 });
 

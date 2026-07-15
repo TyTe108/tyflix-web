@@ -52,6 +52,24 @@ export function createDiscoverRouter(deps: DiscoverRouterDeps): Router {
     }
   });
 
+  router.get("/upcoming", async (req, res) => {
+    const mediaType = req.query.mediaType;
+    if (mediaType !== "movie" && mediaType !== "tv") {
+      res.status(400).json({ error: "invalid media type" });
+      return;
+    }
+
+    try {
+      const results = await tmdb.upcoming(mediaType);
+      const statuses = await getStatusMapOrEmpty(mediaStatus);
+      res.json({
+        results: results.map((item) => annotateMediaStatus(item, statuses)),
+      });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
   router.get("/genres", async (req, res) => {
     const mediaType = req.query.mediaType;
     if (mediaType !== "movie" && mediaType !== "tv") {
