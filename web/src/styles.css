@@ -1131,12 +1131,23 @@ a {
 }
 
 .my-issues-item {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
   padding: 0.85rem 0;
   border-bottom: 1px solid rgba(31, 61, 45, 0.1);
 }
 
 .my-issues-item:last-child {
   border-bottom: 0;
+}
+
+.my-issues-poster {
+  width: 2.75rem;
+  aspect-ratio: 2 / 3;
+  flex: 0 0 auto;
+  border-radius: 0.25rem;
+  object-fit: cover;
 }
 
 .my-issues-row {

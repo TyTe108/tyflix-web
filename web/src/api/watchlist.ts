@@ -5,6 +5,7 @@ export type WatchlistItem = {
   tmdbId: number;
   mediaType: MediaType;
   title: string;
+  posterUrl: string | null;
   mediaStatus: MediaAvailabilityStatus | null;
 };
 

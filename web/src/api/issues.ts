@@ -13,6 +13,8 @@ export type IssueView = {
     id: number;
     tmdbId: number;
     mediaType: MediaType;
+    title?: string | null;
+    posterUrl?: string | null;
   };
   createdBy: {
     id: number;

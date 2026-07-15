@@ -15,6 +15,7 @@ import { createWatchlistRouter } from "./routes/watchlist";
 import { createSeerrClient } from "./seerr/client";
 import { createMediaStatusProvider } from "./seerr/mediaStatusProvider";
 import { createTmdbClient } from "./tmdb/client";
+import { createMediaEnrichment } from "./tmdb/enrichment";
 
 loadLocalEnvFile();
 
@@ -51,6 +52,7 @@ const dashboard = createDashboardClient({
 const tmdb = createTmdbClient({
   apiKey: config.tmdbApiKey,
 });
+const mediaEnrichment = createMediaEnrichment(tmdb);
 
 const app = express();
 app.use(express.json());
@@ -90,13 +92,13 @@ app.use(
 app.use(
   "/api/watchlist",
   requireAuth(config.sessionSecret),
-  createWatchlistRouter({ seerr, mediaStatus }),
+  createWatchlistRouter({ seerr, mediaStatus, mediaEnrichment }),
 );
 
 app.use(
   "/api/issues",
   requireAuth(config.sessionSecret),
-  createIssuesRouter({ seerr, mediaStatus }),
+  createIssuesRouter({ seerr, mediaStatus, mediaEnrichment }),
 );
 
 app.use(

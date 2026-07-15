@@ -98,24 +98,34 @@ export function MyIssuesPage() {
           <ul className="my-issues-list">
             {issues.map((issue) => (
               <li key={issue.id} className="my-issues-item">
-                <div className="my-issues-row">
-                  <Link
-                    to={`/media/${issue.media.mediaType}/${issue.media.tmdbId}`}
-                    className="my-issues-title"
-                  >
-                    TMDB #{issue.media.tmdbId}
-                  </Link>
-                  <span className="stats-tag">
-                    {issue.media.mediaType === "tv" ? "TV" : "Movie"}
-                  </span>
-                  <span>{issueTypeLabel(issue.issueType)}</span>
-                  <span className={issueStatusBadgeClass(issue.status)}>
-                    {issueStatusLabel(issue.status)}
-                  </span>
+                {issue.media.posterUrl ? (
+                  <img
+                    className="my-issues-poster"
+                    src={issue.media.posterUrl}
+                    alt=""
+                    loading="lazy"
+                  />
+                ) : null}
+                <div>
+                  <div className="my-issues-row">
+                    <Link
+                      to={`/media/${issue.media.mediaType}/${issue.media.tmdbId}`}
+                      className="my-issues-title"
+                    >
+                      {issue.media.title ?? `TMDB #${issue.media.tmdbId}`}
+                    </Link>
+                    <span className="stats-tag">
+                      {issue.media.mediaType === "tv" ? "TV" : "Movie"}
+                    </span>
+                    <span>{issueTypeLabel(issue.issueType)}</span>
+                    <span className={issueStatusBadgeClass(issue.status)}>
+                      {issueStatusLabel(issue.status)}
+                    </span>
+                  </div>
+                  <p className="my-issues-meta muted">
+                    Reported {formatIssueDate(issue.createdAt)}
+                  </p>
                 </div>
-                <p className="my-issues-meta muted">
-                  Reported {formatIssueDate(issue.createdAt)}
-                </p>
               </li>
             ))}
           </ul>

@@ -95,7 +95,7 @@ export function WatchlistPage() {
             {items.map((item) => (
               <li key={`${item.mediaType}:${item.tmdbId}`}>
                 <MediaCard
-                  item={{ ...item, posterUrl: null, year: null }}
+                  item={{ ...item, year: null }}
                 />
               </li>
             ))}

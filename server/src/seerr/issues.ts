@@ -23,6 +23,8 @@ export type IssueView = {
     id: number;
     tmdbId: number;
     mediaType: "movie" | "tv";
+    title: string | null;
+    posterUrl: string | null;
   };
   createdBy: {
     id: number;
@@ -138,6 +140,8 @@ function mapMedia(value: unknown): IssueView["media"] | null {
     id: row.id,
     tmdbId: row.tmdbId,
     mediaType: row.mediaType,
+    title: null,
+    posterUrl: null,
   };
 }
 

@@ -7,6 +7,10 @@ import type {
 } from "../seerr/issues";
 import type { MediaStatusProvider } from "../seerr/mediaStatusProvider";
 import { isAdmin, type SessionPayload } from "../session";
+import {
+  mediaEnrichmentKey,
+  type MediaEnrichment,
+} from "../tmdb/enrichment";
 
 export type IssuesRouterDeps = {
   seerr: Pick<
@@ -18,10 +22,11 @@ export type IssuesRouterDeps = {
     | "setIssueStatus"
   >;
   mediaStatus: MediaStatusProvider;
+  mediaEnrichment: MediaEnrichment;
 };
 
 export function createIssuesRouter(deps: IssuesRouterDeps): Router {
-  const { seerr, mediaStatus } = deps;
+  const { seerr, mediaStatus, mediaEnrichment } = deps;
   const router = Router();
 
   router.get("/", async (_req, res) => {
@@ -32,10 +37,11 @@ export function createIssuesRouter(deps: IssuesRouterDeps): Router {
 
     try {
       const all = await seerr.listIssues();
+      const mine = all.filter(
+        (issue) => issue.createdBy.id === session.seerrUserId,
+      );
       res.json({
-        results: all.filter(
-          (issue) => issue.createdBy.id === session.seerrUserId,
-        ),
+        results: await enrichIssues(mine, mediaEnrichment),
       });
     } catch (err) {
       respondUpstreamError(res, err);
@@ -53,7 +59,10 @@ export function createIssuesRouter(deps: IssuesRouterDeps): Router {
     }
 
     try {
-      res.json({ results: await seerr.listIssues() });
+      const issues = await seerr.listIssues();
+      res.json({
+        results: await enrichIssues(issues, mediaEnrichment),
+      });
     } catch (err) {
       respondUpstreamError(res, err);
     }
@@ -114,7 +123,8 @@ export function createIssuesRouter(deps: IssuesRouterDeps): Router {
         res.status(403).json({ error: "forbidden" });
         return;
       }
-      res.json(issue);
+      const [enriched] = await enrichIssues([issue], mediaEnrichment);
+      res.json(enriched);
     } catch (err) {
       respondUpstreamError(res, err);
     }
@@ -292,6 +302,28 @@ function canAccessIssue(
     issue.createdBy.id === session.seerrUserId ||
     isAdmin(session.permissions)
   );
+}
+
+async function enrichIssues(
+  issues: IssueView[],
+  mediaEnrichment: MediaEnrichment,
+): Promise<IssueView[]> {
+  const enriched = await mediaEnrichment.enrich(
+    issues.map((issue) => issue.media),
+  );
+  return issues.map((issue) => {
+    const media = enriched.get(mediaEnrichmentKey(issue.media));
+    return media === undefined
+      ? issue
+      : {
+          ...issue,
+          media: {
+            ...issue.media,
+            title: media.title,
+            posterUrl: media.posterUrl,
+          },
+        };
+  });
 }
 
 function respondUpstreamError(res: Response, err: unknown): void {

@@ -38,6 +38,33 @@ describe("watchlist route", () => {
           return null;
         },
       },
+      mediaEnrichment: {
+        async enrich(items) {
+          assert.deepEqual(items, [
+            {
+              tmdbId: 603,
+              mediaType: "movie",
+              title: "The Matrix",
+              mediaStatus: "available",
+            },
+            {
+              tmdbId: 1396,
+              mediaType: "tv",
+              title: "Breaking Bad",
+              mediaStatus: null,
+            },
+          ]);
+          return new Map([
+            [
+              "movie:603",
+              {
+                title: "TMDB title is not used",
+                posterUrl: "https://image.tmdb.org/t/p/w500/matrix.jpg",
+              },
+            ],
+          ]);
+        },
+      },
     });
 
     const response = await fetchLocal(app, "/api/watchlist");
@@ -49,12 +76,14 @@ describe("watchlist route", () => {
           mediaType: "movie",
           title: "The Matrix",
           mediaStatus: "available",
+          posterUrl: "https://image.tmdb.org/t/p/w500/matrix.jpg",
         },
         {
           tmdbId: 1396,
           mediaType: "tv",
           title: "Breaking Bad",
           mediaStatus: null,
+          posterUrl: null,
         },
       ],
     });
@@ -73,6 +102,11 @@ describe("watchlist route", () => {
         },
         async getMediaId() {
           return null;
+        },
+      },
+      mediaEnrichment: {
+        async enrich() {
+          return new Map();
         },
       },
     });

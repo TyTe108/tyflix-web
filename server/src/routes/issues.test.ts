@@ -5,6 +5,7 @@ import { requireAuth } from "../middleware/auth";
 import type { CreateSeerrIssueInput } from "../seerr/client";
 import type { IssueStatus, IssueView } from "../seerr/issues";
 import { issueSession, SESSION_COOKIE_NAME } from "../session";
+import { createMediaEnrichment } from "../tmdb/enrichment";
 import {
   createIssuesRouter,
   type IssuesRouterDeps,
@@ -54,6 +55,8 @@ function issueView(overrides: Partial<IssueView> = {}): IssueView {
       id: 10,
       tmdbId: 603,
       mediaType: "movie",
+      title: null,
+      posterUrl: null,
     },
     createdBy: {
       id: 7,
@@ -114,6 +117,11 @@ function createStubSeerr(
 function createApp(
   seerr: IssuesRouterDeps["seerr"],
   mediaId: number | null = 10,
+  mediaEnrichment: IssuesRouterDeps["mediaEnrichment"] = {
+    async enrich() {
+      return new Map();
+    },
+  },
 ): express.Express {
   const app = express();
   app.use(express.json());
@@ -130,6 +138,7 @@ function createApp(
           return mediaType === "movie" && tmdbId === 603 ? mediaId : null;
         },
       },
+      mediaEnrichment,
     }),
   );
   return app;
@@ -302,6 +311,92 @@ describe("issue routes", () => {
       [51, 52],
     );
     assert.equal(calls, 2);
+  });
+
+  it("enriches media on personal, all-users, and detail responses", async () => {
+    const issue = issueView();
+    const seerr = createStubSeerr({
+      async listIssues() {
+        return [issue];
+      },
+      async getIssue() {
+        return issue;
+      },
+    });
+    const mediaEnrichment: IssuesRouterDeps["mediaEnrichment"] = {
+      async enrich(items) {
+        assert.ok(items.some((item) => item.tmdbId === 603));
+        return new Map([
+          [
+            "movie:603",
+            {
+              title: "The Matrix",
+              posterUrl: "https://image.tmdb.org/t/p/w500/matrix.jpg",
+            },
+          ],
+        ]);
+      },
+    };
+    const app = createApp(seerr, 10, mediaEnrichment);
+
+    const mine = await fetchLocal(app, "GET", "/api/issues", {
+      cookie: sessionCookie(),
+    });
+    const all = await fetchLocal(app, "GET", "/api/issues/all", {
+      cookie: sessionCookie(ADMIN_PERMISSION),
+    });
+    const detail = await fetchLocal(app, "GET", "/api/issues/51", {
+      cookie: sessionCookie(),
+    });
+
+    assert.equal(mine.status, 200);
+    assert.equal(all.status, 200);
+    assert.equal(detail.status, 200);
+    const expectedMedia = {
+      id: 10,
+      tmdbId: 603,
+      mediaType: "movie",
+      title: "The Matrix",
+      posterUrl: "https://image.tmdb.org/t/p/w500/matrix.jpg",
+    };
+    assert.deepEqual(
+      ((await mine.json()) as { results: IssueView[] }).results[0].media,
+      expectedMedia,
+    );
+    assert.deepEqual(
+      ((await all.json()) as { results: IssueView[] }).results[0].media,
+      expectedMedia,
+    );
+    assert.deepEqual(
+      ((await detail.json()) as IssueView).media,
+      expectedMedia,
+    );
+  });
+
+  it("returns issue media with null enrichment when TMDB fails", async () => {
+    const mediaEnrichment = createMediaEnrichment({
+      async movieDetail() {
+        throw new Error("TMDB unavailable");
+      },
+      async tvDetail() {
+        throw new Error("TMDB unavailable");
+      },
+    });
+    const response = await fetchLocal(
+      createApp(createStubSeerr(), 10, mediaEnrichment),
+      "GET",
+      "/api/issues/51",
+      { cookie: sessionCookie() },
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(((await response.json()) as IssueView).media, {
+      id: 10,
+      tmdbId: 603,
+      mediaType: "movie",
+      title: null,
+      posterUrl: null,
+    });
   });
 });
 
