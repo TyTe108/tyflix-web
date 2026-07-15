@@ -134,6 +134,83 @@ describe("mapMediaSummary", () => {
   });
 });
 
+describe("createTmdbClient().genres", () => {
+  it("maps valid genres and skips malformed rows", async () => {
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/3/genre/movie/list");
+      return jsonResponse(200, {
+        genres: [
+          { id: 28, name: "Action" },
+          { id: "35", name: "Comedy" },
+          { id: 18 },
+          null,
+          { id: 99, name: "Documentary" },
+        ],
+      });
+    };
+
+    const results = await createTmdbClient({ apiKey: "k" }).genres("movie");
+
+    assert.deepEqual(results, [
+      { id: 28, name: "Action" },
+      { id: 99, name: "Documentary" },
+    ]);
+  });
+});
+
+describe("createTmdbClient().discover", () => {
+  it("maps implied media type, pagination, and optional genre query", async () => {
+    const calls: URL[] = [];
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      calls.push(url);
+      return jsonResponse(200, {
+        page: Number(url.searchParams.get("page")),
+        total_pages: 12,
+        results: [
+          {
+            id: 1396,
+            name: "Breaking Bad",
+            first_air_date: "2008-01-20",
+            poster_path: null,
+            overview: "Chemistry teacher goes dark.",
+          },
+        ],
+      });
+    };
+
+    const tmdb = createTmdbClient({ apiKey: "k" });
+    const withGenre = await tmdb.discover("tv", {
+      genreId: 18,
+      page: 3,
+    });
+    await tmdb.discover("tv");
+
+    assert.equal(calls[0].pathname, "/3/discover/tv");
+    assert.equal(calls[0].searchParams.get("sort_by"), "popularity.desc");
+    assert.equal(calls[0].searchParams.get("include_adult"), "false");
+    assert.equal(calls[0].searchParams.get("with_genres"), "18");
+    assert.equal(calls[0].searchParams.get("page"), "3");
+    assert.equal(calls[1].searchParams.has("with_genres"), false);
+    assert.equal(calls[1].searchParams.get("page"), "1");
+    assert.deepEqual(withGenre, {
+      page: 3,
+      totalPages: 12,
+      results: [
+        {
+          tmdbId: 1396,
+          mediaType: "tv",
+          title: "Breaking Bad",
+          year: 2008,
+          posterUrl: null,
+          overview: "Chemistry teacher goes dark.",
+        },
+      ],
+    });
+  });
+});
+
 describe("createTmdbClient().recommendations", () => {
   it("maps recommendation media types, excludes the source, and caps at 20", async () => {
     const rows = [

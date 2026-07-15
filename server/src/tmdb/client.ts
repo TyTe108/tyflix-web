@@ -49,6 +49,16 @@ export type SearchResult = {
   results: MediaSummary[];
 };
 
+export type Genre = {
+  id: number;
+  name: string;
+};
+
+export type DiscoverOptions = {
+  genreId?: number;
+  page?: number;
+};
+
 export class TmdbUpstreamError extends Error {
   readonly status: number;
 
@@ -157,6 +167,75 @@ export function createTmdbClient(options: TmdbClientOptions) {
       }
     }
     return results;
+  }
+
+  async function genres(mediaType: "movie" | "tv"): Promise<Genre[]> {
+    const body = await getJson(`/genre/${mediaType}/list`);
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      !Array.isArray((body as { genres?: unknown }).genres)
+    ) {
+      throw new TmdbUpstreamError(
+        "TMDB genres returned unexpected body",
+        502,
+      );
+    }
+
+    const results: Genre[] = [];
+    for (const row of (body as { genres: unknown[] }).genres) {
+      if (typeof row !== "object" || row === null) {
+        continue;
+      }
+      const id = (row as { id?: unknown }).id;
+      const name = (row as { name?: unknown }).name;
+      if (typeof id === "number" && typeof name === "string") {
+        results.push({ id, name });
+      }
+    }
+    return results;
+  }
+
+  async function discover(
+    mediaType: "movie" | "tv",
+    options: DiscoverOptions = {},
+  ): Promise<SearchResult> {
+    const query: Record<string, string> = {
+      sort_by: "popularity.desc",
+      include_adult: "false",
+      page: String(options.page ?? 1),
+    };
+    if (options.genreId !== undefined) {
+      query.with_genres = String(options.genreId);
+    }
+
+    const body = await getJson(`/discover/${mediaType}`, query);
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      typeof (body as { page?: unknown }).page !== "number" ||
+      typeof (body as { total_pages?: unknown }).total_pages !== "number" ||
+      !Array.isArray((body as { results?: unknown }).results)
+    ) {
+      throw new TmdbUpstreamError(
+        "TMDB discover returned unexpected body",
+        502,
+      );
+    }
+
+    const results: MediaSummary[] = [];
+    for (const row of (body as { results: unknown[] }).results) {
+      const mapped = mapMediaSummary(row, mediaType);
+      if (mapped !== null) {
+        results.push(mapped);
+      }
+    }
+
+    return {
+      page: (body as { page: number }).page,
+      totalPages: (body as { total_pages: number }).total_pages,
+      results,
+    };
   }
 
   async function recommendations(
@@ -305,7 +384,15 @@ export function createTmdbClient(options: TmdbClientOptions) {
     };
   }
 
-  return { search, trending, recommendations, movieDetail, tvDetail };
+  return {
+    search,
+    trending,
+    genres,
+    discover,
+    recommendations,
+    movieDetail,
+    tvDetail,
+  };
 }
 
 export type TmdbClient = ReturnType<typeof createTmdbClient>;

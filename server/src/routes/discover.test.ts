@@ -46,6 +46,27 @@ function createStubTmdb(): DiscoverRouterDeps["tmdb"] {
         },
       ];
     },
+    async genres(mediaType) {
+      return mediaType === "movie"
+        ? [{ id: 28, name: "Action" }]
+        : [{ id: 18, name: "Drama" }];
+    },
+    async discover(mediaType, options) {
+      return {
+        page: options?.page ?? 1,
+        totalPages: 4,
+        results: [
+          {
+            tmdbId: mediaType === "movie" ? 603 : 1396,
+            mediaType,
+            title: mediaType === "movie" ? "The Matrix" : "Breaking Bad",
+            year: mediaType === "movie" ? 1999 : 2008,
+            posterUrl: null,
+            overview: "",
+          },
+        ],
+      };
+    },
     async recommendations(_mediaType, _id) {
       return [
         {
@@ -211,6 +232,105 @@ describe("discovery media status annotation", () => {
     } finally {
       console.error = originalConsoleError;
     }
+  });
+});
+
+describe("discover browse routes", () => {
+  it("annotates browse results and forwards browse options", async () => {
+    const tmdb = createStubTmdb();
+    let received:
+      | {
+          mediaType: "movie" | "tv";
+          options: { genreId?: number; page?: number };
+        }
+      | undefined;
+    const originalDiscover = tmdb.discover;
+    tmdb.discover = async (mediaType, options) => {
+      received = { mediaType, options: options ?? {} };
+      return originalDiscover(mediaType, options);
+    };
+    const app = createApp({
+      tmdb,
+      mediaStatus: createMediaStatusProvider({
+        async listMedia() {
+          return [
+            { id: 10, tmdbId: 603, mediaType: "movie", status: 5 },
+          ];
+        },
+      }),
+    });
+
+    const response = await fetchLocal(
+      app,
+      "/api/discover/browse?mediaType=movie&genreId=28&page=2",
+    );
+    const body = (await response.json()) as {
+      page: number;
+      totalPages: number;
+      results: Array<{ mediaStatus: unknown }>;
+    };
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(received, {
+      mediaType: "movie",
+      options: { genreId: 28, page: 2 },
+    });
+    assert.equal(body.page, 2);
+    assert.equal(body.totalPages, 4);
+    assert.equal(body.results[0].mediaStatus, "available");
+  });
+
+  it("returns null browse statuses when the provider rejects", async () => {
+    const app = createApp({
+      tmdb: createStubTmdb(),
+      mediaStatus: {
+        async getStatusMap() {
+          throw new Error("Seerr unavailable");
+        },
+        async getMediaId() {
+          return null;
+        },
+      },
+    });
+    const originalConsoleError = console.error;
+    console.error = () => undefined;
+    try {
+      const response = await fetchLocal(
+        app,
+        "/api/discover/browse?mediaType=tv",
+      );
+      const body = (await response.json()) as {
+        results: Array<{ mediaStatus: unknown }>;
+      };
+
+      assert.equal(response.status, 200);
+      assert.equal(body.results[0].mediaStatus, null);
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
+  it("validates media type for browse and genre routes", async () => {
+    const app = createApp({
+      tmdb: createStubTmdb(),
+      mediaStatus: createMediaStatusProvider({
+        async listMedia() {
+          return [];
+        },
+      }),
+    });
+
+    const browse = await fetchLocal(
+      app,
+      "/api/discover/browse?mediaType=person",
+    );
+    const genres = await fetchLocal(
+      app,
+      "/api/discover/genres?mediaType=person",
+    );
+
+    assert.equal(browse.status, 400);
+    assert.equal(genres.status, 400);
   });
 });
 

@@ -51,6 +51,55 @@ export function createDiscoverRouter(deps: DiscoverRouterDeps): Router {
     }
   });
 
+  router.get("/genres", async (req, res) => {
+    const mediaType = req.query.mediaType;
+    if (mediaType !== "movie" && mediaType !== "tv") {
+      res.status(400).json({ error: "invalid media type" });
+      return;
+    }
+
+    try {
+      res.json({ results: await tmdb.genres(mediaType) });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
+  router.get("/browse", async (req, res) => {
+    const mediaType = req.query.mediaType;
+    if (mediaType !== "movie" && mediaType !== "tv") {
+      res.status(400).json({ error: "invalid media type" });
+      return;
+    }
+
+    const genreId = parseOptionalNumericQuery(req.query.genreId);
+    if (genreId === null) {
+      res.status(400).json({ error: "invalid genre id" });
+      return;
+    }
+    const page = parseOptionalNumericQuery(req.query.page);
+    if (page === null) {
+      res.status(400).json({ error: "invalid page" });
+      return;
+    }
+
+    try {
+      const result = await tmdb.discover(mediaType, {
+        ...(genreId !== undefined ? { genreId } : {}),
+        ...(page !== undefined ? { page } : {}),
+      });
+      const statuses = await getStatusMapOrEmpty(mediaStatus);
+      res.json({
+        ...result,
+        results: result.results.map((item) =>
+          annotateMediaStatus(item, statuses),
+        ),
+      });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
   router.get("/:mediaType/:id/recommendations", async (req, res) => {
     const mediaType = req.params.mediaType;
     if (mediaType !== "movie" && mediaType !== "tv") {
@@ -66,17 +115,7 @@ export function createDiscoverRouter(deps: DiscoverRouterDeps): Router {
 
     try {
       const results = await tmdb.recommendations(mediaType, id);
-      let statuses: ReadonlyMap<string, MediaAvailability>;
-      try {
-        statuses = await mediaStatus.getStatusMap();
-      } catch (err) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : "Seerr media status request failed";
-        console.error(`Unable to load Seerr media statuses: ${message}`);
-        statuses = new Map();
-      }
+      const statuses = await getStatusMapOrEmpty(mediaStatus);
       res.json({
         results: results.map((item) => annotateMediaStatus(item, statuses)),
       });
@@ -137,6 +176,31 @@ function parseNumericId(raw: string | undefined): number | null {
     return null;
   }
   return Number(raw);
+}
+
+function parseOptionalNumericQuery(
+  raw: unknown,
+): number | undefined | null {
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (typeof raw !== "string" || !/^\d+$/.test(raw)) {
+    return null;
+  }
+  return Number(raw);
+}
+
+async function getStatusMapOrEmpty(
+  mediaStatus: MediaStatusProvider,
+): Promise<ReadonlyMap<string, MediaAvailability>> {
+  try {
+    return await mediaStatus.getStatusMap();
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Seerr media status request failed";
+    console.error(`Unable to load Seerr media statuses: ${message}`);
+    return new Map();
+  }
 }
 
 function respondUpstreamError(

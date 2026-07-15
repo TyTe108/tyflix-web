@@ -2,6 +2,11 @@ import type { MediaAvailabilityStatus } from "./requests";
 
 export type MediaType = "movie" | "tv";
 
+export type Genre = {
+  id: number;
+  name: string;
+};
+
 export type MediaSummary = {
   tmdbId: number;
   mediaType: MediaType;
@@ -61,6 +66,10 @@ export type RecommendationsResponse = {
   results: MediaSummary[];
 };
 
+export type GenresResponse = {
+  results: Genre[];
+};
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) {
@@ -72,6 +81,27 @@ async function getJson<T>(url: string): Promise<T> {
 export async function fetchTrending(): Promise<MediaSummary[]> {
   const body = await getJson<TrendingResponse>("/api/discover/trending");
   return body.results;
+}
+
+export async function fetchGenres(mediaType: MediaType): Promise<Genre[]> {
+  const params = new URLSearchParams({ mediaType });
+  const body = await getJson<GenresResponse>(`/api/discover/genres?${params}`);
+  return body.results;
+}
+
+export async function browseMedia(
+  mediaType: MediaType,
+  genreId?: number,
+  page?: number,
+): Promise<SearchResponse> {
+  const params = new URLSearchParams({ mediaType });
+  if (genreId !== undefined) {
+    params.set("genreId", String(genreId));
+  }
+  if (page !== undefined) {
+    params.set("page", String(page));
+  }
+  return getJson<SearchResponse>(`/api/discover/browse?${params}`);
 }
 
 export async function searchMedia(

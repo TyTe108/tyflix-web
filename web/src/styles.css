@@ -813,6 +813,63 @@ a {
   outline-offset: 1px;
 }
 
+.discover-filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: -0.75rem 0 1.75rem;
+}
+
+.discover-media-toggle {
+  display: inline-flex;
+  border: 1px solid rgba(31, 61, 45, 0.35);
+  border-radius: 0.4rem;
+  overflow: hidden;
+}
+
+.discover-filter-button {
+  border: 0;
+  border-right: 1px solid rgba(31, 61, 45, 0.25);
+  padding: 0.55rem 0.8rem;
+  background: rgba(255, 255, 255, 0.65);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.discover-filter-button:last-child {
+  border-right: 0;
+}
+
+.discover-filter-button.active {
+  background: #1f3d2d;
+  color: #fff;
+}
+
+.discover-filter-button:focus-visible,
+.discover-genre-filter select:focus {
+  outline: 2px solid rgba(31, 61, 45, 0.45);
+  outline-offset: 1px;
+}
+
+.discover-genre-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.discover-genre-filter select {
+  min-width: 12rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid rgba(31, 61, 45, 0.35);
+  border-radius: 0.4rem;
+  background: rgba(255, 255, 255, 0.7);
+  color: inherit;
+  font: inherit;
+}
+
 .discover-results h2 {
   font-family: "Fraunces", "Iowan Old Style", Georgia, serif;
   font-weight: 600;
