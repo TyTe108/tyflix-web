@@ -1029,6 +1029,12 @@ a {
   font-size: 0.875rem;
 }
 
+.media-detail-collection {
+  margin: 0 0 0.45rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
 .media-detail-overview {
   margin: 1rem 0 0;
   line-height: 1.55;
@@ -1240,6 +1246,55 @@ a {
   font-weight: 600;
   cursor: pointer;
   text-decoration: underline;
+}
+
+.collection-loading,
+.collection-error,
+.collection-detail {
+  margin-top: 1.5rem;
+}
+
+.collection-hero {
+  aspect-ratio: 16 / 9;
+  margin-bottom: 1.25rem;
+  overflow: hidden;
+  border-radius: 0.5rem;
+  background: rgba(31, 61, 45, 0.08);
+}
+
+.collection-hero-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.collection-hero-placeholder {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  color: #5c5c5c;
+}
+
+.collection-overview {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.collection-parts {
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgba(31, 61, 45, 0.15);
+}
+
+.collection-parts h2 {
+  margin: 0 0 0.75rem;
+  font-family: "Fraunces", "Iowan Old Style", Georgia, serif;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 .request-controls {

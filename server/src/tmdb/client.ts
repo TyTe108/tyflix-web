@@ -21,6 +21,10 @@ export type MovieDetail = {
   runtime: number | null;
   genres: string[];
   status: string;
+  collection: {
+    id: number;
+    name: string;
+  } | null;
 };
 
 export type TvSeasonSummary = {
@@ -76,6 +80,15 @@ export type PersonDetail = {
   knownForDepartment: string;
   birthday: string | null;
   placeOfBirth: string | null;
+};
+
+export type CollectionDetail = {
+  id: number;
+  name: string;
+  overview: string;
+  posterUrl: string | null;
+  backdropUrl: string | null;
+  parts: MediaSummary[];
 };
 
 export type DiscoverOptions = {
@@ -513,6 +526,68 @@ export function createTmdbClient(options: TmdbClientOptions) {
     return results;
   }
 
+  async function collection(id: number): Promise<CollectionDetail> {
+    const body = await getJson(`/collection/${id}`);
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      !Array.isArray((body as { parts?: unknown }).parts)
+    ) {
+      throw new TmdbUpstreamError(
+        "TMDB collection returned unexpected body",
+        502,
+      );
+    }
+    const row = body as {
+      id?: unknown;
+      name?: unknown;
+      overview?: unknown;
+      poster_path?: unknown;
+      backdrop_path?: unknown;
+      parts: unknown[];
+    };
+    if (typeof row.id !== "number" || typeof row.name !== "string") {
+      throw new TmdbUpstreamError(
+        "TMDB collection returned unexpected body",
+        502,
+      );
+    }
+
+    const parts = row.parts
+      .flatMap((part) => {
+        const media = mapMediaSummary(part, "movie");
+        if (media === null) {
+          return [];
+        }
+        const releaseDate =
+          typeof part === "object" &&
+          part !== null &&
+          typeof (part as { release_date?: unknown }).release_date === "string"
+            ? (part as { release_date: string }).release_date
+            : "";
+        return [{ media, releaseDate }];
+      })
+      .sort((a, b) => {
+        if (a.releaseDate === "") {
+          return b.releaseDate === "" ? 0 : 1;
+        }
+        if (b.releaseDate === "") {
+          return -1;
+        }
+        return a.releaseDate.localeCompare(b.releaseDate);
+      })
+      .map(({ media }) => media);
+
+    return {
+      id: row.id,
+      name: row.name,
+      overview: typeof row.overview === "string" ? row.overview : "",
+      posterUrl: imageUrl(row.poster_path),
+      backdropUrl: imageUrl(row.backdrop_path),
+      parts,
+    };
+  }
+
   async function movieDetail(id: number): Promise<MovieDetail> {
     const body = await getJson(`/movie/${id}`, {
       append_to_response: "external_ids",
@@ -535,6 +610,7 @@ export function createTmdbClient(options: TmdbClientOptions) {
       runtime?: unknown;
       genres?: unknown;
       status?: unknown;
+      belongs_to_collection?: unknown;
     };
 
     if (typeof row.id !== "number" || typeof row.title !== "string") {
@@ -543,6 +619,17 @@ export function createTmdbClient(options: TmdbClientOptions) {
         502,
       );
     }
+
+    const collection =
+      typeof row.belongs_to_collection === "object" &&
+      row.belongs_to_collection !== null &&
+      typeof (row.belongs_to_collection as { id?: unknown }).id === "number" &&
+      typeof (row.belongs_to_collection as { name?: unknown }).name === "string"
+        ? {
+            id: (row.belongs_to_collection as { id: number }).id,
+            name: (row.belongs_to_collection as { name: string }).name,
+          }
+        : null;
 
     return {
       tmdbId: row.id,
@@ -555,6 +642,7 @@ export function createTmdbClient(options: TmdbClientOptions) {
       runtime: typeof row.runtime === "number" ? row.runtime : null,
       genres: mapGenreNames(row.genres),
       status: typeof row.status === "string" ? row.status : "",
+      collection,
     };
   }
 
@@ -623,6 +711,7 @@ export function createTmdbClient(options: TmdbClientOptions) {
     credits,
     person,
     personCredits,
+    collection,
     movieDetail,
     tvDetail,
   };

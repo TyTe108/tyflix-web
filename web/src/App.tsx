@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AdminRoute, ProtectedRoute } from "./auth/ProtectedRoute";
 import { AdminPage } from "./pages/AdminPage";
+import { CollectionPage } from "./pages/CollectionPage";
 import { DiscoverPage } from "./pages/DiscoverPage";
 import { HomePage } from "./pages/HomePage";
 import { IssueDetailPage } from "./pages/IssueDetailPage";
@@ -24,6 +25,7 @@ export function App() {
         <Route path="/issues/:id" element={<IssueDetailPage />} />
         <Route path="/media/:type/:id" element={<MediaDetailPage />} />
         <Route path="/person/:id" element={<PersonPage />} />
+        <Route path="/collection/:id" element={<CollectionPage />} />
       </Route>
       <Route element={<AdminRoute />}>
         <Route path="/admin" element={<AdminPage />} />

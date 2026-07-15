@@ -62,6 +62,10 @@ export type MovieDetail = {
   runtime: number | null;
   genres: string[];
   status: string;
+  collection: {
+    id: number;
+    name: string;
+  } | null;
   mediaStatus: MediaAvailabilityStatus | null;
 };
 
@@ -102,6 +106,15 @@ export type RecommendationsResponse = {
 
 export type GenresResponse = {
   results: Genre[];
+};
+
+export type CollectionDetail = {
+  id: number;
+  name: string;
+  overview: string;
+  posterUrl: string | null;
+  backdropUrl: string | null;
+  parts: MediaSummary[];
 };
 
 async function getJson<T>(url: string): Promise<T> {
@@ -178,6 +191,10 @@ export async function fetchCredits(
 
 export async function fetchPerson(id: number): Promise<PersonResponse> {
   return getJson<PersonResponse>(`/api/discover/person/${id}`);
+}
+
+export async function fetchCollection(id: number): Promise<CollectionDetail> {
+  return getJson<CollectionDetail>(`/api/discover/collection/${id}`);
 }
 
 export function canRequest(

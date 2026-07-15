@@ -138,6 +138,33 @@ function createStubTmdb(): DiscoverRouterDeps["tmdb"] {
         },
       ];
     },
+    async collection(id) {
+      return {
+        id,
+        name: "The Matrix Collection",
+        overview: "A science-fiction franchise.",
+        posterUrl: null,
+        backdropUrl: null,
+        parts: [
+          {
+            tmdbId: 603,
+            mediaType: "movie",
+            title: "The Matrix",
+            year: 1999,
+            posterUrl: null,
+            overview: "",
+          },
+          {
+            tmdbId: 604,
+            mediaType: "movie",
+            title: "The Matrix Reloaded",
+            year: 2003,
+            posterUrl: null,
+            overview: "",
+          },
+        ],
+      };
+    },
     async movieDetail(id) {
       return {
         tmdbId: id,
@@ -150,6 +177,7 @@ function createStubTmdb(): DiscoverRouterDeps["tmdb"] {
         runtime: 136,
         genres: [],
         status: "Released",
+        collection: null,
       };
     },
     async tvDetail(id) {
@@ -638,6 +666,77 @@ describe("GET /api/discover/person/:id", () => {
     console.error = () => undefined;
     try {
       const response = await fetchLocal(app, "/api/discover/person/3");
+
+      assert.equal(response.status, 502);
+      assert.deepEqual(await response.json(), { error: "TMDB unavailable" });
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+});
+
+describe("GET /api/discover/collection/:id", () => {
+  it("returns a collection with annotated part statuses", async () => {
+    const app = createApp({
+      tmdb: createStubTmdb(),
+      mediaStatus: createMediaStatusProvider({
+        async listMedia() {
+          return [{ id: 10, tmdbId: 603, mediaType: "movie", status: 5 }];
+        },
+      }),
+    });
+
+    const response = await fetchLocal(app, "/api/discover/collection/2344");
+    const body = (await response.json()) as {
+      id: number;
+      name: string;
+      parts: Array<{ mediaStatus: unknown }>;
+    };
+
+    assert.equal(response.status, 200);
+    assert.equal(body.id, 2344);
+    assert.equal(body.name, "The Matrix Collection");
+    assert.deepEqual(
+      body.parts.map((part) => part.mediaStatus),
+      ["available", null],
+    );
+  });
+
+  it("validates the numeric collection id", async () => {
+    const app = createApp({
+      tmdb: createStubTmdb(),
+      mediaStatus: createMediaStatusProvider({
+        async listMedia() {
+          return [];
+        },
+      }),
+    });
+
+    const response = await fetchLocal(
+      app,
+      "/api/discover/collection/not-a-number",
+    );
+
+    assert.equal(response.status, 400);
+  });
+
+  it("returns 502 when TMDB fails", async () => {
+    const tmdb = createStubTmdb();
+    tmdb.collection = async () => {
+      throw new Error("TMDB unavailable");
+    };
+    const app = createApp({
+      tmdb,
+      mediaStatus: createMediaStatusProvider({
+        async listMedia() {
+          return [];
+        },
+      }),
+    });
+    const originalConsoleError = console.error;
+    console.error = () => undefined;
+    try {
+      const response = await fetchLocal(app, "/api/discover/collection/2344");
 
       assert.equal(response.status, 502);
       assert.deepEqual(await response.json(), { error: "TMDB unavailable" });

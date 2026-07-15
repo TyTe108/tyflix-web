@@ -238,6 +238,14 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
           <CrewSummary crew={currentCredits.crew} />
         ) : null}
 
+        {detail.mediaType === "movie" && detail.collection !== null ? (
+          <p className="media-detail-collection">
+            <Link to={`/collection/${detail.collection.id}`}>
+              Part of the {detail.collection.name}
+            </Link>
+          </p>
+        ) : null}
+
         {detail.genres.length > 0 ? (
           <p className="media-detail-genres muted">
             {detail.genres.join(" · ")}

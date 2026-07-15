@@ -127,6 +127,7 @@ function createStubTmdb(): RequestsRouterDeps["tmdb"] & {
         runtime: 136,
         genres: [],
         status: "Released",
+        collection: null,
       };
     },
     async tvDetail(id) {

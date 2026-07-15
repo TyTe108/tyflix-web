@@ -166,6 +166,27 @@ export function createDiscoverRouter(deps: DiscoverRouterDeps): Router {
     }
   });
 
+  router.get("/collection/:id", async (req, res) => {
+    const id = parseNumericId(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: "invalid collection id" });
+      return;
+    }
+
+    try {
+      const collection = await tmdb.collection(id);
+      const statuses = await getStatusMapOrEmpty(mediaStatus);
+      res.json({
+        ...collection,
+        parts: collection.parts.map((item) =>
+          annotateMediaStatus(item, statuses),
+        ),
+      });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
   router.get("/movie/:id", async (req, res) => {
     const id = parseNumericId(req.params.id);
     if (id === null) {

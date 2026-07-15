@@ -508,6 +508,106 @@ describe("createTmdbClient().personCredits", () => {
   });
 });
 
+describe("createTmdbClient().collection", () => {
+  it("maps collection images and chronologically sorted valid parts", async () => {
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/3/collection/2344");
+      return jsonResponse(200, {
+        id: 2344,
+        name: "The Matrix Collection",
+        overview: "A science-fiction franchise.",
+        poster_path: "/collection.jpg",
+        backdrop_path: "/collection-bg.jpg",
+        parts: [
+          {
+            id: 605,
+            media_type: "movie",
+            title: "The Matrix Revolutions",
+            release_date: "2003-11-05",
+            poster_path: "/revolutions.jpg",
+          },
+          { id: "bad", media_type: "movie", title: "Malformed" },
+          {
+            id: 603,
+            media_type: "movie",
+            title: "The Matrix",
+            release_date: "1999-03-31",
+            poster_path: "/matrix.jpg",
+          },
+          {
+            id: 604,
+            title: "The Matrix Reloaded",
+            release_date: "2003-05-15",
+            poster_path: null,
+          },
+          {
+            id: 624860,
+            media_type: "movie",
+            title: "The Matrix Resurrections",
+            release_date: "",
+          },
+        ],
+      });
+    };
+
+    const result = await createTmdbClient({ apiKey: "k" }).collection(2344);
+
+    assert.equal(result.id, 2344);
+    assert.equal(result.name, "The Matrix Collection");
+    assert.equal(result.overview, "A science-fiction franchise.");
+    assert.equal(
+      result.posterUrl,
+      "https://image.tmdb.org/t/p/w500/collection.jpg",
+    );
+    assert.equal(
+      result.backdropUrl,
+      "https://image.tmdb.org/t/p/w500/collection-bg.jpg",
+    );
+    assert.deepEqual(
+      result.parts.map((part) => part.tmdbId),
+      [603, 604, 605, 624860],
+    );
+    assert.equal(result.parts[1].mediaType, "movie");
+    assert.equal(result.parts[1].posterUrl, null);
+  });
+});
+
+describe("createTmdbClient().movieDetail", () => {
+  it("maps present and absent collection data", async () => {
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      assert.equal(url.searchParams.get("append_to_response"), "external_ids");
+      const id = Number(url.pathname.split("/").pop());
+      return jsonResponse(200, {
+        id,
+        title: id === 78 ? "Blade Runner" : "Standalone Movie",
+        release_date: "1982-06-25",
+        overview: "",
+        poster_path: null,
+        backdrop_path: null,
+        runtime: 118,
+        genres: [],
+        status: "Released",
+        belongs_to_collection:
+          id === 78
+            ? { id: 422837, name: "Blade Runner Collection" }
+            : null,
+      });
+    };
+
+    const tmdb = createTmdbClient({ apiKey: "k" });
+    const inCollection = await tmdb.movieDetail(78);
+    const standalone = await tmdb.movieDetail(1);
+
+    assert.deepEqual(inCollection.collection, {
+      id: 422837,
+      name: "Blade Runner Collection",
+    });
+    assert.equal(standalone.collection, null);
+  });
+});
+
 describe("createTmdbClient().tvDetail", () => {
   it("maps seasons (excludes season 0) and reads tvdbId from external_ids", async () => {
     globalThis.fetch = async (input) => {
