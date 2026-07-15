@@ -87,6 +87,26 @@ function createStubTmdb(): DiscoverRouterDeps["tmdb"] {
         },
       ];
     },
+    async credits(_mediaType, _id) {
+      return {
+        cast: [
+          {
+            id: 17419,
+            name: "Adam Scott",
+            character: "Mark Scout",
+            profileUrl: null,
+          },
+        ],
+        crew: [
+          {
+            id: 123,
+            name: "Ben Stiller",
+            job: "Director",
+            profileUrl: null,
+          },
+        ],
+      };
+    },
     async movieDetail(id) {
       return {
         tmdbId: id,
@@ -387,6 +407,98 @@ describe("GET /api/discover/:mediaType/:id/recommendations", () => {
       const response = await fetchLocal(
         app,
         "/api/discover/tv/1396/recommendations",
+      );
+
+      assert.equal(response.status, 502);
+      assert.deepEqual(await response.json(), { error: "TMDB unavailable" });
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+});
+
+describe("GET /api/discover/:mediaType/:id/credits", () => {
+  it("returns credits without requesting media statuses", async () => {
+    let mediaStatusCalls = 0;
+    const app = createApp({
+      tmdb: createStubTmdb(),
+      mediaStatus: {
+        async getStatusMap() {
+          mediaStatusCalls += 1;
+          return new Map();
+        },
+        async getMediaId() {
+          return null;
+        },
+      },
+    });
+
+    const response = await fetchLocal(
+      app,
+      "/api/discover/tv/95396/credits",
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      cast: [
+        {
+          id: 17419,
+          name: "Adam Scott",
+          character: "Mark Scout",
+          profileUrl: null,
+        },
+      ],
+      crew: [
+        {
+          id: 123,
+          name: "Ben Stiller",
+          job: "Director",
+          profileUrl: null,
+        },
+      ],
+    });
+    assert.equal(mediaStatusCalls, 0);
+  });
+
+  it("validates media type and numeric id", async () => {
+    const app = createApp({
+      tmdb: createStubTmdb(),
+      mediaStatus: createMediaStatusProvider({
+        async listMedia() {
+          return [];
+        },
+      }),
+    });
+
+    const mediaType = await fetchLocal(
+      app,
+      "/api/discover/person/1/credits",
+    );
+    const id = await fetchLocal(app, "/api/discover/movie/not-a-number/credits");
+
+    assert.equal(mediaType.status, 400);
+    assert.equal(id.status, 400);
+  });
+
+  it("returns 502 when TMDB fails", async () => {
+    const tmdb = createStubTmdb();
+    tmdb.credits = async () => {
+      throw new Error("TMDB unavailable");
+    };
+    const app = createApp({
+      tmdb,
+      mediaStatus: createMediaStatusProvider({
+        async listMedia() {
+          return [];
+        },
+      }),
+    });
+    const originalConsoleError = console.error;
+    console.error = () => undefined;
+    try {
+      const response = await fetchLocal(
+        app,
+        "/api/discover/movie/78/credits",
       );
 
       assert.equal(response.status, 502);

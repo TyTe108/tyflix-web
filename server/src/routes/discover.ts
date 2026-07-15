@@ -124,6 +124,26 @@ export function createDiscoverRouter(deps: DiscoverRouterDeps): Router {
     }
   });
 
+  router.get("/:mediaType/:id/credits", async (req, res) => {
+    const mediaType = req.params.mediaType;
+    if (mediaType !== "movie" && mediaType !== "tv") {
+      res.status(400).json({ error: "invalid media type" });
+      return;
+    }
+
+    const id = parseNumericId(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: `invalid ${mediaType} id` });
+      return;
+    }
+
+    try {
+      res.json(await tmdb.credits(mediaType, id));
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
   router.get("/movie/:id", async (req, res) => {
     const id = parseNumericId(req.params.id);
     if (id === null) {

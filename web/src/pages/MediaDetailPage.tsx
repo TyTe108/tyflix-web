@@ -6,13 +6,17 @@ import {
 } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
+  fetchCredits,
   fetchMovie,
   fetchRecommendations,
   fetchTv,
   formatRuntime,
   canRequest,
   mediaStatusBadgeClass,
+  type CastCredit,
+  type CrewCredit,
   type MediaSummary,
+  type MediaType,
   type MovieDetail,
   type TvDetail,
 } from "../api/discover";
@@ -25,6 +29,12 @@ import { MediaCard } from "../components/MediaCard";
 
 type LoadStatus = "loading" | "ready" | "error";
 type MediaDetail = MovieDetail | TvDetail;
+type LoadedCredits = {
+  mediaType: MediaType;
+  tmdbId: number;
+  cast: CastCredit[];
+  crew: CrewCredit[];
+};
 type RequestUiState =
   | { kind: "idle" }
   | { kind: "submitting" }
@@ -138,6 +148,12 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
   const heroUrl = detail.backdropUrl ?? detail.posterUrl;
   const yearLabel = detail.year !== null ? ` (${detail.year})` : "";
   const [recommendations, setRecommendations] = useState<MediaSummary[]>([]);
+  const [credits, setCredits] = useState<LoadedCredits | null>(null);
+  const currentCredits =
+    credits?.mediaType === detail.mediaType &&
+    credits.tmdbId === detail.tmdbId
+      ? credits
+      : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -152,6 +168,32 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
       .catch(() => {
         if (!cancelled) {
           setRecommendations([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.mediaType, detail.tmdbId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCredits(null);
+
+    void fetchCredits(detail.mediaType, detail.tmdbId)
+      .then(({ cast, crew }) => {
+        if (!cancelled) {
+          setCredits({
+            mediaType: detail.mediaType,
+            tmdbId: detail.tmdbId,
+            cast,
+            crew,
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCredits(null);
         }
       });
 
@@ -192,6 +234,10 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
           <span className="media-detail-year">{yearLabel}</span>
         </h1>
 
+        {currentCredits !== null && currentCredits.crew.length > 0 ? (
+          <CrewSummary crew={currentCredits.crew} />
+        ) : null}
+
         {detail.genres.length > 0 ? (
           <p className="media-detail-genres muted">
             {detail.genres.join(" · ")}
@@ -214,6 +260,41 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
 
         {detail.mediaStatus !== null ? (
           <ReportIssueControls detail={detail} />
+        ) : null}
+
+        {currentCredits !== null && currentCredits.cast.length > 0 ? (
+          <section
+            className="media-detail-cast"
+            aria-labelledby="cast-heading"
+          >
+            <h2 id="cast-heading">Cast</h2>
+            <ul className="media-cast-list">
+              {currentCredits.cast.map((person) => (
+                <li className="media-cast-card" key={person.id}>
+                  {person.profileUrl !== null ? (
+                    <img
+                      className="media-cast-photo"
+                      src={person.profileUrl}
+                      alt=""
+                    />
+                  ) : (
+                    <div
+                      className="media-cast-photo media-cast-placeholder"
+                      aria-hidden="true"
+                    >
+                      {person.name.slice(0, 1)}
+                    </div>
+                  )}
+                  <span className="media-cast-name">{person.name}</span>
+                  {person.character ? (
+                    <span className="media-cast-character muted">
+                      {person.character}
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </section>
         ) : null}
 
         {detail.mediaType === "tv" ? (
@@ -258,6 +339,28 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
       </div>
     </article>
   );
+}
+
+function CrewSummary({ crew }: { crew: CrewCredit[] }) {
+  const groups = [
+    { jobs: ["Director"], label: "Directed by" },
+    { jobs: ["Creator"], label: "Created by" },
+    { jobs: ["Screenplay", "Writer"], label: "Written by" },
+    { jobs: ["Executive Producer"], label: "Executive producers" },
+    { jobs: ["Producer"], label: "Producers" },
+  ];
+  const parts = groups.flatMap(({ jobs, label }) => {
+    const names = crew
+      .filter((person) =>
+        person.job.split(" / ").some((job) => jobs.includes(job)),
+      )
+      .map((person) => person.name);
+    return names.length > 0 ? [`${label} ${names.join(", ")}`] : [];
+  });
+
+  return parts.length > 0 ? (
+    <p className="media-detail-crew muted">{parts.join(" · ")}</p>
+  ) : null;
 }
 
 function ReportIssueControls({ detail }: { detail: MediaDetail }) {

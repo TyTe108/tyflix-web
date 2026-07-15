@@ -1024,23 +1024,92 @@ a {
   font-size: 0.9rem;
 }
 
+.media-detail-crew {
+  margin: 0 0 0.45rem;
+  font-size: 0.875rem;
+}
+
 .media-detail-overview {
   margin: 1rem 0 0;
   line-height: 1.55;
 }
 
+.media-detail-cast,
 .media-detail-seasons {
   margin-top: 1.75rem;
   padding-top: 1.25rem;
   border-top: 1px solid rgba(31, 61, 45, 0.15);
 }
 
+.media-detail-cast h2,
 .media-detail-seasons h2 {
   font-family: "Fraunces", "Iowan Old Style", Georgia, serif;
   font-weight: 600;
   font-size: 1.2rem;
   letter-spacing: -0.02em;
   margin: 0 0 0.75rem;
+}
+
+.media-cast-list {
+  list-style: none;
+  display: flex;
+  gap: 1rem;
+  margin: 0;
+  padding: 0 0 0.5rem;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+}
+
+.media-cast-card {
+  display: flex;
+  flex: 0 0 6.25rem;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  text-align: center;
+}
+
+.media-cast-photo {
+  display: block;
+  width: 5.5rem;
+  height: 5.5rem;
+  border-radius: 50%;
+  object-fit: cover;
+  background: rgba(31, 61, 45, 0.08);
+}
+
+.media-cast-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(31, 61, 45, 0.55);
+  font-family: "Fraunces", "Iowan Old Style", Georgia, serif;
+  font-size: 1.75rem;
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 6px,
+      rgba(31, 61, 45, 0.06) 6px,
+      rgba(31, 61, 45, 0.06) 12px
+    ),
+    rgba(31, 61, 45, 0.08);
+}
+
+.media-cast-name {
+  margin-top: 0.55rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.media-cast-character {
+  margin-top: 0.15rem;
+  font-size: 0.8rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .media-season-list {

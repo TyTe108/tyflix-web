@@ -54,6 +54,20 @@ export type Genre = {
   name: string;
 };
 
+export type CastCredit = {
+  id: number;
+  name: string;
+  character: string;
+  profileUrl: string | null;
+};
+
+export type CrewCredit = {
+  id: number;
+  name: string;
+  job: string;
+  profileUrl: string | null;
+};
+
 export type DiscoverOptions = {
   genreId?: number;
   page?: number;
@@ -283,6 +297,109 @@ export function createTmdbClient(options: TmdbClientOptions) {
     );
   }
 
+  async function credits(
+    mediaType: "movie" | "tv",
+    id: number,
+  ): Promise<{ cast: CastCredit[]; crew: CrewCredit[] }> {
+    const body = await getJson(`/${mediaType}/${id}/credits`);
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      !Array.isArray((body as { cast?: unknown }).cast) ||
+      !Array.isArray((body as { crew?: unknown }).crew)
+    ) {
+      throw new TmdbUpstreamError(
+        "TMDB credits returned unexpected body",
+        502,
+      );
+    }
+
+    const cast = (body as { cast: unknown[] }).cast
+      .flatMap((row) => {
+        if (typeof row !== "object" || row === null) {
+          return [];
+        }
+        const credit = row as {
+          id?: unknown;
+          name?: unknown;
+          character?: unknown;
+          profile_path?: unknown;
+          order?: unknown;
+        };
+        if (
+          typeof credit.id !== "number" ||
+          typeof credit.name !== "string" ||
+          credit.name.trim() === ""
+        ) {
+          return [];
+        }
+        return [{
+          credit: {
+            id: credit.id,
+            name: credit.name,
+            character:
+              typeof credit.character === "string" ? credit.character : "",
+            profileUrl: imageUrl(credit.profile_path),
+          },
+          order: typeof credit.order === "number" ? credit.order : Infinity,
+        }];
+      })
+      .sort((a, b) => a.order - b.order)
+      .slice(0, 18)
+      .map(({ credit }) => credit);
+
+    const keyJobs = new Set([
+      "Director",
+      "Creator",
+      "Screenplay",
+      "Writer",
+      "Executive Producer",
+      "Producer",
+    ]);
+    const crewByPerson = new Map<
+      number,
+      CrewCredit & { jobs: string[] }
+    >();
+    for (const row of (body as { crew: unknown[] }).crew) {
+      if (typeof row !== "object" || row === null) {
+        continue;
+      }
+      const credit = row as {
+        id?: unknown;
+        name?: unknown;
+        job?: unknown;
+        profile_path?: unknown;
+      };
+      if (
+        typeof credit.id !== "number" ||
+        typeof credit.name !== "string" ||
+        credit.name.trim() === "" ||
+        typeof credit.job !== "string" ||
+        !keyJobs.has(credit.job)
+      ) {
+        continue;
+      }
+      const existing = crewByPerson.get(credit.id);
+      if (existing !== undefined) {
+        if (!existing.jobs.includes(credit.job)) {
+          existing.jobs.push(credit.job);
+          existing.job = existing.jobs.join(" / ");
+        }
+        continue;
+      }
+      crewByPerson.set(credit.id, {
+        id: credit.id,
+        name: credit.name,
+        job: credit.job,
+        profileUrl: imageUrl(credit.profile_path),
+        jobs: [credit.job],
+      });
+    }
+    const crew = [...crewByPerson.values()].slice(0, 8).map(({ jobs, ...credit }) => credit);
+
+    return { cast, crew };
+  }
+
   async function movieDetail(id: number): Promise<MovieDetail> {
     const body = await getJson(`/movie/${id}`, {
       append_to_response: "external_ids",
@@ -390,6 +507,7 @@ export function createTmdbClient(options: TmdbClientOptions) {
     genres,
     discover,
     recommendations,
+    credits,
     movieDetail,
     tvDetail,
   };

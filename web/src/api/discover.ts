@@ -7,6 +7,25 @@ export type Genre = {
   name: string;
 };
 
+export type CastCredit = {
+  id: number;
+  name: string;
+  character: string;
+  profileUrl: string | null;
+};
+
+export type CrewCredit = {
+  id: number;
+  name: string;
+  job: string;
+  profileUrl: string | null;
+};
+
+export type CreditsResponse = {
+  cast: CastCredit[];
+  crew: CrewCredit[];
+};
+
 export type MediaSummary = {
   tmdbId: number;
   mediaType: MediaType;
@@ -131,6 +150,15 @@ export async function fetchRecommendations(
     `/api/discover/${mediaType}/${id}/recommendations`,
   );
   return body.results;
+}
+
+export async function fetchCredits(
+  mediaType: MediaType,
+  id: number,
+): Promise<CreditsResponse> {
+  return getJson<CreditsResponse>(
+    `/api/discover/${mediaType}/${id}/credits`,
+  );
 }
 
 export function canRequest(

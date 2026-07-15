@@ -295,6 +295,88 @@ describe("createTmdbClient().recommendations", () => {
   });
 });
 
+describe("createTmdbClient().credits", () => {
+  it("maps and caps ordered cast and key, deduplicated crew", async () => {
+    const cast = Array.from({ length: 20 }, (_, index) => ({
+      id: 100 + index,
+      name: `Actor ${index}`,
+      character: `Character ${index}`,
+      profile_path: index === 19 ? null : `/actor-${index}.jpg`,
+      order: 19 - index,
+    }));
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/3/tv/95396/credits");
+      assert.equal(url.searchParams.get("api_key"), "k");
+      return jsonResponse(200, {
+        cast: [
+          ...cast,
+          { id: "bad", name: "Malformed", order: -1 },
+          { id: 999, order: -2 },
+        ],
+        crew: [
+          {
+            id: 1,
+            name: "Alex Creator",
+            job: "Creator",
+            profile_path: "/alex.jpg",
+          },
+          {
+            id: 1,
+            name: "Alex Creator",
+            job: "Executive Producer",
+            profile_path: "/alex.jpg",
+          },
+          { id: 2, name: "A Director", job: "Director", profile_path: null },
+          { id: 3, name: "A Composer", job: "Original Music Composer" },
+          { id: "bad", name: "Malformed", job: "Writer" },
+          ...Array.from({ length: 7 }, (_, index) => ({
+            id: 10 + index,
+            name: `Writer ${index}`,
+            job: "Writer",
+            profile_path: null,
+          })),
+        ],
+      });
+    };
+
+    const result = await createTmdbClient({ apiKey: "k" }).credits("tv", 95396);
+
+    assert.equal(result.cast.length, 18);
+    assert.deepEqual(result.cast[0], {
+      id: 119,
+      name: "Actor 19",
+      character: "Character 19",
+      profileUrl: null,
+    });
+    assert.equal(
+      result.cast[1].profileUrl,
+      "https://image.tmdb.org/t/p/w500/actor-18.jpg",
+    );
+    assert.deepEqual(result.cast[17], {
+      id: 102,
+      name: "Actor 2",
+      character: "Character 2",
+      profileUrl: "https://image.tmdb.org/t/p/w500/actor-2.jpg",
+    });
+    assert.equal(result.crew.length, 8);
+    assert.deepEqual(result.crew[0], {
+      id: 1,
+      name: "Alex Creator",
+      job: "Creator / Executive Producer",
+      profileUrl: "https://image.tmdb.org/t/p/w500/alex.jpg",
+    });
+    assert.deepEqual(result.crew[1], {
+      id: 2,
+      name: "A Director",
+      job: "Director",
+      profileUrl: null,
+    });
+    assert.equal(result.crew.some((person) => person.name === "A Composer"), false);
+    assert.equal(result.crew[result.crew.length - 1].name, "Writer 5");
+  });
+});
+
 describe("createTmdbClient().tvDetail", () => {
   it("maps seasons (excludes season 0) and reads tvdbId from external_ids", async () => {
     globalThis.fetch = async (input) => {
