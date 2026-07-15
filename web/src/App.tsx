@@ -5,6 +5,7 @@ import { DiscoverPage } from "./pages/DiscoverPage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { MediaDetailPage } from "./pages/MediaDetailPage";
+import { MyIssuesPage } from "./pages/MyIssuesPage";
 import { MyRequestsPage } from "./pages/MyRequestsPage";
 import { WatchlistPage } from "./pages/WatchlistPage";
 
@@ -17,6 +18,7 @@ export function App() {
         <Route path="/discover" element={<DiscoverPage />} />
         <Route path="/watchlist" element={<WatchlistPage />} />
         <Route path="/requests" element={<MyRequestsPage />} />
+        <Route path="/issues" element={<MyIssuesPage />} />
         <Route path="/media/:type/:id" element={<MediaDetailPage />} />
       </Route>
       <Route element={<AdminRoute />}>

@@ -1,4 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type FormEvent,
+} from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   fetchMovie,
@@ -9,6 +14,10 @@ import {
   type MovieDetail,
   type TvDetail,
 } from "../api/discover";
+import {
+  createIssue,
+  type IssueType,
+} from "../api/issues";
 import { createRequest, mediaStatusLabel } from "../api/requests";
 
 type LoadStatus = "loading" | "ready" | "error";
@@ -18,6 +27,11 @@ type RequestUiState =
   | { kind: "submitting" }
   | { kind: "requested" }
   | { kind: "already" }
+  | { kind: "error"; message: string };
+type IssueUiState =
+  | { kind: "idle" }
+  | { kind: "submitting" }
+  | { kind: "submitted" }
   | { kind: "error"; message: string };
 
 function parseType(raw: string | undefined): "movie" | "tv" | null {
@@ -173,6 +187,10 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
 
         <RequestControls detail={detail} />
 
+        {detail.mediaStatus !== null ? (
+          <ReportIssueControls detail={detail} />
+        ) : null}
+
         {detail.mediaType === "tv" ? (
           <section
             className="media-detail-seasons"
@@ -198,6 +216,98 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
         ) : null}
       </div>
     </article>
+  );
+}
+
+function ReportIssueControls({ detail }: { detail: MediaDetail }) {
+  const [expanded, setExpanded] = useState(false);
+  const [issueType, setIssueType] = useState<IssueType>("video");
+  const [message, setMessage] = useState("");
+  const [issueState, setIssueState] = useState<IssueUiState>({ kind: "idle" });
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIssueState({ kind: "submitting" });
+    try {
+      const result = await createIssue({
+        tmdbId: detail.tmdbId,
+        mediaType: detail.mediaType,
+        issueType,
+        message,
+      });
+      if (result.ok) {
+        setIssueState({ kind: "submitted" });
+      } else {
+        setIssueState({
+          kind: "error",
+          message: "This title is not tracked in Seerr.",
+        });
+      }
+    } catch (err: unknown) {
+      setIssueState({
+        kind: "error",
+        message:
+          err instanceof Error ? err.message : "Failed to report issue",
+      });
+    }
+  }
+
+  return (
+    <section className="issue-report" aria-labelledby="issue-report-heading">
+      <h2 id="issue-report-heading">Report an issue</h2>
+      {!expanded ? (
+        <button
+          type="button"
+          className="btn secondary"
+          onClick={() => setExpanded(true)}
+        >
+          Report an issue
+        </button>
+      ) : issueState.kind === "submitted" ? (
+        <p className="issue-report-success">Issue reported — thanks</p>
+      ) : (
+        <form
+          className="issue-report-form"
+          onSubmit={(event) => void submit(event)}
+        >
+          <label>
+            <span>Issue type</span>
+            <select
+              value={issueType}
+              onChange={(event) =>
+                setIssueType(event.target.value as IssueType)
+              }
+              disabled={issueState.kind === "submitting"}
+            >
+              <option value="video">Video</option>
+              <option value="audio">Audio</option>
+              <option value="subtitles">Subtitles</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label>
+            <span>What’s wrong?</span>
+            <textarea
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              required
+              rows={4}
+              disabled={issueState.kind === "submitting"}
+            />
+          </label>
+          <button
+            type="submit"
+            className="btn"
+            disabled={issueState.kind === "submitting"}
+          >
+            {issueState.kind === "submitting" ? "Reporting…" : "Submit report"}
+          </button>
+          {issueState.kind === "error" ? (
+            <p className="error issue-report-error">{issueState.message}</p>
+          ) : null}
+        </form>
+      )}
+    </section>
   );
 }
 

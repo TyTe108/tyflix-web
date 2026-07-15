@@ -61,6 +61,7 @@ export function HomePage() {
           <Link to="/discover">Discover</Link>
           <Link to="/watchlist">Watchlist</Link>
           <Link to="/requests">My Requests</Link>
+          <Link to="/issues">My Issues</Link>
           {isAdmin ? <Link to="/admin">Admin</Link> : null}
           <button
             type="button"

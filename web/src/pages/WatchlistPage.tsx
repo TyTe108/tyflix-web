@@ -56,6 +56,7 @@ export function WatchlistPage() {
         <div className="nav-links">
           <Link to="/">Home</Link>
           <Link to="/discover">Discover</Link>
+          <Link to="/issues">My Issues</Link>
           {isAdmin ? <Link to="/admin">Admin</Link> : null}
           <button
             type="button"

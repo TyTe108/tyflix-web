@@ -78,6 +78,7 @@ export function DiscoverPage() {
         <div className="nav-links">
           <Link to="/">Home</Link>
           <Link to="/watchlist">Watchlist</Link>
+          <Link to="/issues">My Issues</Link>
           {isAdmin ? <Link to="/admin">Admin</Link> : null}
           <button
             type="button"

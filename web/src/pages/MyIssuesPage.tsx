@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  fetchMyRequests,
-  formatRequestDate,
-  mediaStatusLabel,
-  requestStatusBadgeClass,
-  type RequestView,
-} from "../api/requests";
+  fetchMyIssues,
+  formatIssueDate,
+  issueStatusBadgeClass,
+  issueStatusLabel,
+  issueTypeLabel,
+  type IssueView,
+} from "../api/issues";
 import { useAuth } from "../auth/AuthContext";
 
 type LoadStatus = "loading" | "ready" | "error";
 
-export function MyRequestsPage() {
+export function MyIssuesPage() {
   const { isAdmin, logout } = useAuth();
-  const [requests, setRequests] = useState<RequestView[]>([]);
+  const [issues, setIssues] = useState<IssueView[]>([]);
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -27,22 +28,22 @@ export function MyRequestsPage() {
     setStatus("loading");
     setError(null);
 
-    void fetchMyRequests()
-      .then((rows) => {
+    void fetchMyIssues()
+      .then((results) => {
         if (cancelled) {
           return;
         }
-        setRequests(rows);
+        setIssues(results);
         setStatus("ready");
       })
       .catch((err: unknown) => {
         if (cancelled) {
           return;
         }
-        setRequests([]);
+        setIssues([]);
         setStatus("error");
         setError(
-          err instanceof Error ? err.message : "Failed to load requests",
+          err instanceof Error ? err.message : "Failed to load issues",
         );
       });
 
@@ -54,12 +55,12 @@ export function MyRequestsPage() {
   return (
     <main className="page page-wide">
       <header className="row">
-        <h1>My Requests</h1>
+        <h1>My Issues</h1>
         <div className="nav-links">
           <Link to="/">Home</Link>
           <Link to="/discover">Discover</Link>
           <Link to="/watchlist">Watchlist</Link>
-          <Link to="/issues">My Issues</Link>
+          <Link to="/requests">My Requests</Link>
           {isAdmin ? <Link to="/admin">Admin</Link> : null}
           <button
             type="button"
@@ -71,60 +72,50 @@ export function MyRequestsPage() {
         </div>
       </header>
 
-      <section aria-labelledby="my-requests-heading">
-        <h2 id="my-requests-heading" className="visually-hidden">
-          Request list
+      <section aria-labelledby="my-issues-heading">
+        <h2 id="my-issues-heading" className="visually-hidden">
+          Issue list
         </h2>
 
         {status === "loading" ? (
-          <p className="muted">Loading your requests…</p>
+          <p className="muted">Loading your issues…</p>
         ) : null}
 
         {status === "error" ? (
           <div className="stats-error">
-            <p className="error">{error ?? "Failed to load requests"}</p>
+            <p className="error">{error ?? "Failed to load issues"}</p>
             <button type="button" className="btn secondary" onClick={retry}>
               Retry
             </button>
           </div>
         ) : null}
 
-        {status === "ready" && requests.length === 0 ? (
-          <p className="muted">
-            No requests yet.{" "}
-            <Link to="/discover">Discover something</Link> to request.
-          </p>
+        {status === "ready" && issues.length === 0 ? (
+          <p className="muted">You haven't reported any issues.</p>
         ) : null}
 
-        {status === "ready" && requests.length > 0 ? (
-          <ul className="my-requests-list">
-            {requests.map((row) => (
-              <li key={row.id} className="my-requests-item">
-                <div className="my-requests-row">
+        {status === "ready" && issues.length > 0 ? (
+          <ul className="my-issues-list">
+            {issues.map((issue) => (
+              <li key={issue.id} className="my-issues-item">
+                <div className="my-issues-row">
                   <Link
-                    to={`/media/${row.mediaType}/${row.tmdbId}`}
-                    className="my-requests-title"
+                    to={`/media/${issue.media.mediaType}/${issue.media.tmdbId}`}
+                    className="my-issues-title"
                   >
-                    {row.title}
+                    TMDB #{issue.media.tmdbId}
                   </Link>
                   <span className="stats-tag">
-                    {row.mediaType === "tv" ? "TV" : "Movie"}
+                    {issue.media.mediaType === "tv" ? "TV" : "Movie"}
                   </span>
-                  <span className={requestStatusBadgeClass(row.requestStatus)}>
-                    {row.requestStatus}
+                  <span>{issueTypeLabel(issue.issueType)}</span>
+                  <span className={issueStatusBadgeClass(issue.status)}>
+                    {issueStatusLabel(issue.status)}
                   </span>
                 </div>
-                <div className="my-requests-meta muted">
-                  <span>{mediaStatusLabel(row.mediaStatus)}</span>
-                  {row.mediaType === "tv" &&
-                  row.seasons &&
-                  row.seasons.length > 0 ? (
-                    <span>
-                      Seasons {row.seasons.join(", ")}
-                    </span>
-                  ) : null}
-                  <span>Requested {formatRequestDate(row.createdAt)}</span>
-                </div>
+                <p className="my-issues-meta muted">
+                  Reported {formatIssueDate(issue.createdAt)}
+                </p>
               </li>
             ))}
           </ul>
