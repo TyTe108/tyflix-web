@@ -33,7 +33,7 @@ import {
   formatRequestDate,
   mediaStatusLabel,
   requestStatusBadgeClass,
-  type RequestRow,
+  type RequestView,
 } from "../api/requests";
 
 type LoadStatus = "loading" | "ready" | "error";
@@ -119,7 +119,7 @@ export function AdminPage() {
   );
 }
 
-function pendingFirst(requests: RequestRow[]): RequestRow[] {
+function pendingFirst(requests: RequestView[]): RequestView[] {
   return [...requests].sort((a, b) => {
     const aPending = a.requestStatus === "pending" ? 0 : 1;
     const bPending = b.requestStatus === "pending" ? 0 : 1;
@@ -128,7 +128,7 @@ function pendingFirst(requests: RequestRow[]): RequestRow[] {
 }
 
 function RequestsPanel() {
-  const [requests, setRequests] = useState<RequestRow[]>([]);
+  const [requests, setRequests] = useState<RequestView[]>([]);
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);

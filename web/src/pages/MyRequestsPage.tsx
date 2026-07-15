@@ -5,7 +5,7 @@ import {
   formatRequestDate,
   mediaStatusLabel,
   requestStatusBadgeClass,
-  type RequestRow,
+  type RequestView,
 } from "../api/requests";
 import { useAuth } from "../auth/AuthContext";
 
@@ -13,7 +13,7 @@ type LoadStatus = "loading" | "ready" | "error";
 
 export function MyRequestsPage() {
   const { isAdmin, logout } = useAuth();
-  const [requests, setRequests] = useState<RequestRow[]>([]);
+  const [requests, setRequests] = useState<RequestView[]>([]);
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);

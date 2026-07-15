@@ -4,31 +4,29 @@ export type RequestApprovalStatus =
   | "pending"
   | "approved"
   | "declined"
-  | "failed";
+  | "failed"
+  | "completed";
 
 export type MediaAvailabilityStatus =
   | "unknown"
   | "pending"
   | "processing"
   | "partially_available"
-  | "available";
+  | "available"
+  | "blocklisted"
+  | "deleted";
 
-export type RequestRow = {
+export type RequestView = {
   id: number;
   tmdbId: number;
   mediaType: MediaType;
   title: string;
-  seasons: number[] | null;
-  requestedBySeerrId: number;
-  requestedByName: string;
+  seasons: number[];
   requestStatus: RequestApprovalStatus;
   mediaStatus: MediaAvailabilityStatus;
-  radarrId: number | null;
-  sonarrId: number | null;
+  requestedById: number;
+  requestedByName: string;
   createdAt: string;
-  updatedAt: string;
-  decidedBy: number | null;
-  decidedAt: string | null;
 };
 
 export type CreateRequestInput = {
@@ -38,8 +36,8 @@ export type CreateRequestInput = {
 };
 
 export type CreateRequestResult =
-  | { ok: true; request: RequestRow }
-  | { ok: false; alreadyRequested: true; request: RequestRow };
+  | { ok: true; request: RequestView }
+  | { ok: false; alreadyRequested: true; request: RequestView };
 
 export async function createRequest(
   input: CreateRequestInput,
@@ -51,7 +49,7 @@ export async function createRequest(
   });
 
   if (res.status === 409) {
-    const body = (await res.json()) as { request?: RequestRow };
+    const body = (await res.json()) as { request?: RequestView };
     if (body.request) {
       return { ok: false, alreadyRequested: true, request: body.request };
     }
@@ -62,41 +60,41 @@ export async function createRequest(
     throw new Error(`Failed to create request (${res.status})`);
   }
 
-  return { ok: true, request: (await res.json()) as RequestRow };
+  return { ok: true, request: (await res.json()) as RequestView };
 }
 
-export async function fetchMyRequests(): Promise<RequestRow[]> {
+export async function fetchMyRequests(): Promise<RequestView[]> {
   const res = await fetch("/api/requests");
   if (!res.ok) {
     throw new Error(`Failed to load requests (${res.status})`);
   }
-  const body = (await res.json()) as { results: RequestRow[] };
+  const body = (await res.json()) as { results: RequestView[] };
   return body.results;
 }
 
-export async function fetchAllRequests(): Promise<RequestRow[]> {
+export async function fetchAllRequests(): Promise<RequestView[]> {
   const res = await fetch("/api/requests/all");
   if (!res.ok) {
     throw new Error(`Failed to load all requests (${res.status})`);
   }
-  const body = (await res.json()) as { results: RequestRow[] };
+  const body = (await res.json()) as { results: RequestView[] };
   return body.results;
 }
 
-export async function approveRequest(id: number): Promise<RequestRow> {
+export async function approveRequest(id: number): Promise<RequestView> {
   const res = await fetch(`/api/requests/${id}/approve`, { method: "POST" });
   if (!res.ok) {
     throw new Error(`Failed to approve request (${res.status})`);
   }
-  return (await res.json()) as RequestRow;
+  return (await res.json()) as RequestView;
 }
 
-export async function declineRequest(id: number): Promise<RequestRow> {
+export async function declineRequest(id: number): Promise<RequestView> {
   const res = await fetch(`/api/requests/${id}/decline`, { method: "POST" });
   if (!res.ok) {
     throw new Error(`Failed to decline request (${res.status})`);
   }
-  return (await res.json()) as RequestRow;
+  return (await res.json()) as RequestView;
 }
 
 export function formatRequestDate(iso: string): string {
@@ -119,6 +117,8 @@ export function requestStatusBadgeClass(
       return "request-status request-status-pending";
     case "approved":
       return "request-status request-status-approved";
+    case "completed":
+      return "request-status request-status-approved";
     case "declined":
       return "request-status request-status-declined";
     case "failed":
@@ -138,5 +138,9 @@ export function mediaStatusLabel(status: MediaAvailabilityStatus): string {
       return "Partially available";
     case "available":
       return "Available";
+    case "blocklisted":
+      return "Blocklisted";
+    case "deleted":
+      return "Deleted";
   }
 }
