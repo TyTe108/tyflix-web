@@ -7,9 +7,16 @@ import {
   type MovieDetail,
   type TvDetail,
 } from "../api/discover";
+import { createRequest } from "../api/requests";
 
 type LoadStatus = "loading" | "ready" | "error";
 type MediaDetail = MovieDetail | TvDetail;
+type RequestUiState =
+  | { kind: "idle" }
+  | { kind: "submitting" }
+  | { kind: "requested" }
+  | { kind: "already" }
+  | { kind: "error"; message: string };
 
 function parseType(raw: string | undefined): "movie" | "tv" | null {
   if (raw === "movie" || raw === "tv") {
@@ -157,6 +164,8 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
           <p className="muted">No overview available.</p>
         )}
 
+        <RequestControls detail={detail} />
+
         {detail.mediaType === "tv" ? (
           <section
             className="media-detail-seasons"
@@ -182,5 +191,125 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
         ) : null}
       </div>
     </article>
+  );
+}
+
+function RequestControls({ detail }: { detail: MediaDetail }) {
+  const [requestState, setRequestState] = useState<RequestUiState>({
+    kind: "idle",
+  });
+  const [selectedSeasons, setSelectedSeasons] = useState<number[]>([]);
+
+  const done =
+    requestState.kind === "requested" || requestState.kind === "already";
+  const submitting = requestState.kind === "submitting";
+
+  const submit = useCallback(
+    async (seasons?: number[]) => {
+      setRequestState({ kind: "submitting" });
+      try {
+        const result = await createRequest({
+          tmdbId: detail.tmdbId,
+          mediaType: detail.mediaType,
+          ...(seasons !== undefined ? { seasons } : {}),
+        });
+        if (result.ok) {
+          setRequestState({ kind: "requested" });
+        } else {
+          setRequestState({ kind: "already" });
+        }
+      } catch (err: unknown) {
+        setRequestState({
+          kind: "error",
+          message:
+            err instanceof Error ? err.message : "Failed to create request",
+        });
+      }
+    },
+    [detail.mediaType, detail.tmdbId],
+  );
+
+  function toggleSeason(seasonNumber: number) {
+    setSelectedSeasons((prev) =>
+      prev.includes(seasonNumber)
+        ? prev.filter((n) => n !== seasonNumber)
+        : [...prev, seasonNumber].sort((a, b) => a - b),
+    );
+  }
+
+  if (detail.mediaType === "movie") {
+    return (
+      <section className="request-controls" aria-label="Request movie">
+        {done ? (
+          <p className="request-controls-status">
+            {requestState.kind === "already"
+              ? "Already requested"
+              : "Requested"}
+          </p>
+        ) : (
+          <button
+            type="button"
+            className="btn"
+            disabled={submitting}
+            onClick={() => void submit()}
+          >
+            {submitting ? "Requesting…" : "Request"}
+          </button>
+        )}
+        {requestState.kind === "error" ? (
+          <p className="error request-controls-error">{requestState.message}</p>
+        ) : null}
+      </section>
+    );
+  }
+
+  return (
+    <section className="request-controls" aria-label="Request TV seasons">
+      {detail.seasons.length === 0 ? (
+        <p className="muted">No seasons available to request.</p>
+      ) : done ? (
+        <p className="request-controls-status">
+          {requestState.kind === "already" ? "Already requested" : "Requested"}
+        </p>
+      ) : (
+        <>
+          <fieldset className="request-season-pick" disabled={submitting}>
+            <legend>Select seasons to request</legend>
+            <ul className="request-season-check-list">
+              {detail.seasons.map((season) => (
+                <li key={season.seasonNumber}>
+                  <label className="request-season-check">
+                    <input
+                      type="checkbox"
+                      checked={selectedSeasons.includes(season.seasonNumber)}
+                      onChange={() => toggleSeason(season.seasonNumber)}
+                    />
+                    <span>
+                      {season.name}
+                      <span className="muted">
+                        {" "}
+                        ({season.episodeCount} ep
+                        {season.episodeCount === 1 ? "" : "s"})
+                      </span>
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </fieldset>
+          <button
+            type="button"
+            className="btn"
+            disabled={submitting || selectedSeasons.length === 0}
+            onClick={() => void submit(selectedSeasons)}
+          >
+            {submitting ? "Requesting…" : "Request selected seasons"}
+          </button>
+        </>
+      )}
+      {requestState.kind === "error" ? (
+        <p className="error request-controls-error">{requestState.message}</p>
+      ) : null}
+    </section>
   );
 }

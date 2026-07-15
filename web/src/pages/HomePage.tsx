@@ -59,6 +59,7 @@ export function HomePage() {
         <h1>Tyflix</h1>
         <div className="nav-links">
           <Link to="/discover">Discover</Link>
+          <Link to="/requests">My Requests</Link>
           {isAdmin ? <Link to="/admin">Admin</Link> : null}
           <button
             type="button"
