@@ -74,6 +74,31 @@ export async function fetchMyRequests(): Promise<RequestRow[]> {
   return body.results;
 }
 
+export async function fetchAllRequests(): Promise<RequestRow[]> {
+  const res = await fetch("/api/requests/all");
+  if (!res.ok) {
+    throw new Error(`Failed to load all requests (${res.status})`);
+  }
+  const body = (await res.json()) as { results: RequestRow[] };
+  return body.results;
+}
+
+export async function approveRequest(id: number): Promise<RequestRow> {
+  const res = await fetch(`/api/requests/${id}/approve`, { method: "POST" });
+  if (!res.ok) {
+    throw new Error(`Failed to approve request (${res.status})`);
+  }
+  return (await res.json()) as RequestRow;
+}
+
+export async function declineRequest(id: number): Promise<RequestRow> {
+  const res = await fetch(`/api/requests/${id}/decline`, { method: "POST" });
+  if (!res.ok) {
+    throw new Error(`Failed to decline request (${res.status})`);
+  }
+  return (await res.json()) as RequestRow;
+}
+
 export function formatRequestDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) {

@@ -26,6 +26,15 @@ import {
   type AdminUser,
   type AdminUsersResponse,
 } from "../api/admin";
+import {
+  approveRequest,
+  declineRequest,
+  fetchAllRequests,
+  formatRequestDate,
+  mediaStatusLabel,
+  requestStatusBadgeClass,
+  type RequestRow,
+} from "../api/requests";
 
 type LoadStatus = "loading" | "ready" | "error";
 
@@ -99,12 +108,177 @@ export function AdminPage() {
         ) : null}
       </section>
 
+      <RequestsPanel />
+
       <UsersPanel />
 
       <JobsPanel />
 
       <ContainersPanel />
     </main>
+  );
+}
+
+function pendingFirst(requests: RequestRow[]): RequestRow[] {
+  return [...requests].sort((a, b) => {
+    const aPending = a.requestStatus === "pending" ? 0 : 1;
+    const bPending = b.requestStatus === "pending" ? 0 : 1;
+    return aPending - bPending;
+  });
+}
+
+function RequestsPanel() {
+  const [requests, setRequests] = useState<RequestRow[]>([]);
+  const [status, setStatus] = useState<LoadStatus>("loading");
+  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [activeRequestId, setActiveRequestId] = useState<number | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const retry = useCallback(() => {
+    setReloadKey((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setStatus("loading");
+    setError(null);
+
+    void fetchAllRequests()
+      .then((rows) => {
+        if (cancelled) {
+          return;
+        }
+        setRequests(pendingFirst(rows));
+        setStatus("ready");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        setRequests([]);
+        setStatus("error");
+        setError(
+          err instanceof Error ? err.message : "Failed to load requests",
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey]);
+
+  const runAction = useCallback(
+    async (id: number, action: "approve" | "decline") => {
+      setActiveRequestId(id);
+      setActionError(null);
+      try {
+        const updated =
+          action === "approve"
+            ? await approveRequest(id)
+            : await declineRequest(id);
+        setRequests((rows) =>
+          pendingFirst(rows.map((row) => (row.id === id ? updated : row))),
+        );
+      } catch (err: unknown) {
+        setActionError(
+          err instanceof Error ? err.message : `Failed to ${action} request`,
+        );
+
+        // Approval failures may persist the request as failed server-side.
+        try {
+          const rows = await fetchAllRequests();
+          setRequests(pendingFirst(rows));
+        } catch {
+          // Preserve the action error and currently displayed rows.
+        }
+      } finally {
+        setActiveRequestId(null);
+      }
+    },
+    [],
+  );
+
+  return (
+    <section className="admin-section" aria-labelledby="requests-heading">
+      <h2 id="requests-heading">Requests</h2>
+
+      {status === "loading" ? (
+        <p className="muted">Loading requests…</p>
+      ) : null}
+
+      {status === "error" ? (
+        <div className="stats-error">
+          <p className="error">{error ?? "Failed to load requests"}</p>
+          <button type="button" className="btn secondary" onClick={retry}>
+            Retry
+          </button>
+        </div>
+      ) : null}
+
+      {status === "ready" && actionError ? (
+        <p className="error admin-requests-action-error">{actionError}</p>
+      ) : null}
+
+      {status === "ready" && requests.length === 0 ? (
+        <p className="muted">No requests yet.</p>
+      ) : null}
+
+      {status === "ready" && requests.length > 0 ? (
+        <ul className="admin-requests-list">
+          {requests.map((request) => {
+            const inFlight = activeRequestId === request.id;
+            return (
+              <li key={request.id} className="admin-request-row">
+                <div className="admin-request-main">
+                  <span className="admin-request-title">{request.title}</span>
+                  <span className="stats-tag">
+                    {request.mediaType === "tv" ? "TV" : "Movie"}
+                  </span>
+                  <span
+                    className={requestStatusBadgeClass(request.requestStatus)}
+                  >
+                    {request.requestStatus}
+                  </span>
+                </div>
+
+                <div className="admin-request-meta muted">
+                  <span>Requested by {request.requestedByName}</span>
+                  {request.mediaType === "tv" &&
+                  request.seasons &&
+                  request.seasons.length > 0 ? (
+                    <span>Seasons {request.seasons.join(", ")}</span>
+                  ) : null}
+                  <span>{mediaStatusLabel(request.mediaStatus)}</span>
+                  <span>Requested {formatRequestDate(request.createdAt)}</span>
+                </div>
+
+                {request.requestStatus === "pending" ? (
+                  <div className="admin-request-actions">
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={activeRequestId !== null}
+                      onClick={() => void runAction(request.id, "approve")}
+                    >
+                      {inFlight ? "Working…" : "Approve"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      disabled={activeRequestId !== null}
+                      onClick={() => void runAction(request.id, "decline")}
+                    >
+                      Decline
+                    </button>
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </section>
   );
 }
 

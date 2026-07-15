@@ -1133,6 +1133,60 @@ a {
   border: 1px solid rgba(139, 30, 30, 0.35);
 }
 
+.admin-requests-action-error {
+  margin: 0 0 0.75rem;
+}
+
+.admin-requests-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.admin-request-row {
+  padding: 0.85rem 0;
+  border-bottom: 1px solid rgba(31, 61, 45, 0.1);
+}
+
+.admin-request-row:last-child {
+  border-bottom: 0;
+}
+
+.admin-request-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.65rem;
+}
+
+.admin-request-title {
+  font-weight: 600;
+}
+
+.admin-request-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  margin-top: 0.3rem;
+  font-size: 0.875rem;
+}
+
+.admin-request-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+}
+
+.admin-request-actions .btn {
+  padding: 0.45rem 0.8rem;
+  font-size: 0.875rem;
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 @media (max-width: 32rem) {
   .stats-totals {
     grid-template-columns: 1fr;
