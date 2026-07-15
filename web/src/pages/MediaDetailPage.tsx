@@ -4,10 +4,12 @@ import {
   fetchMovie,
   fetchTv,
   formatRuntime,
+  canRequest,
+  mediaStatusBadgeClass,
   type MovieDetail,
   type TvDetail,
 } from "../api/discover";
-import { createRequest } from "../api/requests";
+import { createRequest, mediaStatusLabel } from "../api/requests";
 
 type LoadStatus = "loading" | "ready" | "error";
 type MediaDetail = MovieDetail | TvDetail;
@@ -139,6 +141,11 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
           {detail.status ? (
             <span className="muted media-detail-status">{detail.status}</span>
           ) : null}
+          {detail.mediaStatus !== null ? (
+            <span className={mediaStatusBadgeClass(detail.mediaStatus)}>
+              {mediaStatusLabel(detail.mediaStatus)}
+            </span>
+          ) : null}
         </p>
 
         <h1>
@@ -237,9 +244,30 @@ function RequestControls({ detail }: { detail: MediaDetail }) {
     );
   }
 
+  if (!canRequest(detail.mediaStatus)) {
+    const label = detail.mediaStatus === "available" ? "Available" : "Requested";
+    return (
+      <section className="request-controls" aria-label="Request status">
+        <p className="request-controls-status">
+          <span className={mediaStatusBadgeClass(detail.mediaStatus)}>
+            {label}
+          </span>
+        </p>
+      </section>
+    );
+  }
+
+  const partialAvailabilityContext =
+    detail.mediaStatus === "partially_available" ? (
+      <p className="request-controls-status">
+        Partially available — request more
+      </p>
+    ) : null;
+
   if (detail.mediaType === "movie") {
     return (
       <section className="request-controls" aria-label="Request movie">
+        {partialAvailabilityContext}
         {done ? (
           <p className="request-controls-status">
             {requestState.kind === "already"
@@ -265,6 +293,7 @@ function RequestControls({ detail }: { detail: MediaDetail }) {
 
   return (
     <section className="request-controls" aria-label="Request TV seasons">
+      {partialAvailabilityContext}
       {detail.seasons.length === 0 ? (
         <p className="muted">No seasons available to request.</p>
       ) : done ? (

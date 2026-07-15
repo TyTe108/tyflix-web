@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   fetchTrending,
+  mediaStatusBadgeClass,
   searchMedia,
   type MediaSummary,
 } from "../api/discover";
+import { mediaStatusLabel } from "../api/requests";
 import { useAuth } from "../auth/AuthContext";
 
 type LoadStatus = "loading" | "ready" | "error";
@@ -146,6 +148,13 @@ function MediaCard({ item }: { item: MediaSummary }) {
             No poster
           </div>
         )}
+        {item.mediaStatus !== null ? (
+          <span
+            className={`media-status-corner ${mediaStatusBadgeClass(item.mediaStatus)}`}
+          >
+            {mediaStatusLabel(item.mediaStatus)}
+          </span>
+        ) : null}
       </div>
       <div className="media-card-body">
         <div className="media-card-title-row">

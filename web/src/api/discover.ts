@@ -1,3 +1,5 @@
+import type { MediaAvailabilityStatus } from "./requests";
+
 export type MediaType = "movie" | "tv";
 
 export type MediaSummary = {
@@ -7,6 +9,7 @@ export type MediaSummary = {
   year: number | null;
   posterUrl: string | null;
   overview: string;
+  mediaStatus: MediaAvailabilityStatus | null;
 };
 
 export type MovieDetail = {
@@ -20,6 +23,7 @@ export type MovieDetail = {
   runtime: number | null;
   genres: string[];
   status: string;
+  mediaStatus: MediaAvailabilityStatus | null;
 };
 
 export type TvSeasonSummary = {
@@ -40,6 +44,7 @@ export type TvDetail = {
   status: string;
   tvdbId: number | null;
   seasons: TvSeasonSummary[];
+  mediaStatus: MediaAvailabilityStatus | null;
 };
 
 export type SearchResponse = {
@@ -82,6 +87,37 @@ export async function fetchMovie(id: number): Promise<MovieDetail> {
 
 export async function fetchTv(id: number): Promise<TvDetail> {
   return getJson<TvDetail>(`/api/discover/tv/${id}`);
+}
+
+export function canRequest(
+  mediaStatus: MediaAvailabilityStatus | null,
+): boolean {
+  return (
+    mediaStatus !== "available" &&
+    mediaStatus !== "processing" &&
+    mediaStatus !== "pending"
+  );
+}
+
+export function mediaStatusBadgeClass(
+  mediaStatus: MediaAvailabilityStatus | null,
+): string {
+  switch (mediaStatus) {
+    case null:
+      return "";
+    case "available":
+      return "request-status request-status-approved";
+    case "partially_available":
+      return "request-status request-status-pending";
+    case "processing":
+    case "pending":
+      return "request-status request-status-processing";
+    case "blocklisted":
+      return "request-status request-status-failed";
+    case "unknown":
+    case "deleted":
+      return "request-status request-status-declined";
+  }
 }
 
 export function formatRuntime(minutes: number): string {
