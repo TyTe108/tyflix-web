@@ -1,49 +1,16 @@
 import { Router } from "express";
-import {
-  mediaStatusFromCode,
-  type MediaAvailability,
-  type SeerrClient,
-} from "../seerr/client";
+import type { MediaAvailability } from "../seerr/client";
+import type { MediaStatusProvider } from "../seerr/mediaStatusProvider";
 import { TmdbUpstreamError, type TmdbClient } from "../tmdb/client";
 
 export type DiscoverRouterDeps = {
   tmdb: TmdbClient;
-  seerr: Pick<SeerrClient, "listMedia">;
+  mediaStatus: MediaStatusProvider;
 };
 
 export function createDiscoverRouter(deps: DiscoverRouterDeps): Router {
-  const { tmdb, seerr } = deps;
+  const { tmdb, mediaStatus } = deps;
   const router = Router();
-  let mediaStatusCache:
-    | { expiresAt: number; statuses: Map<string, MediaAvailability> }
-    | undefined;
-
-  async function getMediaStatuses(): Promise<Map<string, MediaAvailability>> {
-    if (mediaStatusCache !== undefined && mediaStatusCache.expiresAt > Date.now()) {
-      return mediaStatusCache.statuses;
-    }
-
-    try {
-      const media = await seerr.listMedia();
-      const statuses = new Map<string, MediaAvailability>();
-      for (const item of media) {
-        const status = mediaStatusFromCode(item.status);
-        if (status !== null) {
-          statuses.set(`${item.mediaType}:${item.tmdbId}`, status);
-        }
-      }
-      mediaStatusCache = {
-        expiresAt: Date.now() + 60_000,
-        statuses,
-      };
-      return statuses;
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Seerr media list request failed";
-      console.error(`Unable to load Seerr media statuses: ${message}`);
-      return new Map();
-    }
-  }
 
   router.get("/search", async (req, res) => {
     const query = typeof req.query.query === "string" ? req.query.query : "";
@@ -60,7 +27,7 @@ export function createDiscoverRouter(deps: DiscoverRouterDeps): Router {
 
     try {
       const result = await tmdb.search(query, page);
-      const statuses = await getMediaStatuses();
+      const statuses = await mediaStatus.getStatusMap();
       res.json({
         ...result,
         results: result.results.map((item) =>
@@ -75,7 +42,7 @@ export function createDiscoverRouter(deps: DiscoverRouterDeps): Router {
   router.get("/trending", async (_req, res) => {
     try {
       const results = await tmdb.trending();
-      const statuses = await getMediaStatuses();
+      const statuses = await mediaStatus.getStatusMap();
       res.json({
         results: results.map((item) => annotateMediaStatus(item, statuses)),
       });
@@ -93,7 +60,7 @@ export function createDiscoverRouter(deps: DiscoverRouterDeps): Router {
 
     try {
       const detail = await tmdb.movieDetail(id);
-      const statuses = await getMediaStatuses();
+      const statuses = await mediaStatus.getStatusMap();
       res.json(annotateMediaStatus(detail, statuses));
     } catch (err) {
       respondUpstreamError(res, err);
@@ -109,7 +76,7 @@ export function createDiscoverRouter(deps: DiscoverRouterDeps): Router {
 
     try {
       const detail = await tmdb.tvDetail(id);
-      const statuses = await getMediaStatuses();
+      const statuses = await mediaStatus.getStatusMap();
       res.json(annotateMediaStatus(detail, statuses));
     } catch (err) {
       respondUpstreamError(res, err);

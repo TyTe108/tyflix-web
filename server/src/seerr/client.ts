@@ -30,6 +30,12 @@ export type SeerrMediaListItem = {
   status: number;
 };
 
+export type SeerrWatchlistItem = {
+  tmdbId: number;
+  mediaType: "movie" | "tv";
+  title: string;
+};
+
 export type SeerrRequestSeason = {
   seasonNumber: number;
 };
@@ -309,6 +315,44 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return media;
   }
 
+  async function listUserWatchlist(
+    userId: number,
+    page = 1,
+  ): Promise<SeerrWatchlistItem[]> {
+    let currentPage = page;
+    let totalPages = currentPage;
+    const watchlist: SeerrWatchlistItem[] = [];
+
+    do {
+      const path = `/api/v1/user/${userId}/watchlist`;
+      const body = await getJson(path, { page: String(currentPage) });
+
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        typeof (body as { totalPages?: unknown }).totalPages !== "number" ||
+        !Array.isArray((body as { results?: unknown }).results)
+      ) {
+        throw new SeerrUpstreamError(
+          `Seerr ${path} returned unexpected body`,
+          502,
+        );
+      }
+
+      totalPages = (body as { totalPages: number }).totalPages;
+      const results = (body as { results: unknown[] }).results;
+      for (const row of results) {
+        const mapped = mapSeerrWatchlistItem(row);
+        if (mapped !== null) {
+          watchlist.push(mapped);
+        }
+      }
+      currentPage += 1;
+    } while (currentPage <= totalPages);
+
+    return watchlist;
+  }
+
   async function createRequest(
     input: CreateSeerrRequestInput,
   ): Promise<SeerrRequest> {
@@ -339,6 +383,7 @@ export function createSeerrClient(options: SeerrClientOptions) {
     listUserRequests,
     getRequestsByUser: listUserRequests,
     listMedia,
+    listUserWatchlist,
     createRequest,
     approveRequest,
     declineRequest,
@@ -410,6 +455,26 @@ function mapSeerrMediaListItem(row: unknown): SeerrMediaListItem | null {
   }
 
   return { tmdbId, mediaType, status };
+}
+
+function mapSeerrWatchlistItem(row: unknown): SeerrWatchlistItem | null {
+  if (typeof row !== "object" || row === null) {
+    return null;
+  }
+
+  const tmdbId = (row as { tmdbId?: unknown }).tmdbId;
+  const mediaType = (row as { mediaType?: unknown }).mediaType;
+  const title = (row as { title?: unknown }).title;
+  if (
+    typeof tmdbId !== "number" ||
+    !Number.isFinite(tmdbId) ||
+    (mediaType !== "movie" && mediaType !== "tv") ||
+    typeof title !== "string"
+  ) {
+    return null;
+  }
+
+  return { tmdbId, mediaType, title };
 }
 
 function mapSeerrUser(row: unknown): SeerrUser | null {

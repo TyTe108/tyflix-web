@@ -237,6 +237,69 @@ describe("Seerr media client", () => {
   });
 });
 
+describe("Seerr watchlist client", () => {
+  it("maps valid rows, skips malformed rows, and paginates", async () => {
+    const pages: string[] = [];
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      pages.push(url.searchParams.get("page") ?? "");
+      if (url.searchParams.get("page") === "1") {
+        return jsonResponse(200, {
+          page: 1,
+          totalPages: 2,
+          totalResults: 4,
+          results: [
+            {
+              id: 1,
+              ratingKey: "10",
+              title: "The Matrix",
+              mediaType: "movie",
+              tmdbId: 603,
+            },
+            {
+              id: 2,
+              ratingKey: "11",
+              title: "Missing TMDB id",
+              mediaType: "movie",
+            },
+            {
+              id: 3,
+              title: "Wrong media type",
+              mediaType: "person",
+              tmdbId: 12,
+            },
+          ],
+        });
+      }
+      return jsonResponse(200, {
+        page: 2,
+        totalPages: 2,
+        totalResults: 4,
+        results: [
+          {
+            id: 4,
+            ratingKey: "12",
+            title: "Breaking Bad",
+            mediaType: "tv",
+            tmdbId: 1396,
+          },
+        ],
+      });
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    assert.deepEqual(await seerr.listUserWatchlist(7), [
+      { tmdbId: 603, mediaType: "movie", title: "The Matrix" },
+      { tmdbId: 1396, mediaType: "tv", title: "Breaking Bad" },
+    ]);
+    assert.deepEqual(pages, ["1", "2"]);
+  });
+});
+
 describe("Seerr requests client", () => {
   it("maps every request and media status to its label", () => {
     const requestStatuses = [

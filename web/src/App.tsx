@@ -6,6 +6,7 @@ import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { MediaDetailPage } from "./pages/MediaDetailPage";
 import { MyRequestsPage } from "./pages/MyRequestsPage";
+import { WatchlistPage } from "./pages/WatchlistPage";
 
 export function App() {
   return (
@@ -14,6 +15,7 @@ export function App() {
       <Route element={<ProtectedRoute />}>
         <Route path="/" element={<HomePage />} />
         <Route path="/discover" element={<DiscoverPage />} />
+        <Route path="/watchlist" element={<WatchlistPage />} />
         <Route path="/requests" element={<MyRequestsPage />} />
         <Route path="/media/:type/:id" element={<MediaDetailPage />} />
       </Route>

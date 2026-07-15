@@ -58,6 +58,7 @@ export function MyRequestsPage() {
         <div className="nav-links">
           <Link to="/">Home</Link>
           <Link to="/discover">Discover</Link>
+          <Link to="/watchlist">Watchlist</Link>
           {isAdmin ? <Link to="/admin">Admin</Link> : null}
           <button
             type="button"

@@ -84,6 +84,7 @@ export function AdminPage() {
         <div className="nav-links">
           <Link to="/">Home</Link>
           <Link to="/discover">Discover</Link>
+          <Link to="/watchlist">Watchlist</Link>
         </div>
       </header>
 

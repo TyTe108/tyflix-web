@@ -10,7 +10,9 @@ import { createAuthRouter } from "./routes/auth";
 import { createDiscoverRouter } from "./routes/discover";
 import { createMeRouter } from "./routes/me";
 import { createRequestsRouter } from "./routes/requests";
+import { createWatchlistRouter } from "./routes/watchlist";
 import { createSeerrClient } from "./seerr/client";
+import { createMediaStatusProvider } from "./seerr/mediaStatusProvider";
 import { createTmdbClient } from "./tmdb/client";
 
 loadLocalEnvFile();
@@ -39,6 +41,7 @@ const seerr = createSeerrClient({
   baseUrl: config.seerrUrl,
   apiKey: config.seerrApiKey,
 });
+const mediaStatus = createMediaStatusProvider(seerr);
 
 const dashboard = createDashboardClient({
   baseUrl: config.dashboardUrl,
@@ -80,7 +83,13 @@ app.use(
 app.use(
   "/api/discover",
   requireAuth(config.sessionSecret),
-  createDiscoverRouter({ tmdb, seerr }),
+  createDiscoverRouter({ tmdb, mediaStatus }),
+);
+
+app.use(
+  "/api/watchlist",
+  requireAuth(config.sessionSecret),
+  createWatchlistRouter({ seerr, mediaStatus }),
 );
 
 app.use(

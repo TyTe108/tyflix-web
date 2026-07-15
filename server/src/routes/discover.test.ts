@@ -6,6 +6,7 @@ import {
   createDiscoverRouter,
   type DiscoverRouterDeps,
 } from "./discover";
+import { createMediaStatusProvider } from "../seerr/mediaStatusProvider";
 
 function createStubTmdb(): DiscoverRouterDeps["tmdb"] {
   return {
@@ -109,7 +110,7 @@ describe("discovery media status annotation", () => {
     let mediaCalls = 0;
     const app = createApp({
       tmdb: createStubTmdb(),
-      seerr: {
+      mediaStatus: createMediaStatusProvider({
         async listMedia() {
           mediaCalls += 1;
           return [
@@ -117,7 +118,7 @@ describe("discovery media status annotation", () => {
             { tmdbId: 1396, mediaType: "tv", status: 4 },
           ];
         },
-      },
+      }),
     });
 
     const trending = await fetchLocal(app, "/api/discover/trending");
@@ -156,11 +157,11 @@ describe("discovery media status annotation", () => {
   it("still returns discovery results with null status when Seerr fails", async () => {
     const app = createApp({
       tmdb: createStubTmdb(),
-      seerr: {
+      mediaStatus: createMediaStatusProvider({
         async listMedia() {
           throw new Error("Seerr unavailable");
         },
-      },
+      }),
     });
     const originalConsoleError = console.error;
     console.error = () => undefined;

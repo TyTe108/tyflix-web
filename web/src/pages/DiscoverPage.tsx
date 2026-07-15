@@ -2,12 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   fetchTrending,
-  mediaStatusBadgeClass,
   searchMedia,
   type MediaSummary,
 } from "../api/discover";
-import { mediaStatusLabel } from "../api/requests";
 import { useAuth } from "../auth/AuthContext";
+import { MediaCard } from "../components/MediaCard";
 
 type LoadStatus = "loading" | "ready" | "error";
 
@@ -78,6 +77,7 @@ export function DiscoverPage() {
         <h1>Discover</h1>
         <div className="nav-links">
           <Link to="/">Home</Link>
+          <Link to="/watchlist">Watchlist</Link>
           {isAdmin ? <Link to="/admin">Admin</Link> : null}
           <button
             type="button"
@@ -131,40 +131,5 @@ export function DiscoverPage() {
         ) : null}
       </section>
     </main>
-  );
-}
-
-function MediaCard({ item }: { item: MediaSummary }) {
-  const to = `/media/${item.mediaType}/${item.tmdbId}`;
-  const yearLabel = item.year !== null ? String(item.year) : "—";
-
-  return (
-    <Link to={to} className="media-card">
-      <div className="media-poster">
-        {item.posterUrl ? (
-          <img src={item.posterUrl} alt="" loading="lazy" />
-        ) : (
-          <div className="media-poster-placeholder" aria-hidden="true">
-            No poster
-          </div>
-        )}
-        {item.mediaStatus !== null ? (
-          <span
-            className={`media-status-corner ${mediaStatusBadgeClass(item.mediaStatus)}`}
-          >
-            {mediaStatusLabel(item.mediaStatus)}
-          </span>
-        ) : null}
-      </div>
-      <div className="media-card-body">
-        <div className="media-card-title-row">
-          <span className="media-card-title">{item.title}</span>
-          <span className="stats-tag">
-            {item.mediaType === "tv" ? "TV" : "Movie"}
-          </span>
-        </div>
-        <p className="media-card-year muted">{yearLabel}</p>
-      </div>
-    </Link>
   );
 }
