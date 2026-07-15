@@ -3,7 +3,7 @@
 > Living doc. Its job is to let a fresh conversation pick up this project cold.
 > Keep it current; delete guidance notes as you go.
 >
-> **Last updated after:** Phase 5 complete — but PIVOTED mid-way to a **Seerr-backed** architecture (2026-07-15): the own-request pipeline (SQLite/Radarr/Sonarr) was built (5.1–5.7) then **retired** (5.8–5.10); requests now flow through Seerr's API. See §3 + the increment log. Next: parity backlog and/or Phase 4 deploy.
+> **Last updated after:** Phase 9 (2026-07-14). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped parity features on that architecture: **6** media-status badges in discovery, **7** Plex Watchlist, **8** issue reporting (report/list/detail/comments/admin), **9** TMDB title+poster enrichment — all verified live + committed. See §3, the §8 log, and §10 status. Next: request-quota display / quality-profile selection, then Phase 4 deploy.
 > **Working name:** "Tyflix Web" / repo `tyflix-web` — rename freely.
 
 ---
@@ -76,6 +76,21 @@ Static React build served by the same Node process (single origin)
   submitted on behalf of the logged-in user via the Seerr API key. tyflix-web keeps **no** request store of
   its own — Seerr is the source of truth (in sync). Seerr's two-axis status (request `status` + `media.status`)
   maps straight to our `requestStatus`/`mediaStatus`.
+- **Media-status overlay (Phase 6):** discovery results (trending/search/movie/tv) are annotated with each
+  title's Seerr availability via a shared `createMediaStatusProvider` — it paginates `GET /api/v1/media`, builds
+  a `` `${mediaType}:${tmdbId}` `` → status map, caches 60s, and degrades to null on failure (discovery never
+  breaks). The frontend shows status badges + a `canRequest()` gate (hides Request for available/processing/pending).
+- **Watchlist (Phase 7):** `GET /api/watchlist` proxies the logged-in user's Plex Watchlist from Seerr
+  (`GET /api/v1/user/{seerrUserId}/watchlist`), annotated with the same media-status provider. Read-only (Plex
+  owns the watchlist).
+- **Issues (Phase 8):** `/api/issues*` mirrors Seerr's issue model (report/list/detail/comment/resolve-reopen).
+  Because we call Seerr with the admin API key, **Seerr's per-user checks are bypassed → our routes enforce
+  owner-or-admin themselves** (like requests). Create resolves the Seerr internal `mediaId` via the provider's
+  `getMediaId`; only the initial report message is attributed to the acting user (later comments post as the
+  API-key/owner account).
+- **Enrichment (Phase 9):** a shared `createMediaEnrichment(tmdb)` resolves title+posterUrl by `mediaType:tmdbId`
+  (10-min cache, parallel, per-item fail-soft) to fill gaps in Seerr payloads — watchlist cards get posters,
+  issue lists/detail get real titles + poster thumbs.
 
 ### Security / trust model
 
@@ -202,6 +217,26 @@ tyflix-web/
 - **Test looping catches flakiness single runs miss.** A base64url signature-tamper test flipped the LAST sig
   char, which (unpadded HMAC) can decode to the same bytes → ~25% flaky. Tamper a FULLY-significant char (first)
   instead. Run suspect suites ~15–20× when in doubt.
+- **Deployed Seerr's issue API diverges from the develop-branch source — verify against the live instance.**
+  `GET /api/v1/issue` only accepts `sort ∈ {added, modified}` (NOT `created`), **rejects a `createdBy` query
+  param entirely** ("Unknown query parameter"), and when `filter` is omitted defaults to **OPEN-only** (the
+  develop source suggests all statuses — it lies for this build). So `listIssues` must send
+  `?take=&skip=&sort=added&filter=all` and we filter own-vs-all **in our code** (Seerr can't filter by creator).
+  Two live bugs came from trusting the source: `sort=created`+`createdBy` (8.1 → fixed 8.1.1) and the
+  omitted-filter open-only default that hid resolved issues (fixed post-8.3 with `filter=all`).
+- **Issue create needs Seerr's internal `mediaId`, not tmdbId.** Resolve `mediaType:tmdbId → mediaId` via the
+  media provider's `getMediaId` (built from the same cached `GET /api/v1/media`). Reporting on an untracked
+  title → 404. `POST /api/v1/issue { issueType:1-4, message, mediaId, userId }`; the initial message is
+  attributed to `userId` (pass the acting user), but `POST /:id/comment` has no userId override so later
+  comments post as the API-key/owner account (documented limitation, surfaced in the UI).
+- **Issue CREATE response is un-enriched** (media.title null); GET list/detail enrich it. Harmless — the report
+  form doesn't show the title, and the detail page re-fetches (enriched).
+- **Seerr watchlist payload has no poster.** `GET /api/v1/user/{id}/watchlist` returns `{ id, ratingKey, title,
+  mediaType, tmdbId }` — title but no poster/overview. Posters come from Phase 9 TMDB enrichment.
+- **Live-verify pattern (no login UI needed).** Forge a `tyflix_session` cookie with a node script — sign the
+  **HMAC over the JSON string**, not the base64url payload — then curl the running server; or drive the
+  already-logged-in Personal Chrome (Claude-in-Chrome) against the vite dev server. Create real Seerr issues for
+  e2e, then clean up with `DELETE /api/v1/issue/{id}` (API key) and confirm `issue/count` returns to 0.
 
 ## 6. Core logic — watched-vs-requested (to port in Phase 2)
 
@@ -252,8 +287,13 @@ Roadmap (planned):
   → 5.9 UI align → 5.10 removed the own-store/servarr/DB). Net: TMDB discovery UI that requests via Seerr;
   My Requests + admin approval queue read/write Seerr; all in sync. (`phase-5-replacement-spec.md` is
   SUPERSEDED — it documents the retired own-store approach.)
-- **Parity backlog (next candidates, all via Seerr's API):** 4K requests, quality-profile selection, request
-  limits, issue reporting, notifications, watchlist. Goal = parity with Seerr's UI, Seerr as the engine.
+- **Phase 6 — Media-status overlay. COMPLETE.** Availability badges in discovery + Request-button gating.
+- **Phase 7 — Watchlist. COMPLETE.** Per-user Plex Watchlist page (Seerr-backed), shared status provider.
+- **Phase 8 — Issue reporting. COMPLETE.** Report/list/detail/comments/resolve-reopen + admin panel.
+- **Phase 9 — TMDB enrichment. COMPLETE.** Titles + posters for watchlist cards and issue lists/detail.
+- **Parity backlog (remaining, via Seerr's API):** request-quota display, quality-profile selection. (4K is
+  N/A — no 4K server in this Seerr. Notifications/settings/user-management stay delegated to Seerr by design.)
+  Goal = parity with Seerr's user-facing UI, Seerr as the engine.
 - **Phase 4 — Deploy.** Dockerize into the Dell stack + Cloudflare tunnel hostname `tyflix-dashboard.tylerte.dev`;
   prod env; add the `/api` 404-guard; don't route the public hostname until the admin gate is smoke-tested in
   prod. (No DB volume needed — no own store.)
@@ -309,11 +349,35 @@ Log (newest at bottom):
 - **Phase 5.10** — deleted the retired own-store/Radarr/Sonarr/DB code + config + better-sqlite3; skip-not-throw
   hardening in the Seerr list mapper. 43 tests; all endpoints re-verified working.
 - **Phase 5 COMPLETE (Seerr-backed).** Next: parity backlog (via Seerr) and/or Phase 4 deploy.
+- **Phase 6.1** — backend media-status overlay: `listMedia` + `mediaStatusFromCode`, 60s cache, annotate
+  `/api/discover/*` with `mediaStatus` (`mediaType:tmdbId` key), fail-soft to null. Verified live: trending/
+  detail tagged (Severance→partially, Blade Runner→available); keying discriminates movie vs tv.
+- **Phase 6.2** — frontend badges + `canRequest()` gating (available→"Available", processing/pending→
+  "Requested", partial→still requestable). Verified in-browser.
+- **Phase 7** — Watchlist: `listUserWatchlist` + `GET /api/watchlist` (requireAuth), **extracted shared
+  `createMediaStatusProvider`** (discover + watchlist) and **extracted `MediaCard`**. WatchlistPage + nav.
+  Verified live: 13 items, status-annotated, 401 without cookie.
+- **Phase 8.1 / 8.1.1** — issue backend: client (list/get/create/comment/status) + `getMediaId` on the provider
+  + `/api/issues*` routes with **owner-or-admin enforcement in our code** (admin key bypasses Seerr's checks).
+  8.1.1 fixed `sort=created`/`createdBy` rejection (→ `sort=added`, filter own in code). Verified e2e vs live
+  Seerr: create→count 0→1, per-user scoping, non-owner 403, untracked 404, clean delete.
+- **Phase 8.2** — issue frontend: report form (tracked-media only) + My Issues list. Verified in-browser: filed
+  an Audio issue → "Issue reported" → appeared in My Issues → in Seerr → cleaned up.
+- **Phase 8.3 (+ list fix)** — issue detail (comments, add-comment, resolve/reopen; owner-or-admin gated) +
+  admin Issues panel. Fixed the omitted-filter **open-only** default (→ `filter=all`) so resolved issues stay
+  visible. Verified in-browser: detail→comment→resolve→visible in admin panel; cleaned up.
+- **Phase 9** — TMDB enrichment: shared `createMediaEnrichment` (title+poster, 10-min cache, parallel,
+  fail-soft); watchlist posters + issue titles/thumbs. Verified live: 13/13 watchlist posters resolve; issue
+  media enriches to "Blade Runner" + poster. **64 server tests.**
+- **Phases 6–9 COMPLETE + committed.** Next: request-quota display / quality-profile selection, then Phase 4 deploy.
 
 ## 9. Deferred / candidate future work
 
-- **Parity backlog (via Seerr's API):** 4K requests, quality-profile selection, request limits, issue
-  reporting, notifications, watchlist. Goal = parity with Seerr's UI while Seerr stays the engine.
+- **Parity backlog (remaining, via Seerr's API):** request-quota display, quality-profile selection. Done so
+  far: media-status badges (6), watchlist (7), issue reporting (8), enrichment (9). 4K is N/A (no 4K server);
+  notifications, settings, user-management, and richer discovery (recommendations/similar/cast/genre browse)
+  stay delegated to Seerr or are unbuilt. Goal = parity with Seerr's user-facing UI, Seerr as the engine.
+- **Cosmetic/polish:** corner status badge can overlap poster title art; consider a scrim/reposition.
 - Own user store / retiring Seerr — explicitly NOT the direction anymore (tyflix-web enhances Seerr, in sync).
 - Port host-metric collectors into Node to drop the FastAPI-dashboard dependency.
 - Tautulli-backed watch history for durable, profile-independent accuracy.
@@ -328,12 +392,14 @@ Log (newest at bottom):
 
 ## 10. Rollout / status
 
-Phases 1–3 + 5 complete and verified live. tyflix-web is a **Seerr-backed enhancement**: Plex login + Seerr
-admin gate, TMDB discovery UI that requests **through Seerr** (in sync), My Requests + admin approval queue
-reading/writing Seerr, per-user watched-vs-requested + the full admin dashboard. No own request store
-(retired). 43 server tests. **Not deployed.** Next: the **parity backlog** (4K, quality profiles, request
-limits, issues, notifications, watchlist — all via Seerr) and/or **Phase 4 deploy** (hostname
-`tyflix-dashboard.tylerte.dev`). Local dev: `npm run dev`; `.env` carries PLEX_*, SESSION_SECRET,
+Phases 1–3, 5, and **6–9** complete and verified live. tyflix-web is a **Seerr-backed enhancement**: Plex login
++ Seerr admin gate; TMDB discovery UI with **media-status badges** that requests **through Seerr** (in sync);
+My Requests + admin approval queue reading/writing Seerr; **Plex Watchlist**; **issue reporting** (report/list/
+detail/comments/resolve + admin panel); **TMDB title+poster enrichment**; per-user watched-vs-requested + the
+full admin dashboard. No own request store (retired). **64 server tests.** **Not deployed.** Next: **parity
+backlog** (request-quota display, quality-profile selection — via Seerr) and/or **Phase 4 deploy** (hostname
+`tyflix-dashboard.tylerte.dev`; add the `/api` 404-guard; prod build currently doesn't serve the SPA at `/` —
+must fix before routing the hostname). Local dev: `npm run dev`; `.env` carries PLEX_*, SESSION_SECRET,
 SEERR_URL+key, TMDB_API_KEY, DASHBOARD_URL (`RADARR_*`/`SONARR_*`/`DB_PATH` are stale/ignored — safe to delete).
 
 ## 11. Working patterns established
