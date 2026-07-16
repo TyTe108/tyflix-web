@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   fetchAdminContainers,
   fetchAdminSystem,
@@ -46,7 +46,84 @@ import {
 
 type LoadStatus = "loading" | "ready" | "error";
 
+const ADMIN_TABS = [
+  { id: "requests", label: "Requests" },
+  { id: "issues", label: "Issues" },
+  { id: "users", label: "Users" },
+  { id: "system", label: "System" },
+  { id: "jobs", label: "Jobs" },
+  { id: "containers", label: "Containers" },
+] as const;
+
+type AdminTab = (typeof ADMIN_TABS)[number]["id"];
+
+const DEFAULT_TAB: AdminTab = "requests";
+
+function isAdminTab(value: string | null): value is AdminTab {
+  return ADMIN_TABS.some((tab) => tab.id === value);
+}
+
 export function AdminPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawTab = searchParams.get("tab");
+  const activeTab: AdminTab = isAdminTab(rawTab) ? rawTab : DEFAULT_TAB;
+
+  const selectTab = useCallback(
+    (tab: AdminTab) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("tab", tab);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  return (
+    <main className="page page-wide">
+      <h1>Admin</h1>
+
+      <div className="admin-tabs" role="tablist" aria-label="Admin sections">
+        {ADMIN_TABS.map((tab) => {
+          const selected = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              id={`admin-tab-${tab.id}`}
+              aria-selected={selected}
+              aria-controls={`admin-tabpanel-${tab.id}`}
+              className={selected ? "admin-tab active" : "admin-tab"}
+              onClick={() => selectTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        className="admin-tabpanel"
+        role="tabpanel"
+        id={`admin-tabpanel-${activeTab}`}
+        aria-labelledby={`admin-tab-${activeTab}`}
+      >
+        {activeTab === "requests" ? <RequestsPanel /> : null}
+        {activeTab === "issues" ? <IssuesPanel /> : null}
+        {activeTab === "users" ? <UsersPanel /> : null}
+        {activeTab === "system" ? <SystemPanel /> : null}
+        {activeTab === "jobs" ? <JobsPanel /> : null}
+        {activeTab === "containers" ? <ContainersPanel /> : null}
+      </div>
+    </main>
+  );
+}
+
+function SystemPanel() {
   const [system, setSystem] = useState<AdminSystem | null>(null);
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -86,40 +163,26 @@ export function AdminPage() {
   }, [reloadKey]);
 
   return (
-    <main className="page page-wide">
-      <h1>Admin</h1>
+    <section className="admin-section" aria-labelledby="system-heading">
+      <h2 id="system-heading">System / Storage</h2>
 
-      <section className="admin-section" aria-labelledby="system-heading">
-        <h2 id="system-heading">System / Storage</h2>
+      {status === "loading" ? (
+        <p className="muted">Loading system status…</p>
+      ) : null}
 
-        {status === "loading" ? (
-          <p className="muted">Loading system status…</p>
-        ) : null}
+      {status === "error" ? (
+        <div className="stats-error">
+          <p className="error">{error ?? "Failed to load system status"}</p>
+          <button type="button" className="btn secondary" onClick={retry}>
+            Retry
+          </button>
+        </div>
+      ) : null}
 
-        {status === "error" ? (
-          <div className="stats-error">
-            <p className="error">{error ?? "Failed to load system status"}</p>
-            <button type="button" className="btn secondary" onClick={retry}>
-              Retry
-            </button>
-          </div>
-        ) : null}
-
-        {status === "ready" && system !== null ? (
-          <SystemPanel system={system} />
-        ) : null}
-      </section>
-
-      <RequestsPanel />
-
-      <IssuesPanel />
-
-      <UsersPanel />
-
-      <JobsPanel />
-
-      <ContainersPanel />
-    </main>
+      {status === "ready" && system !== null ? (
+        <SystemBody system={system} />
+      ) : null}
+    </section>
   );
 }
 
@@ -883,7 +946,7 @@ function NativeTable({ rows }: { rows: AdminNativeRow[] }) {
   );
 }
 
-function SystemPanel({ system }: { system: AdminSystem }) {
+function SystemBody({ system }: { system: AdminSystem }) {
   const { cpu, mem, load, temps, gpu, storage, services } = system;
 
   return (
