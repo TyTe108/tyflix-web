@@ -531,7 +531,7 @@ describe("Seerr requests client", () => {
     }
   });
 
-  it("creates a TV request with mediaId, userId, and seasons", async () => {
+  it("creates a TV request without profile overrides when none are provided", async () => {
     let call:
       | { url: string; method: string | undefined; body: string | undefined }
       | undefined;
@@ -577,6 +577,34 @@ describe("Seerr requests client", () => {
     });
   });
 
+  it("includes profileId and serverId when provided", async () => {
+    let body: Record<string, unknown> | undefined;
+    globalThis.fetch = async (_input, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return jsonResponse(201, requestRow());
+    };
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    await seerr.createRequest({
+      mediaType: "movie",
+      tmdbId: 603,
+      userId: 7,
+      profileId: 4,
+      serverId: 12,
+    });
+
+    assert.deepEqual(body, {
+      mediaType: "movie",
+      mediaId: 603,
+      userId: 7,
+      profileId: 4,
+      serverId: 12,
+    });
+  });
+
   it("lists requests from the per-user endpoint", async () => {
     const urls: string[] = [];
     globalThis.fetch = async (input) => {
@@ -612,6 +640,95 @@ describe("Seerr requests client", () => {
       () => seerr.listAllRequests(),
       (err: unknown) =>
         err instanceof SeerrUpstreamError && err.status === 503,
+    );
+  });
+});
+
+describe("createSeerrClient().getServiceProfiles", () => {
+  it("uses radarr for movies and picks the default server", async () => {
+    const calls: string[] = [];
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith("/api/v1/service/radarr")) {
+        return jsonResponse(200, [
+          { id: 0, name: "Primary", isDefault: false },
+          { id: 12, name: "Default", isDefault: true },
+        ]);
+      }
+      return jsonResponse(200, {
+        server: { id: 12, activeProfileId: 4 },
+        profiles: [
+          { id: 1, name: "Any" },
+          { id: 4, name: "HD-1080p" },
+        ],
+        rootFolders: [{ id: 1, path: "/movies" }],
+      });
+    };
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    assert.deepEqual(await seerr.getServiceProfiles("movie"), {
+      serverId: 12,
+      defaultProfileId: 4,
+      profiles: [
+        { id: 1, name: "Any" },
+        { id: 4, name: "HD-1080p" },
+      ],
+    });
+    assert.deepEqual(calls, [
+      "http://seerr:5055/api/v1/service/radarr",
+      "http://seerr:5055/api/v1/service/radarr/12",
+    ]);
+  });
+
+  it("uses sonarr for TV and falls back to the first server", async () => {
+    const calls: string[] = [];
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith("/api/v1/service/sonarr")) {
+        return jsonResponse(200, [
+          { id: 3, name: "TV", isDefault: false },
+          { id: 4, name: "Other", isDefault: false },
+        ]);
+      }
+      return jsonResponse(200, {
+        server: { id: 3, activeProfileId: 6 },
+        profiles: [{ id: 6, name: "HD-720p/1080p" }],
+        rootFolders: [],
+      });
+    };
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    assert.deepEqual(await seerr.getServiceProfiles("tv"), {
+      serverId: 3,
+      defaultProfileId: 6,
+      profiles: [{ id: 6, name: "HD-720p/1080p" }],
+    });
+    assert.deepEqual(calls, [
+      "http://seerr:5055/api/v1/service/sonarr",
+      "http://seerr:5055/api/v1/service/sonarr/3",
+    ]);
+  });
+
+  it("throws a 502 for an unexpected service shape", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse(200, [{ id: "bad", isDefault: true }]);
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    await assert.rejects(
+      () => seerr.getServiceProfiles("movie"),
+      (err: unknown) =>
+        err instanceof SeerrUpstreamError && err.status === 502,
     );
   });
 });

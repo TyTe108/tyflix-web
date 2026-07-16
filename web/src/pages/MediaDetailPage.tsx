@@ -24,7 +24,13 @@ import {
   createIssue,
   type IssueType,
 } from "../api/issues";
-import { createRequest, mediaStatusLabel } from "../api/requests";
+import {
+  createRequest,
+  fetchRequestProfiles,
+  mediaStatusLabel,
+  type RequestProfiles,
+} from "../api/requests";
+import { useAuth } from "../auth/AuthContext";
 import { MediaCard } from "../components/MediaCard";
 
 type LoadStatus = "loading" | "ready" | "error";
@@ -469,14 +475,47 @@ function ReportIssueControls({ detail }: { detail: MediaDetail }) {
 }
 
 function RequestControls({ detail }: { detail: MediaDetail }) {
+  const { isAdmin } = useAuth();
   const [requestState, setRequestState] = useState<RequestUiState>({
     kind: "idle",
   });
   const [selectedSeasons, setSelectedSeasons] = useState<number[]>([]);
+  const [requestProfiles, setRequestProfiles] =
+    useState<RequestProfiles | null>(null);
+  const [selectedProfileId, setSelectedProfileId] = useState<
+    number | undefined
+  >(undefined);
 
   const done =
     requestState.kind === "requested" || requestState.kind === "already";
   const submitting = requestState.kind === "submitting";
+
+  useEffect(() => {
+    setRequestProfiles(null);
+    setSelectedProfileId(undefined);
+    if (!isAdmin || !canRequest(detail.mediaStatus)) {
+      return;
+    }
+
+    let cancelled = false;
+    void fetchRequestProfiles(detail.mediaType)
+      .then((value) => {
+        if (!cancelled) {
+          setRequestProfiles(value);
+          setSelectedProfileId(value.defaultProfileId);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRequestProfiles(null);
+          setSelectedProfileId(undefined);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.mediaStatus, detail.mediaType, isAdmin]);
 
   const submit = useCallback(
     async (seasons?: number[]) => {
@@ -486,6 +525,9 @@ function RequestControls({ detail }: { detail: MediaDetail }) {
           tmdbId: detail.tmdbId,
           mediaType: detail.mediaType,
           ...(seasons !== undefined ? { seasons } : {}),
+          ...(selectedProfileId === undefined
+            ? {}
+            : { profileId: selectedProfileId }),
         });
         if (result.ok) {
           setRequestState({ kind: "requested" });
@@ -500,7 +542,7 @@ function RequestControls({ detail }: { detail: MediaDetail }) {
         });
       }
     },
-    [detail.mediaType, detail.tmdbId],
+    [detail.mediaType, detail.tmdbId, selectedProfileId],
   );
 
   function toggleSeason(seasonNumber: number) {
@@ -531,6 +573,26 @@ function RequestControls({ detail }: { detail: MediaDetail }) {
       </p>
     ) : null;
 
+  const qualityProfilePicker =
+    requestProfiles && requestProfiles.profiles.length > 0 ? (
+      <label className="request-profile-picker">
+        <span>Quality profile</span>
+        <select
+          value={selectedProfileId ?? ""}
+          disabled={submitting}
+          onChange={(event) =>
+            setSelectedProfileId(Number(event.currentTarget.value))
+          }
+        >
+          {requestProfiles.profiles.map((profile) => (
+            <option key={profile.id} value={profile.id}>
+              {profile.name}
+            </option>
+          ))}
+        </select>
+      </label>
+    ) : null;
+
   if (detail.mediaType === "movie") {
     return (
       <section className="request-controls" aria-label="Request movie">
@@ -542,14 +604,17 @@ function RequestControls({ detail }: { detail: MediaDetail }) {
               : "Requested"}
           </p>
         ) : (
-          <button
-            type="button"
-            className="btn"
-            disabled={submitting}
-            onClick={() => void submit()}
-          >
-            {submitting ? "Requesting…" : "Request"}
-          </button>
+          <>
+            {qualityProfilePicker}
+            <button
+              type="button"
+              className="btn"
+              disabled={submitting}
+              onClick={() => void submit()}
+            >
+              {submitting ? "Requesting…" : "Request"}
+            </button>
+          </>
         )}
         {requestState.kind === "error" ? (
           <p className="error request-controls-error">{requestState.message}</p>
@@ -593,6 +658,7 @@ function RequestControls({ detail }: { detail: MediaDetail }) {
               ))}
             </ul>
           </fieldset>
+          {qualityProfilePicker}
           <button
             type="button"
             className="btn"

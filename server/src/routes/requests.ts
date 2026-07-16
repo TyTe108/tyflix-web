@@ -7,7 +7,7 @@ import {
   type SeerrClient,
   type SeerrRequest,
 } from "../seerr/client";
-import type { SessionPayload } from "../session";
+import { isAdmin, type SessionPayload } from "../session";
 import type { TmdbClient } from "../tmdb/client";
 
 export type RequestsRouterDeps = {
@@ -15,6 +15,7 @@ export type RequestsRouterDeps = {
     SeerrClient,
     | "listAllRequests"
     | "listUserRequests"
+    | "getServiceProfiles"
     | "createRequest"
     | "approveRequest"
     | "declineRequest"
@@ -27,6 +28,21 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
   const { seerr, tmdb, sessionSecret } = deps;
   const router = Router();
   const admin = requireAdmin(sessionSecret);
+
+  router.get("/profiles", admin, async (req, res) => {
+    const mediaType =
+      typeof req.query.mediaType === "string" ? req.query.mediaType : undefined;
+    if (mediaType !== "movie" && mediaType !== "tv") {
+      res.status(400).json({ error: "mediaType must be movie or tv" });
+      return;
+    }
+
+    try {
+      res.json(await seerr.getServiceProfiles(mediaType));
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
 
   router.post("/", async (req, res) => {
     const session = res.locals.session as SessionPayload | undefined;
@@ -41,7 +57,24 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
       return;
     }
 
+    if (
+      parsed.profileId !== undefined &&
+      !isAdmin(session.permissions)
+    ) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+
     try {
+      const profileOverride =
+        parsed.profileId === undefined
+          ? {}
+          : {
+              profileId: parsed.profileId,
+              serverId: (
+                await seerr.getServiceProfiles(parsed.mediaType)
+              ).serverId,
+            };
       const request = await seerr.createRequest({
         mediaType: parsed.mediaType,
         tmdbId: parsed.tmdbId,
@@ -49,6 +82,7 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
           ? { seasons: parsed.seasons }
           : {}),
         userId: session.seerrUserId,
+        ...profileOverride,
       });
       const view = await enrichRequest(request, tmdb, new Map());
       res.status(201).json(view);
@@ -155,11 +189,13 @@ function parseCreateBody(
   | {
       tmdbId: number;
       mediaType: "movie";
+      profileId?: number;
     }
   | {
       tmdbId: number;
       mediaType: "tv";
       seasons?: number[];
+      profileId?: number;
     } {
   if (typeof body !== "object" || body === null) {
     return { error: "invalid body" };
@@ -168,6 +204,7 @@ function parseCreateBody(
   const tmdbId = (body as { tmdbId?: unknown }).tmdbId;
   const mediaType = (body as { mediaType?: unknown }).mediaType;
   const seasons = (body as { seasons?: unknown }).seasons;
+  const profileId = (body as { profileId?: unknown }).profileId;
 
   if (typeof tmdbId !== "number" || !Number.isInteger(tmdbId) || tmdbId < 1) {
     return { error: "tmdbId must be a positive integer" };
@@ -175,10 +212,22 @@ function parseCreateBody(
   if (mediaType !== "movie" && mediaType !== "tv") {
     return { error: "mediaType must be movie or tv" };
   }
+  if (
+    profileId !== undefined &&
+    (typeof profileId !== "number" ||
+      !Number.isInteger(profileId) ||
+      profileId < 1)
+  ) {
+    return { error: "profileId must be a positive integer" };
+  }
 
   if (mediaType === "tv") {
     if (seasons === undefined) {
-      return { tmdbId, mediaType };
+      return {
+        tmdbId,
+        mediaType,
+        ...(profileId === undefined ? {} : { profileId }),
+      };
     }
     if (!Array.isArray(seasons)) {
       return { error: "seasons must be an array" };
@@ -193,10 +242,19 @@ function parseCreateBody(
     ) {
       return { error: "seasons must be positive integers" };
     }
-    return { tmdbId, mediaType, seasons };
+    return {
+      tmdbId,
+      mediaType,
+      seasons,
+      ...(profileId === undefined ? {} : { profileId }),
+    };
   }
 
-  return { tmdbId, mediaType };
+  return {
+    tmdbId,
+    mediaType,
+    ...(profileId === undefined ? {} : { profileId }),
+  };
 }
 
 function parseNumericId(raw: string | undefined): number | null {

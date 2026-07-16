@@ -98,6 +98,14 @@ export type CreateSeerrRequestInput = {
   tmdbId: number;
   seasons?: number[];
   userId: number;
+  profileId?: number;
+  serverId?: number;
+};
+
+export type ServiceProfiles = {
+  serverId: number;
+  defaultProfileId: number;
+  profiles: Array<{ id: number; name: string }>;
 };
 
 export type CreateSeerrIssueInput = {
@@ -315,6 +323,73 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return { movie, tv };
   }
 
+  async function getServiceProfiles(
+    mediaType: "movie" | "tv",
+  ): Promise<ServiceProfiles> {
+    const service = mediaType === "movie" ? "radarr" : "sonarr";
+    const serversBody = await getJson(`/api/v1/service/${service}`);
+    if (!Array.isArray(serversBody) || serversBody.length === 0) {
+      throw new SeerrUpstreamError(
+        "Seerr getServiceProfiles returned unexpected server list",
+        502,
+      );
+    }
+
+    const servers = serversBody.map(mapServiceServer);
+    if (servers.some((server) => server === null)) {
+      throw new SeerrUpstreamError(
+        "Seerr getServiceProfiles returned unexpected server list",
+        502,
+      );
+    }
+    const validServers = servers as Array<{ id: number; isDefault: boolean }>;
+    const selected =
+      validServers.find((server) => server.isDefault) ?? validServers[0];
+
+    const detailBody = await getJson(
+      `/api/v1/service/${service}/${selected.id}`,
+    );
+    if (typeof detailBody !== "object" || detailBody === null) {
+      throw new SeerrUpstreamError(
+        "Seerr getServiceProfiles returned unexpected service detail",
+        502,
+      );
+    }
+
+    const server = (detailBody as { server?: unknown }).server;
+    const profilesBody = (detailBody as { profiles?: unknown }).profiles;
+    if (
+      typeof server !== "object" ||
+      server === null ||
+      !Array.isArray(profilesBody)
+    ) {
+      throw new SeerrUpstreamError(
+        "Seerr getServiceProfiles returned unexpected service detail",
+        502,
+      );
+    }
+
+    const defaultProfileId = (server as { activeProfileId?: unknown })
+      .activeProfileId;
+    const profiles = profilesBody.map(mapServiceProfile);
+    if (
+      typeof defaultProfileId !== "number" ||
+      !Number.isFinite(defaultProfileId) ||
+      profiles.some((profile) => profile === null)
+    ) {
+      throw new SeerrUpstreamError(
+        "Seerr getServiceProfiles returned unexpected service detail",
+        502,
+      );
+    }
+
+    return {
+      serverId: selected.id,
+      defaultProfileId,
+      profiles: profiles as Array<{ id: number; name: string }>,
+    };
+  }
+
   async function listMedia(): Promise<SeerrMediaListItem[]> {
     const take = 100;
     let skip = 0;
@@ -508,6 +583,8 @@ export function createSeerrClient(options: SeerrClientOptions) {
         ? { seasons: input.seasons }
         : {}),
       userId: input.userId,
+      ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
+      ...(input.serverId === undefined ? {} : { serverId: input.serverId }),
     });
     return requireSeerrRequest(body, "createRequest");
   }
@@ -528,6 +605,7 @@ export function createSeerrClient(options: SeerrClientOptions) {
     listUserRequests,
     getRequestsByUser: listUserRequests,
     getUserQuota,
+    getServiceProfiles,
     listMedia,
     listUserWatchlist,
     listIssues,
@@ -653,6 +731,38 @@ function mapQuotaAxis(row: unknown): QuotaAxis | null {
   }
 
   return { days, limit, used, restricted };
+}
+
+function mapServiceServer(
+  row: unknown,
+): { id: number; isDefault: boolean } | null {
+  if (typeof row !== "object" || row === null) {
+    return null;
+  }
+  const id = (row as { id?: unknown }).id;
+  const isDefault = (row as { isDefault?: unknown }).isDefault;
+  if (
+    typeof id !== "number" ||
+    !Number.isFinite(id) ||
+    typeof isDefault !== "boolean"
+  ) {
+    return null;
+  }
+  return { id, isDefault };
+}
+
+function mapServiceProfile(
+  row: unknown,
+): { id: number; name: string } | null {
+  if (typeof row !== "object" || row === null) {
+    return null;
+  }
+  const id = (row as { id?: unknown }).id;
+  const name = (row as { name?: unknown }).name;
+  if (typeof id !== "number" || !Number.isFinite(id) || typeof name !== "string") {
+    return null;
+  }
+  return { id, name };
 }
 
 function mapSeerrUser(row: unknown): SeerrUser | null {

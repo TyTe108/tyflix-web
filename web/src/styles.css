@@ -1315,6 +1315,30 @@ a {
   margin: 0;
 }
 
+.request-profile-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.request-profile-picker select {
+  min-width: 12rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid rgba(31, 61, 45, 0.35);
+  border-radius: 0.4rem;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  font-weight: 400;
+}
+
+.request-profile-picker select:focus {
+  outline: 2px solid rgba(31, 61, 45, 0.45);
+  outline-offset: 1px;
+}
+
 .request-season-pick {
   margin: 0;
   padding: 0;

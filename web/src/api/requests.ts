@@ -33,6 +33,13 @@ export type CreateRequestInput = {
   tmdbId: number;
   mediaType: MediaType;
   seasons?: number[];
+  profileId?: number;
+};
+
+export type RequestProfiles = {
+  serverId: number;
+  defaultProfileId: number;
+  profiles: Array<{ id: number; name: string }>;
 };
 
 export type CreateRequestResult =
@@ -79,6 +86,17 @@ export async function fetchAllRequests(): Promise<RequestView[]> {
   }
   const body = (await res.json()) as { results: RequestView[] };
   return body.results;
+}
+
+export async function fetchRequestProfiles(
+  mediaType: MediaType,
+): Promise<RequestProfiles> {
+  const params = new URLSearchParams({ mediaType });
+  const res = await fetch(`/api/requests/profiles?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Failed to load quality profiles (${res.status})`);
+  }
+  return (await res.json()) as RequestProfiles;
 }
 
 export async function approveRequest(id: number): Promise<RequestView> {

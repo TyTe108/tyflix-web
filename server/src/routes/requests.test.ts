@@ -73,14 +73,17 @@ function createStubSeerr(
   overrides: Partial<RequestsRouterDeps["seerr"]> = {},
 ): RequestsRouterDeps["seerr"] & {
   createCalls: CreateSeerrRequestInput[];
+  profileCalls: Array<"movie" | "tv">;
   approveCalls: number[];
   declineCalls: number[];
 } {
   const createCalls: CreateSeerrRequestInput[] = [];
+  const profileCalls: Array<"movie" | "tv"> = [];
   const approveCalls: number[] = [];
   const declineCalls: number[] = [];
   return {
     createCalls,
+    profileCalls,
     approveCalls,
     declineCalls,
     async listAllRequests() {
@@ -88,6 +91,14 @@ function createStubSeerr(
     },
     async listUserRequests() {
       return [];
+    },
+    async getServiceProfiles(mediaType) {
+      profileCalls.push(mediaType);
+      return {
+        serverId: mediaType === "movie" ? 12 : 13,
+        defaultProfileId: 1,
+        profiles: [{ id: 1, name: "Any" }],
+      };
     },
     async createRequest(input) {
       createCalls.push(input);
@@ -187,6 +198,63 @@ describe("Seerr-backed request routes", () => {
       requestedByName: "Tyler",
       createdAt: "2026-07-15T00:00:00.000Z",
     });
+  });
+
+  it("admin-gates quality profiles", async () => {
+    const seerr = createStubSeerr();
+    const app = createApp(seerr);
+
+    const forbidden = await fetchLocal(
+      app,
+      "GET",
+      "/api/requests/profiles?mediaType=movie",
+      { cookie: sessionCookie() },
+    );
+    assert.equal(forbidden.status, 403);
+
+    const allowed = await fetchLocal(
+      app,
+      "GET",
+      "/api/requests/profiles?mediaType=movie",
+      { cookie: sessionCookie(ADMIN_PERMISSION) },
+    );
+    assert.equal(allowed.status, 200);
+    assert.deepEqual(seerr.profileCalls, ["movie"]);
+    assert.deepEqual(await allowed.json(), {
+      serverId: 12,
+      defaultProfileId: 1,
+      profiles: [{ id: 1, name: "Any" }],
+    });
+  });
+
+  it("rejects non-admin profile overrides and forwards admin overrides", async () => {
+    const seerr = createStubSeerr();
+    const app = createApp(seerr);
+    const body = { tmdbId: 603, mediaType: "movie", profileId: 4 };
+
+    const forbidden = await fetchLocal(app, "POST", "/api/requests", {
+      cookie: sessionCookie(0, 44),
+      body,
+    });
+    assert.equal(forbidden.status, 403);
+    assert.deepEqual(seerr.createCalls, []);
+    assert.deepEqual(seerr.profileCalls, []);
+
+    const allowed = await fetchLocal(app, "POST", "/api/requests", {
+      cookie: sessionCookie(ADMIN_PERMISSION, 44),
+      body,
+    });
+    assert.equal(allowed.status, 201);
+    assert.deepEqual(seerr.profileCalls, ["movie"]);
+    assert.deepEqual(seerr.createCalls, [
+      {
+        mediaType: "movie",
+        tmdbId: 603,
+        userId: 44,
+        profileId: 4,
+        serverId: 12,
+      },
+    ]);
   });
 
   it("lists only the authenticated user's requests and memoizes titles", async () => {
