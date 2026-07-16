@@ -191,6 +191,7 @@ describe("Seerr-backed request routes", () => {
       tmdbId: 603,
       mediaType: "movie",
       title: "The Matrix",
+      posterUrl: null,
       seasons: [],
       requestStatus: "pending",
       mediaStatus: "pending",

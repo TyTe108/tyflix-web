@@ -2,9 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   fetchMyRequests,
-  formatRequestDate,
-  mediaStatusLabel,
-  requestStatusBadgeClass,
   type RequestView,
 } from "../api/requests";
 import {
@@ -12,6 +9,7 @@ import {
   formatQuota,
   type MyQuota,
 } from "../api/me";
+import { RequestCard } from "../components/RequestCard";
 
 type LoadStatus = "loading" | "ready" | "error";
 
@@ -124,34 +122,10 @@ export function MyRequestsPage() {
         ) : null}
 
         {status === "ready" && requests.length > 0 ? (
-          <ul className="my-requests-list">
+          <ul className="request-card-list">
             {requests.map((row) => (
-              <li key={row.id} className="my-requests-item">
-                <div className="my-requests-row">
-                  <Link
-                    to={`/media/${row.mediaType}/${row.tmdbId}`}
-                    className="my-requests-title"
-                  >
-                    {row.title}
-                  </Link>
-                  <span className="stats-tag">
-                    {row.mediaType === "tv" ? "TV" : "Movie"}
-                  </span>
-                  <span className={requestStatusBadgeClass(row.requestStatus)}>
-                    {row.requestStatus}
-                  </span>
-                </div>
-                <div className="my-requests-meta muted">
-                  <span>{mediaStatusLabel(row.mediaStatus)}</span>
-                  {row.mediaType === "tv" &&
-                  row.seasons &&
-                  row.seasons.length > 0 ? (
-                    <span>
-                      Seasons {row.seasons.join(", ")}
-                    </span>
-                  ) : null}
-                  <span>Requested {formatRequestDate(row.createdAt)}</span>
-                </div>
+              <li key={row.id}>
+                <RequestCard request={row} />
               </li>
             ))}
           </ul>

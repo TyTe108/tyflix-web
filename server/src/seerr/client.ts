@@ -80,6 +80,7 @@ export type RequestView = {
   tmdbId: number;
   mediaType: "movie" | "tv";
   title: string;
+  posterUrl: string | null;
   seasons: number[];
   requestStatus:
     | "pending"
@@ -643,7 +644,10 @@ export function mediaStatusFromCode(code: number): MediaAvailability | null {
   return MEDIA_STATUS[code as keyof typeof MEDIA_STATUS] ?? null;
 }
 
-export function toRequestView(req: SeerrRequest, title: string): RequestView {
+export function toRequestView(
+  req: SeerrRequest,
+  details: { title: string; posterUrl: string | null },
+): RequestView {
   const requestStatus = REQUEST_STATUS[req.status as keyof typeof REQUEST_STATUS];
   const mediaStatus = mediaStatusFromCode(req.media.status);
   if (requestStatus === undefined || mediaStatus === null) {
@@ -654,7 +658,8 @@ export function toRequestView(req: SeerrRequest, title: string): RequestView {
     id: req.id,
     tmdbId: req.media.tmdbId,
     mediaType: req.type,
-    title,
+    title: details.title,
+    posterUrl: details.posterUrl,
     seasons: req.seasons.map((season) => season.seasonNumber),
     requestStatus,
     mediaStatus,

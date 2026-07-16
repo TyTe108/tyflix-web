@@ -519,15 +519,22 @@ describe("Seerr requests client", () => {
     ];
 
     for (let status = 1; status <= requestStatuses.length; status += 1) {
-      const view = toRequestView(requestRow({ status }), "The Matrix");
+      const view = toRequestView(requestRow({ status }), {
+        title: "The Matrix",
+        posterUrl: null,
+      });
       assert.equal(view.requestStatus, requestStatuses[status - 1]);
     }
     for (let status = 1; status <= mediaStatuses.length; status += 1) {
       const request = requestRow({
         media: { ...requestRow().media, status },
       });
-      const view = toRequestView(request, "The Matrix");
+      const view = toRequestView(request, {
+        title: "The Matrix",
+        posterUrl: "https://img/poster.jpg",
+      });
       assert.equal(view.mediaStatus, mediaStatuses[status - 1]);
+      assert.equal(view.posterUrl, "https://img/poster.jpg");
     }
   });
 

@@ -156,30 +156,38 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
   return router;
 }
 
+type RequestDetail = { title: string; posterUrl: string | null };
+
 async function enrichRequests(
   requests: SeerrRequest[],
   tmdb: Pick<TmdbClient, "movieDetail" | "tvDetail">,
 ): Promise<RequestView[]> {
-  const titles = new Map<number, Promise<string>>();
+  const details = new Map<number, Promise<RequestDetail>>();
   return Promise.all(
-    requests.map((request) => enrichRequest(request, tmdb, titles)),
+    requests.map((request) => enrichRequest(request, tmdb, details)),
   );
 }
 
 async function enrichRequest(
   request: SeerrRequest,
   tmdb: Pick<TmdbClient, "movieDetail" | "tvDetail">,
-  titles: Map<number, Promise<string>>,
+  details: Map<number, Promise<RequestDetail>>,
 ): Promise<RequestView> {
-  let title = titles.get(request.media.tmdbId);
-  if (title === undefined) {
-    title =
+  let detail = details.get(request.media.tmdbId);
+  if (detail === undefined) {
+    detail =
       request.type === "movie"
-        ? tmdb.movieDetail(request.media.tmdbId).then((detail) => detail.title)
-        : tmdb.tvDetail(request.media.tmdbId).then((detail) => detail.title);
-    titles.set(request.media.tmdbId, title);
+        ? tmdb.movieDetail(request.media.tmdbId).then((movie) => ({
+            title: movie.title,
+            posterUrl: movie.posterUrl,
+          }))
+        : tmdb.tvDetail(request.media.tmdbId).then((tv) => ({
+            title: tv.title,
+            posterUrl: tv.posterUrl,
+          }));
+    details.set(request.media.tmdbId, detail);
   }
-  return toRequestView(request, await title);
+  return toRequestView(request, await detail);
 }
 
 function parseCreateBody(

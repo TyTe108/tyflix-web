@@ -21,6 +21,7 @@ export type RequestView = {
   tmdbId: number;
   mediaType: MediaType;
   title: string;
+  posterUrl: string | null;
   seasons: number[];
   requestStatus: RequestApprovalStatus;
   mediaStatus: MediaAvailabilityStatus;

@@ -30,11 +30,9 @@ import {
   approveRequest,
   declineRequest,
   fetchAllRequests,
-  formatRequestDate,
-  mediaStatusLabel,
-  requestStatusBadgeClass,
   type RequestView,
 } from "../api/requests";
+import { RequestCard } from "../components/RequestCard";
 import {
   fetchAllIssues,
   formatIssueDate,
@@ -292,57 +290,21 @@ function RequestsPanel() {
       ) : null}
 
       {status === "ready" && requests.length > 0 ? (
-        <ul className="admin-requests-list">
-          {requests.map((request) => {
-            const inFlight = activeRequestId === request.id;
-            return (
-              <li key={request.id} className="admin-request-row">
-                <div className="admin-request-main">
-                  <span className="admin-request-title">{request.title}</span>
-                  <span className="stats-tag">
-                    {request.mediaType === "tv" ? "TV" : "Movie"}
-                  </span>
-                  <span
-                    className={requestStatusBadgeClass(request.requestStatus)}
-                  >
-                    {request.requestStatus}
-                  </span>
-                </div>
-
-                <div className="admin-request-meta muted">
-                  <span>Requested by {request.requestedByName}</span>
-                  {request.mediaType === "tv" &&
-                  request.seasons &&
-                  request.seasons.length > 0 ? (
-                    <span>Seasons {request.seasons.join(", ")}</span>
-                  ) : null}
-                  <span>{mediaStatusLabel(request.mediaStatus)}</span>
-                  <span>Requested {formatRequestDate(request.createdAt)}</span>
-                </div>
-
-                {request.requestStatus === "pending" ? (
-                  <div className="admin-request-actions">
-                    <button
-                      type="button"
-                      className="btn"
-                      disabled={activeRequestId !== null}
-                      onClick={() => void runAction(request.id, "approve")}
-                    >
-                      {inFlight ? "Working…" : "Approve"}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn secondary"
-                      disabled={activeRequestId !== null}
-                      onClick={() => void runAction(request.id, "decline")}
-                    >
-                      Decline
-                    </button>
-                  </div>
-                ) : null}
-              </li>
-            );
-          })}
+        <ul className="request-card-list">
+          {requests.map((request) => (
+            <li key={request.id}>
+              <RequestCard
+                request={request}
+                showRequester
+                actions={{
+                  onApprove: () => void runAction(request.id, "approve"),
+                  onDecline: () => void runAction(request.id, "decline"),
+                  inFlight: activeRequestId === request.id,
+                  disabled: activeRequestId !== null,
+                }}
+              />
+            </li>
+          ))}
         </ul>
       ) : null}
     </section>
