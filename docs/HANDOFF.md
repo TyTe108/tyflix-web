@@ -3,7 +3,7 @@
 > Living doc. Its job is to let a fresh conversation pick up this project cold.
 > Keep it current; delete guidance notes as you go.
 >
-> **Last updated after:** Phase 12 (2026-07-14). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. See §3, the §8 log, and §10 status. Next: **Phase 4 deploy** (not yet started). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
+> **Last updated after:** Phase 12 (2026-07-14). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. Next: **Phase 4 deploy** (not yet started). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
 > **Working name:** "Tyflix Web" / repo `tyflix-web` — rename freely.
 
 ---
@@ -266,6 +266,14 @@ tyflix-web/
 - **Real request = real download.** POSTing a request to Seerr auto-approves for admins → Radarr/Sonarr grab
   immediately. When verifying request/quality-profile changes, prefer read-only checks + unit tests; only do a
   live create-request e2e if you can clean up in Radarr/Sonarr afterward.
+- **UI design system (Phase 13).** All theming flows through CSS custom-property tokens defined on :root in
+  web/src/styles.css (--bg/--surface/--surface-2/--border/--text/--text-muted/--accent(+hover/contrast)/
+  --ok/--warn/--info/--danger/--radius/--shadow-1/-2/--transition) — the theme is DARK; add new colors as tokens,
+  never raw hex in component CSS. The app shell (components/AppShell.tsx) is a react-router LAYOUT ROUTE wrapping
+  all protected routes (sidebar + <Outlet/>); /login is outside it; new authed pages just add a route inside the
+  shell (no per-page nav header — the sidebar owns nav). Nav icons are inline SVGs (no icon dep). Admin tabs use
+  ?tab= (useSearchParams). Request posters (RequestView.posterUrl) are filled by enrichRequest reusing the
+  per-request TMDB detail fetch — free; keep it that way.
 
 ## 6. Core logic — watched-vs-requested (to port in Phase 2)
 
@@ -425,7 +433,24 @@ Log (newest at bottom):
   profileId+serverId, GET /api/requests/profiles (admin) + profileId admin-gate on POST (403 pre-create),
   admin-only selector on the request control. Verified live (profiles list; non-admin 403; selector renders).
   Did NOT submit a real request (download side-effect); forwarding covered by unit tests.
-- **Phases 10–12 COMPLETE + committed. 103 server tests. Parity backlog cleared.** Next: **Phase 4 deploy**.
+- **Phases 10–12 COMPLETE + committed. 103 server tests. Parity backlog cleared.**
+- **Phase 13.1** — dark theme: full CSS design-token system (:root custom properties) + sleek dark (Seerr-like)
+  palette in styles.css; every color/shadow/radius routed through a token; depth (shadows) + motion (hover-lift
+  on media cards, transitions), global :focus-visible, prefers-reduced-motion. CSS-only reskin. index.html
+  color-scheme/theme-color. Verified live (Discover + Admin dark/clean).
+- **Phase 13.2** — left-sidebar app shell: components/AppShell.tsx (sticky sidebar: Tyflix wordmark, NavLink
+  items w/ inline SVG icons + active states, user + Logout); App.tsx nests protected routes in the shell
+  (AdminRoute gate kept; /login outside); removed per-page header link rows from the 6 top-level pages (kept
+  titles + sub-page Back links); content widened (.page-wide 48→72rem → ~7-across grid); responsive icon rail
+  <820px. No deps (inline SVGs). Verified live.
+- **Phase 13.3** — admin tabs: AdminPage is a tab bar (Requests default | Issues | Users | System | Jobs |
+  Containers) rendering only the active panel (lazy self-fetch on select); ?tab= query persistence via
+  useSearchParams; extracted a self-fetching SystemPanel (presentational → SystemBody). Verified live.
+- **Phase 13.4** — Seerr-style request cards: RequestView gains posterUrl (backend toRequestView + enrichRequest
+  reuse the existing per-request TMDB detail fetch — no new API calls); shared components/RequestCard.tsx
+  (poster→detail link, title, type, status badge, meta, optional approve/decline for pending) used by the admin
+  queue (with requester + actions) and My Requests. Verified live (posters DOM-confirmed rendering).
+- **Phase 13 COMPLETE + committed. UI modernized (dark + sidebar + admin tabs + poster request cards).** Next: **Phase 4 deploy**.
 
 ## 9. Deferred / candidate future work
 
@@ -449,8 +474,10 @@ Log (newest at bottom):
 
 ## 10. Rollout / status
 
-Phases 1–3, 5, and **6–12** complete and verified live — **the Seerr-parity backlog is cleared (~90% of Seerr's
-user-facing UI)**. tyflix-web is a **Seerr-backed enhancement**: Plex login + Seerr admin gate; a full discovery
+Phases 1–3, 5, **6–12**, and **13** complete and verified live — **the Seerr-parity backlog is cleared (~90% of
+Seerr's user-facing UI)** and the UI has been modernized (Phase 13: sleek **dark theme** via design tokens, a
+persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — reads like
+Seerr/Plex, no longer the old flat light look). tyflix-web is a **Seerr-backed enhancement**: Plex login + Seerr admin gate; a full discovery
 UI (trending, search, popular, genre + studio/network browse, upcoming, "more like this" recommendations,
 cast/crew, person pages, collections) with **media-status badges**, that requests **through Seerr** (in sync)
 with **admin quality-profile selection**; My Requests (with **request-quota display**) + admin approval queue;
