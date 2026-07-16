@@ -12,12 +12,10 @@ import {
   formatQuota,
   type MyQuota,
 } from "../api/me";
-import { useAuth } from "../auth/AuthContext";
 
 type LoadStatus = "loading" | "ready" | "error";
 
 export function MyRequestsPage() {
-  const { isAdmin, logout } = useAuth();
   const [requests, setRequests] = useState<RequestView[]>([]);
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -82,23 +80,7 @@ export function MyRequestsPage() {
 
   return (
     <main className="page page-wide">
-      <header className="row">
-        <h1>My Requests</h1>
-        <div className="nav-links">
-          <Link to="/">Home</Link>
-          <Link to="/discover">Discover</Link>
-          <Link to="/watchlist">Watchlist</Link>
-          <Link to="/issues">My Issues</Link>
-          {isAdmin ? <Link to="/admin">Admin</Link> : null}
-          <button
-            type="button"
-            className="btn secondary"
-            onClick={() => void logout()}
-          >
-            Logout
-          </button>
-        </div>
-      </header>
+      <h1>My Requests</h1>
 
       {quota === undefined ? (
         <p className="muted">Loading request quota…</p>

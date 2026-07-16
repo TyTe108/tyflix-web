@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   fetchWatchlist,
   type WatchlistItem,
 } from "../api/watchlist";
-import { useAuth } from "../auth/AuthContext";
 import { MediaCard } from "../components/MediaCard";
 
 type LoadStatus = "loading" | "ready" | "error";
 
 export function WatchlistPage() {
-  const { isAdmin, logout } = useAuth();
   const [items, setItems] = useState<WatchlistItem[]>([]);
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -51,22 +48,7 @@ export function WatchlistPage() {
 
   return (
     <main className="page page-wide">
-      <header className="row">
-        <h1>Watchlist</h1>
-        <div className="nav-links">
-          <Link to="/">Home</Link>
-          <Link to="/discover">Discover</Link>
-          <Link to="/issues">My Issues</Link>
-          {isAdmin ? <Link to="/admin">Admin</Link> : null}
-          <button
-            type="button"
-            className="btn secondary"
-            onClick={() => void logout()}
-          >
-            Logout
-          </button>
-        </div>
-      </header>
+      <h1>Watchlist</h1>
 
       <section aria-labelledby="watchlist-heading">
         <h2 id="watchlist-heading" className="visually-hidden">

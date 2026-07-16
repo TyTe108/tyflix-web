@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import { AppShell } from "./components/AppShell";
 import { AdminRoute, ProtectedRoute } from "./auth/ProtectedRoute";
 import { AdminPage } from "./pages/AdminPage";
 import { CollectionPage } from "./pages/CollectionPage";
@@ -17,18 +18,20 @@ export function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route element={<ProtectedRoute />}>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/discover" element={<DiscoverPage />} />
-        <Route path="/watchlist" element={<WatchlistPage />} />
-        <Route path="/requests" element={<MyRequestsPage />} />
-        <Route path="/issues" element={<MyIssuesPage />} />
-        <Route path="/issues/:id" element={<IssueDetailPage />} />
-        <Route path="/media/:type/:id" element={<MediaDetailPage />} />
-        <Route path="/person/:id" element={<PersonPage />} />
-        <Route path="/collection/:id" element={<CollectionPage />} />
-      </Route>
-      <Route element={<AdminRoute />}>
-        <Route path="/admin" element={<AdminPage />} />
+        <Route element={<AppShell />}>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/discover" element={<DiscoverPage />} />
+          <Route path="/watchlist" element={<WatchlistPage />} />
+          <Route path="/requests" element={<MyRequestsPage />} />
+          <Route path="/issues" element={<MyIssuesPage />} />
+          <Route path="/issues/:id" element={<IssueDetailPage />} />
+          <Route path="/media/:type/:id" element={<MediaDetailPage />} />
+          <Route path="/person/:id" element={<PersonPage />} />
+          <Route path="/collection/:id" element={<CollectionPage />} />
+          <Route element={<AdminRoute />}>
+            <Route path="/admin" element={<AdminPage />} />
+          </Route>
+        </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

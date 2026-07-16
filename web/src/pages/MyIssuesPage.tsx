@@ -8,12 +8,10 @@ import {
   issueTypeLabel,
   type IssueView,
 } from "../api/issues";
-import { useAuth } from "../auth/AuthContext";
 
 type LoadStatus = "loading" | "ready" | "error";
 
 export function MyIssuesPage() {
-  const { isAdmin, logout } = useAuth();
   const [issues, setIssues] = useState<IssueView[]>([]);
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -54,23 +52,7 @@ export function MyIssuesPage() {
 
   return (
     <main className="page page-wide">
-      <header className="row">
-        <h1>My Issues</h1>
-        <div className="nav-links">
-          <Link to="/">Home</Link>
-          <Link to="/discover">Discover</Link>
-          <Link to="/watchlist">Watchlist</Link>
-          <Link to="/requests">My Requests</Link>
-          {isAdmin ? <Link to="/admin">Admin</Link> : null}
-          <button
-            type="button"
-            className="btn secondary"
-            onClick={() => void logout()}
-          >
-            Logout
-          </button>
-        </div>
-      </header>
+      <h1>My Issues</h1>
 
       <section aria-labelledby="my-issues-heading">
         <h2 id="my-issues-heading" className="visually-hidden">

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   browseMedia,
   fetchGenres,
@@ -12,7 +11,6 @@ import {
   type MediaType,
   type StudioOption,
 } from "../api/discover";
-import { useAuth } from "../auth/AuthContext";
 import { MediaCard } from "../components/MediaCard";
 
 type LoadStatus = "loading" | "ready" | "error";
@@ -22,7 +20,6 @@ type BrowseMode = "popular" | "upcoming";
 const SEARCH_DEBOUNCE_MS = 400;
 
 export function DiscoverPage() {
-  const { isAdmin, logout } = useAuth();
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [results, setResults] = useState<MediaSummary[]>([]);
@@ -185,22 +182,7 @@ export function DiscoverPage() {
 
   return (
     <main className="page page-wide">
-      <header className="row">
-        <h1>Discover</h1>
-        <div className="nav-links">
-          <Link to="/">Home</Link>
-          <Link to="/watchlist">Watchlist</Link>
-          <Link to="/issues">My Issues</Link>
-          {isAdmin ? <Link to="/admin">Admin</Link> : null}
-          <button
-            type="button"
-            className="btn secondary"
-            onClick={() => void logout()}
-          >
-            Logout
-          </button>
-        </div>
-      </header>
+      <h1>Discover</h1>
 
       <label className="discover-search">
         <span className="visually-hidden">Search movies and TV</span>

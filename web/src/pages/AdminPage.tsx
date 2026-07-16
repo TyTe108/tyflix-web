@@ -87,14 +87,7 @@ export function AdminPage() {
 
   return (
     <main className="page page-wide">
-      <header className="row">
-        <h1>Admin</h1>
-        <div className="nav-links">
-          <Link to="/">Home</Link>
-          <Link to="/discover">Discover</Link>
-          <Link to="/watchlist">Watchlist</Link>
-        </div>
-      </header>
+      <h1>Admin</h1>
 
       <section className="admin-section" aria-labelledby="system-heading">
         <h2 id="system-heading">System / Storage</h2>

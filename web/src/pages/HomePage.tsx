@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   fetchMyStats,
   formatBytes,
@@ -10,7 +9,7 @@ import { useAuth } from "../auth/AuthContext";
 type StatsStatus = "loading" | "ready" | "error";
 
 export function HomePage() {
-  const { user, isAdmin, logout } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [stats, setStats] = useState<MyStats | null>(null);
   const [statsStatus, setStatsStatus] = useState<StatsStatus>("loading");
   const [statsError, setStatsError] = useState<string | null>(null);
@@ -55,23 +54,7 @@ export function HomePage() {
 
   return (
     <main className="page">
-      <header className="row">
-        <h1>Tyflix</h1>
-        <div className="nav-links">
-          <Link to="/discover">Discover</Link>
-          <Link to="/watchlist">Watchlist</Link>
-          <Link to="/requests">My Requests</Link>
-          <Link to="/issues">My Issues</Link>
-          {isAdmin ? <Link to="/admin">Admin</Link> : null}
-          <button
-            type="button"
-            className="btn secondary"
-            onClick={() => void logout()}
-          >
-            Logout
-          </button>
-        </div>
-      </header>
+      <h1>Tyflix</h1>
 
       <p>
         Signed in as <strong>{user.displayName}</strong>
