@@ -3,7 +3,7 @@
 > Living doc. Its job is to let a fresh conversation pick up this project cold.
 > Keep it current; delete guidance notes as you go.
 >
-> **Last updated after:** Phase 9 (2026-07-14). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped parity features on that architecture: **6** media-status badges in discovery, **7** Plex Watchlist, **8** issue reporting (report/list/detail/comments/admin), **9** TMDB title+poster enrichment — all verified live + committed. See §3, the §8 log, and §10 status. Next: request-quota display / quality-profile selection, then Phase 4 deploy.
+> **Last updated after:** Phase 12 (2026-07-14). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. See §3, the §8 log, and §10 status. Next: **Phase 4 deploy** (not yet started). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
 > **Working name:** "Tyflix Web" / repo `tyflix-web` — rename freely.
 
 ---
@@ -91,6 +91,19 @@ Static React build served by the same Node process (single origin)
 - **Enrichment (Phase 9):** a shared `createMediaEnrichment(tmdb)` resolves title+posterUrl by `mediaType:tmdbId`
   (10-min cache, parallel, per-item fail-soft) to fill gaps in Seerr payloads — watchlist cards get posters,
   issue lists/detail get real titles + poster thumbs.
+- **Discovery expansion (Phases 10–11):** all TMDB-backed, all status-overlaid via annotateMediaStatus and all
+  reusing MediaCard. `recommendations` ("More like this" on detail, /recommendations + /similar fallback);
+  `discover` browse by media-type + genre + studio(with_companies)/network(with_networks) — genres from
+  /genre/list, a **curated** studio/network id list (tmdb/studios.ts) since TMDB has no "list studios" endpoint;
+  `upcoming` (/movie/upcoming + /tv/on_the_air); `credits` (cast + key crew on detail); `person` pages
+  (/person/{id} + combined_credits) reached from clickable cast; `collection` pages (belongs_to_collection +
+  /collection/{id}). Key gotcha: only /trending, /search, and /recommendations include `media_type` per row —
+  /similar, /discover, /popular, /upcoming DON'T, so `mapMediaSummary(row, defaultMediaType)` injects it.
+- **Request quota + quality profiles (Phase 12):** `GET /api/me/quota` proxies Seerr `/user/{id}/quota`
+  (limit 0 = unlimited). Admin-only quality-profile selection: `GET /api/requests/profiles` (from Seerr
+  `/service/{radarr|sonarr}/{serverId}`) + `POST /api/requests` accepts an optional `profileId` that is
+  **admin-gated in our route (403 for non-admins, checked before creation)** and forwarded to Seerr with the
+  resolved serverId.
 
 ### Security / trust model
 
@@ -237,6 +250,22 @@ tyflix-web/
   **HMAC over the JSON string**, not the base64url payload — then curl the running server; or drive the
   already-logged-in Personal Chrome (Claude-in-Chrome) against the vite dev server. Create real Seerr issues for
   e2e, then clean up with `DELETE /api/v1/issue/{id}` (API key) and confirm `issue/count` returns to 0.
+- **TMDB single-type endpoints omit `media_type`.** /trending, /search/multi, and /{type}/{id}/recommendations
+  include `media_type` per row; /similar, /discover, /movie|tv/popular, /movie/upcoming, /tv/on_the_air, and
+  /collection parts DO NOT (type is implied by the endpoint). Always pass `mapMediaSummary(row, defaultMediaType)`
+  for those. Also: `include_adult=false` on discover/search.
+- **No "list all studios" TMDB endpoint** → studio/network browse uses a hand-curated verified id list
+  (server/src/tmdb/studios.ts): studios via `with_companies` (Disney 2, Pixar 3, Marvel 420, WB 174, Universal
+  33, Columbia 5, Paramount 4, Lucasfilm 1, 20th Century 25, A24 41077, DreamWorks 521), networks via
+  `with_networks` (Netflix 213, HBO 49, HBO Max 3186, Disney+ 2739, Apple TV+ 2552, Prime 1024, Hulu 453,
+  Showtime 67, FX 88, Paramount+ 4330, Peacock 3353). For TV "upcoming" use /tv/on_the_air (airing_today is
+  talk-show noise).
+- **Quota `limit: 0` = unlimited.** Seerr `/user/{id}/quota` returns `{movie,tv}:{days,limit,used,restricted}`;
+  this server has no limits set, so the UI shows "Unlimited". Quality-profile ids (this Seerr): 1 Any, 2 SD,
+  3 HD-720p, 4 HD-1080p, 5 Ultra-HD, 6 HD-720p/1080p; default radarr/sonarr serverId 0, activeProfileId 1.
+- **Real request = real download.** POSTing a request to Seerr auto-approves for admins → Radarr/Sonarr grab
+  immediately. When verifying request/quality-profile changes, prefer read-only checks + unit tests; only do a
+  live create-request e2e if you can clean up in Radarr/Sonarr afterward.
 
 ## 6. Core logic — watched-vs-requested (to port in Phase 2)
 
@@ -291,9 +320,14 @@ Roadmap (planned):
 - **Phase 7 — Watchlist. COMPLETE.** Per-user Plex Watchlist page (Seerr-backed), shared status provider.
 - **Phase 8 — Issue reporting. COMPLETE.** Report/list/detail/comments/resolve-reopen + admin panel.
 - **Phase 9 — TMDB enrichment. COMPLETE.** Titles + posters for watchlist cards and issue lists/detail.
-- **Parity backlog (remaining, via Seerr's API):** request-quota display, quality-profile selection. (4K is
-  N/A — no 4K server in this Seerr. Notifications/settings/user-management stay delegated to Seerr by design.)
-  Goal = parity with Seerr's user-facing UI, Seerr as the engine.
+- **Phase 10 — Discovery: recommendations + browse. COMPLETE.** "More like this" on detail (10.1); popular +
+  genre browse (10.2).
+- **Phase 11 — Discovery: breadth. COMPLETE.** Cast & crew (11.1), person pages (11.2), collections (11.3),
+  studio/network browse (11.4), upcoming (11.5).
+- **Phase 12 — Request parity. COMPLETE.** Request-quota display (12.1), admin quality-profile selection (12.2).
+- **Parity backlog: CLEARED.** Everything targeted is built. Not built (by design / N/A): notifications,
+  settings, *arr config, user management (delegated to Seerr); 4K (no 4K server). Smaller unbuilt niceties:
+  request editing, blocklist management, i18n. Goal reached = parity with Seerr's user-facing UI, Seerr as the engine.
 - **Phase 4 — Deploy.** Dockerize into the Dell stack + Cloudflare tunnel hostname `tyflix-dashboard.tylerte.dev`;
   prod env; add the `/api` 404-guard; don't route the public hostname until the admin gate is smoke-tested in
   prod. (No DB volume needed — no own store.)
@@ -369,14 +403,37 @@ Log (newest at bottom):
 - **Phase 9** — TMDB enrichment: shared `createMediaEnrichment` (title+poster, 10-min cache, parallel,
   fail-soft); watchlist posters + issue titles/thumbs. Verified live: 13/13 watchlist posters resolve; issue
   media enriches to "Blade Runner" + poster. **64 server tests.**
-- **Phases 6–9 COMPLETE + committed.** Next: request-quota display / quality-profile selection, then Phase 4 deploy.
+- **Phases 6–9 COMPLETE + committed.**
+- **Phase 10.1** — "More like this" on detail: tmdb.recommendations (/recommendations + /similar fallback),
+  GET /api/discover/:type/:id/recommendations (status-overlaid), MediaCard row on detail. Verified live
+  (Blade Runner → Blade Runner 2049/Terminator…).
+- **Phase 10.2** — popular + genre browse: tmdb.genres + tmdb.discover, GET /api/discover/genres + /browse,
+  DiscoverPage All/Movies/TV toggle + genre selector + dynamic headings. Verified live (Sci-Fi movies).
+- **Phase 11.1** — cast & crew: tmdb.credits, GET /api/discover/:type/:id/credits, Cast row + crew line on
+  detail. Verified live (Harrison Ford/Deckard; "Directed by Ridley Scott").
+- **Phase 11.2** — person pages: tmdb.person + personCredits (dedupe, drop "Self", sort by popularity, cap 24),
+  GET /api/discover/person/:id, PersonPage (/person/:id) + clickable cast. Verified live (Harrison Ford page).
+- **Phase 11.3** — collections: movieDetail.collection + tmdb.collection, GET /api/discover/collection/:id,
+  "Part of the {name}" link + CollectionPage. Verified live (Blade Runner Collection: 1982 + 2049).
+- **Phase 11.4** — studio/network browse: curated tmdb/studios.ts, GET /api/discover/studios, /browse forwards
+  companyId/networkId, Studio(Movies)/Network(TV) selectors + heading priority. Verified live (Marvel Studios).
+- **Phase 11.5** — upcoming: tmdb.upcoming (/movie/upcoming + /tv/on_the_air), GET /api/discover/upcoming,
+  [Popular|Upcoming] segmented control. Verified live (Upcoming Movies).
+- **Phase 12.1** — request-quota display: seerr.getUserQuota, GET /api/me/quota, "Request quota" summary on
+  My Requests. Verified live (Unlimited).
+- **Phase 12.2** — admin quality-profile selection: seerr.getServiceProfiles, createRequest forwards
+  profileId+serverId, GET /api/requests/profiles (admin) + profileId admin-gate on POST (403 pre-create),
+  admin-only selector on the request control. Verified live (profiles list; non-admin 403; selector renders).
+  Did NOT submit a real request (download side-effect); forwarding covered by unit tests.
+- **Phases 10–12 COMPLETE + committed. 103 server tests. Parity backlog cleared.** Next: **Phase 4 deploy**.
 
 ## 9. Deferred / candidate future work
 
-- **Parity backlog (remaining, via Seerr's API):** request-quota display, quality-profile selection. Done so
-  far: media-status badges (6), watchlist (7), issue reporting (8), enrichment (9). 4K is N/A (no 4K server);
-  notifications, settings, user-management, and richer discovery (recommendations/similar/cast/genre browse)
-  stay delegated to Seerr or are unbuilt. Goal = parity with Seerr's user-facing UI, Seerr as the engine.
+- **Parity backlog: CLEARED (Phases 6–12).** Built: media-status (6), watchlist (7), issues (8), enrichment (9),
+  recommendations + popular/genre browse (10), cast/person/collections/studio-network/upcoming (11), quota +
+  quality-profile (12). Not built by design: notifications, settings, *arr config, user management (delegated to
+  Seerr). N/A: 4K (no 4K server). Unbuilt niceties if ever wanted: request editing, blocklist management, i18n,
+  root-folder/language-profile selection.
 - **Cosmetic/polish:** corner status badge can overlap poster title art; consider a scrim/reposition.
 - Own user store / retiring Seerr — explicitly NOT the direction anymore (tyflix-web enhances Seerr, in sync).
 - Port host-metric collectors into Node to drop the FastAPI-dashboard dependency.
@@ -392,15 +449,18 @@ Log (newest at bottom):
 
 ## 10. Rollout / status
 
-Phases 1–3, 5, and **6–9** complete and verified live. tyflix-web is a **Seerr-backed enhancement**: Plex login
-+ Seerr admin gate; TMDB discovery UI with **media-status badges** that requests **through Seerr** (in sync);
-My Requests + admin approval queue reading/writing Seerr; **Plex Watchlist**; **issue reporting** (report/list/
-detail/comments/resolve + admin panel); **TMDB title+poster enrichment**; per-user watched-vs-requested + the
-full admin dashboard. No own request store (retired). **64 server tests.** **Not deployed.** Next: **parity
-backlog** (request-quota display, quality-profile selection — via Seerr) and/or **Phase 4 deploy** (hostname
-`tyflix-dashboard.tylerte.dev`; add the `/api` 404-guard; prod build currently doesn't serve the SPA at `/` —
-must fix before routing the hostname). Local dev: `npm run dev`; `.env` carries PLEX_*, SESSION_SECRET,
-SEERR_URL+key, TMDB_API_KEY, DASHBOARD_URL (`RADARR_*`/`SONARR_*`/`DB_PATH` are stale/ignored — safe to delete).
+Phases 1–3, 5, and **6–12** complete and verified live — **the Seerr-parity backlog is cleared (~90% of Seerr's
+user-facing UI)**. tyflix-web is a **Seerr-backed enhancement**: Plex login + Seerr admin gate; a full discovery
+UI (trending, search, popular, genre + studio/network browse, upcoming, "more like this" recommendations,
+cast/crew, person pages, collections) with **media-status badges**, that requests **through Seerr** (in sync)
+with **admin quality-profile selection**; My Requests (with **request-quota display**) + admin approval queue;
+**Plex Watchlist**; **issue reporting** (report/list/detail/comments/resolve + admin panel); **TMDB
+title+poster enrichment**; per-user watched-vs-requested + the full admin dashboard. No own request store
+(retired). **103 server tests.** **Not deployed.** Next: **Phase 4 deploy** (hostname
+`tyflix-dashboard.tylerte.dev`; add the `/api` 404-guard; **prod build currently doesn't serve the SPA at `/`
+("Cannot GET /") — must fix before routing the hostname**). Local dev: `npm run dev`; `.env` carries PLEX_*,
+SESSION_SECRET, SEERR_URL+key, TMDB_API_KEY, DASHBOARD_URL (`RADARR_*`/`SONARR_*`/`DB_PATH` are stale/ignored —
+safe to delete).
 
 ## 11. Working patterns established
 
