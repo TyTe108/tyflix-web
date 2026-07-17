@@ -10,6 +10,8 @@ import {
   type MyQuota,
 } from "../api/me";
 import { RequestCard } from "../components/RequestCard";
+import { PaginationControls } from "../components/PaginationControls";
+import { usePagination } from "../hooks/usePagination";
 
 type LoadStatus = "loading" | "ready" | "error";
 
@@ -19,6 +21,16 @@ export function MyRequestsPage() {
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [quota, setQuota] = useState<MyQuota | null | undefined>(undefined);
+  const {
+    pageItems,
+    page,
+    pageCount,
+    total,
+    canPrev,
+    canNext,
+    next,
+    prev,
+  } = usePagination(requests, 20);
 
   const retry = useCallback(() => {
     setReloadKey((n) => n + 1);
@@ -122,13 +134,24 @@ export function MyRequestsPage() {
         ) : null}
 
         {status === "ready" && requests.length > 0 ? (
-          <ul className="request-card-list">
-            {requests.map((row) => (
-              <li key={row.id}>
-                <RequestCard request={row} />
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="request-card-list">
+              {pageItems.map((row) => (
+                <li key={row.id}>
+                  <RequestCard request={row} />
+                </li>
+              ))}
+            </ul>
+            <PaginationControls
+              page={page}
+              pageCount={pageCount}
+              total={total}
+              canPrev={canPrev}
+              canNext={canNext}
+              onPrev={prev}
+              onNext={next}
+            />
+          </>
         ) : null}
       </section>
     </main>

@@ -35,6 +35,7 @@ import {
   type RequestView,
 } from "../api/requests";
 import { RequestCard } from "../components/RequestCard";
+import { PaginationControls } from "../components/PaginationControls";
 import {
   fetchAllIssues,
   formatIssueDate,
@@ -43,6 +44,7 @@ import {
   issueTypeLabel,
 } from "../api/issues";
 import { usePolledResource } from "../hooks/usePolledResource";
+import { usePagination } from "../hooks/usePagination";
 
 const ADMIN_TABS = [
   { id: "requests", label: "Requests" },
@@ -171,6 +173,16 @@ function RequestsPanel() {
     30000,
   );
   const requests = useMemo(() => pendingFirst(data ?? []), [data]);
+  const {
+    pageItems,
+    page,
+    pageCount,
+    total,
+    canPrev,
+    canNext,
+    next,
+    prev,
+  } = usePagination(requests, 20);
   const [actionError, setActionError] = useState<string | null>(null);
   const [activeRequestId, setActiveRequestId] = useState<number | null>(null);
 
@@ -223,22 +235,33 @@ function RequestsPanel() {
           {requests.length === 0 ? (
             <p className="muted">No requests yet.</p>
           ) : (
-            <ul className="request-card-list">
-              {requests.map((request) => (
-                <li key={request.id}>
-                  <RequestCard
-                    request={request}
-                    showRequester
-                    actions={{
-                      onApprove: () => void runAction(request.id, "approve"),
-                      onDecline: () => void runAction(request.id, "decline"),
-                      inFlight: activeRequestId === request.id,
-                      disabled: activeRequestId !== null,
-                    }}
-                  />
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="request-card-list">
+                {pageItems.map((request) => (
+                  <li key={request.id}>
+                    <RequestCard
+                      request={request}
+                      showRequester
+                      actions={{
+                        onApprove: () => void runAction(request.id, "approve"),
+                        onDecline: () => void runAction(request.id, "decline"),
+                        inFlight: activeRequestId === request.id,
+                        disabled: activeRequestId !== null,
+                      }}
+                    />
+                  </li>
+                ))}
+              </ul>
+              <PaginationControls
+                page={page}
+                pageCount={pageCount}
+                total={total}
+                canPrev={canPrev}
+                canNext={canNext}
+                onPrev={prev}
+                onNext={next}
+              />
+            </>
           )}
         </>
       ) : null}

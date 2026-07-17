@@ -2018,6 +2018,19 @@ a:hover {
   gap: 0.75rem;
 }
 
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.pagination-label {
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .request-card {
   display: flex;
   align-items: stretch;
