@@ -746,6 +746,36 @@ a:hover {
   color: var(--text-muted);
 }
 
+.admin-users-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  transition: color var(--transition);
+}
+
+.admin-users-sort:hover,
+.admin-users-header .admin-users-cell.is-sorted {
+  color: var(--accent);
+}
+
+.admin-users-sort-caret {
+  flex-shrink: 0;
+  font-size: 0.7em;
+  line-height: 1;
+}
+
 .admin-users-cell {
   min-width: 0;
   overflow-wrap: anywhere;

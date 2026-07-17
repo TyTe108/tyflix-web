@@ -341,6 +341,25 @@ function UsersPanel() {
 
 function UsersBody({ data }: { data: AdminUsersResponse }) {
   const { users, totals, watched_definition } = data;
+  const [sortKey, setSortKey] = useState<UserSortKey>("gb_unwatched");
+  const [sortDir, setSortDir] = useState<SortDir>(-1);
+
+  const sorted = useMemo(
+    () => [...users].sort((a, b) => compareUsers(a, b, sortKey, sortDir)),
+    [users, sortKey, sortDir],
+  );
+
+  const onSort = useCallback(
+    (key: UserSortKey) => {
+      if (key === sortKey) {
+        setSortDir((dir) => (dir === 1 ? -1 : 1));
+        return;
+      }
+      setSortKey(key);
+      setSortDir(key === "user" || key === "posture" ? 1 : -1);
+    },
+    [sortKey],
+  );
 
   return (
     <div className="admin-users">
@@ -361,36 +380,125 @@ function UsersBody({ data }: { data: AdminUsersResponse }) {
       <div className="admin-users-scroll">
         <div className="admin-users-list" role="table">
           <div className="admin-users-row admin-users-header" role="row">
-            <div className="admin-users-cell" role="columnheader">
-              User
-            </div>
-            <div className="admin-users-cell" role="columnheader">
-              Requests
-            </div>
-            <div className="admin-users-cell" role="columnheader">
-              Requested
-            </div>
-            <div className="admin-users-cell" role="columnheader">
-              Watched
-            </div>
-            <div className="admin-users-cell" role="columnheader">
-              Unwatched
-            </div>
-            <div className="admin-users-cell" role="columnheader">
-              Rate
-            </div>
-            <div className="admin-users-cell" role="columnheader">
-              Posture
-            </div>
+            {USER_SORT_HEADERS.map(({ key, label }) => (
+              <UsersSortHeader
+                key={key}
+                label={label}
+                sortKey={key}
+                activeKey={sortKey}
+                sortDir={sortDir}
+                onSort={onSort}
+              />
+            ))}
           </div>
 
-          {users.map((user) => (
+          {sorted.map((user) => (
             <UserListRow key={user.user} user={user} />
           ))}
         </div>
       </div>
 
       <p className="stats-caption muted">{watched_definition}</p>
+    </div>
+  );
+}
+
+type UserSortKey =
+  | "user"
+  | "total_requests"
+  | "gb_requested"
+  | "gb_watched"
+  | "gb_unwatched"
+  | "rate"
+  | "posture";
+
+type SortDir = 1 | -1;
+
+const USER_SORT_HEADERS: { key: UserSortKey; label: string }[] = [
+  { key: "user", label: "User" },
+  { key: "total_requests", label: "Requests" },
+  { key: "gb_requested", label: "Requested" },
+  { key: "gb_watched", label: "Watched" },
+  { key: "gb_unwatched", label: "Unwatched" },
+  { key: "rate", label: "Rate" },
+  { key: "posture", label: "Posture" },
+];
+
+function sortFieldValue(
+  user: AdminUser,
+  key: UserSortKey,
+): string | number {
+  const value = user[key];
+  if (value === null || value === undefined) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  if (typeof value === "number" && Number.isNaN(value)) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  return value;
+}
+
+function compareUsers(
+  a: AdminUser,
+  b: AdminUser,
+  key: UserSortKey,
+  dir: SortDir,
+): number {
+  const av = sortFieldValue(a, key);
+  const bv = sortFieldValue(b, key);
+
+  let cmp = 0;
+  if (typeof av === "string" && typeof bv === "string") {
+    cmp = av.localeCompare(bv);
+  } else {
+    const an = typeof av === "number" ? av : Number.NEGATIVE_INFINITY;
+    const bn = typeof bv === "number" ? bv : Number.NEGATIVE_INFINITY;
+    cmp = an === bn ? 0 : an < bn ? -1 : 1;
+  }
+
+  return cmp * dir;
+}
+
+function UsersSortHeader({
+  label,
+  sortKey,
+  activeKey,
+  sortDir,
+  onSort,
+}: {
+  label: string;
+  sortKey: UserSortKey;
+  activeKey: UserSortKey;
+  sortDir: SortDir;
+  onSort: (key: UserSortKey) => void;
+}) {
+  const active = sortKey === activeKey;
+  const ariaSort = active
+    ? sortDir === 1
+      ? "ascending"
+      : "descending"
+    : "none";
+
+  return (
+    <div
+      className={
+        active ? "admin-users-cell is-sorted" : "admin-users-cell"
+      }
+      role="columnheader"
+      aria-sort={ariaSort}
+    >
+      <button
+        type="button"
+        className="admin-users-sort"
+        onClick={() => onSort(sortKey)}
+      >
+        <span>{label}</span>
+        {active ? (
+          <span className="admin-users-sort-caret" aria-hidden="true">
+            {sortDir === 1 ? "▲" : "▼"}
+          </span>
+        ) : null}
+      </button>
     </div>
   );
 }
