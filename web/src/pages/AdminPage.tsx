@@ -13,6 +13,7 @@ import {
   healthBadgeClass,
   jobStatusBadgeClass,
   postureBadgeClass,
+  rateBarClass,
   stateBadgeClass,
   tempBarClass,
   usageBarClass,
@@ -347,7 +348,14 @@ function UsersBody({ data }: { data: AdminUsersResponse }) {
         {totals.users} user{totals.users === 1 ? "" : "s"} ·{" "}
         {totals.requesters} requester{totals.requesters === 1 ? "" : "s"} ·{" "}
         {totals.gb_requested_h} requested · {totals.gb_watched_h} watched ·{" "}
-        {totals.gb_unwatched_h} unwatched · rate {formatRate(totals.rate)}
+        {totals.gb_unwatched_h} unwatched · rate{" "}
+        <span className="admin-bar-inline" aria-hidden="true">
+          <span
+            className={`stats-bar-fill ${rateBarClass(totals.rate)}`}
+            style={{ width: `${barWidth(totals.rate)}%` }}
+          />
+        </span>
+        {formatRate(totals.rate)}
       </p>
 
       <div className="admin-users-scroll">
@@ -436,6 +444,12 @@ function UserRowCells({ user }: { user: AdminUser }) {
         {user.gb_unwatched_h}
       </div>
       <div className="admin-users-cell admin-users-col-num" role="cell">
+        <span className="admin-bar-inline" aria-hidden="true">
+          <span
+            className={`stats-bar-fill ${rateBarClass(user.rate)}`}
+            style={{ width: `${barWidth(user.rate)}%` }}
+          />
+        </span>
         {formatRate(user.rate)}
       </div>
       <div className="admin-users-cell admin-users-col-posture" role="cell">

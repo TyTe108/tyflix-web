@@ -271,6 +271,21 @@ export function tempBarClass(
   return "is-ok";
 }
 
+export function rateBarClass(
+  rate: number | null | undefined,
+): "is-danger" | "is-warn" | "is-ok" | "is-neutral" {
+  if (rate === null || rate === undefined || Number.isNaN(rate)) {
+    return "is-neutral";
+  }
+  if (rate >= 70) {
+    return "is-ok";
+  }
+  if (rate >= 40) {
+    return "is-warn";
+  }
+  return "is-danger";
+}
+
 export function postureBadgeClass(posture: string): string {
   switch (posture) {
     case "Approve freely":

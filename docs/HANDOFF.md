@@ -3,7 +3,7 @@
 > Living doc. Its job is to let a fresh conversation pick up this project cold.
 > Keep it current; delete guidance notes as you go.
 >
-> **Last updated after:** Phase 12 (2026-07-14). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. Next: **Phase 4 deploy** (not yet started). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
+> **Last updated after:** Phase 13.10 (2026-07-16). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. Next: **Phase 4 deploy** (not yet started). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
 > **Working name:** "Tyflix Web" / repo `tyflix-web` — rename freely.
 
 ---
@@ -471,6 +471,22 @@ Log (newest at bottom):
 - **Phase 13.5–13.7 COMPLETE.** All six admin panels now auto-refresh (System/Containers 5s, Jobs 30s,
   Users 60s, Requests 30s, Issues 60s) with no loading flash and keep-last-good on transient failures —
   no manual reload needed.
+- **Phase 13.8** — System tab visual parity: replaced the flat `admin-metrics` `<dl>` with six
+  `.admin-tile` cards (CPU, Memory, Load (1m), CPU temp, GPU busy, Transcoder), each a big number + a
+  threshold-colored `.stats-bar`; GPU engines became five labeled `.stats-bar` rows; storage bars are now
+  threshold-colored (fixes the always-green-drive bug). Added `usageBarClass`/`tempBarClass` helpers + a
+  `barWidth()` clamp (0–100, null/NaN→0) and fill modifiers
+  `.stats-bar-fill.is-ok/.is-warn/.is-danger/.is-info/.is-neutral` — all via tokens, no raw hex.
+  `tsc -b && vite build` clean.
+- **Phase 13.9** — Containers tab bars: Docker CPU + memory and Native CPU cells prepend a compact
+  `.admin-bar-inline` track (reusing the `is-*` fills + `usageBarClass` + `barWidth`); numbers unchanged.
+  Purely additive (+34/−0); `tsc -b && vite build` clean.
+- **Phase 13.10** — Users tab watch-rate bars: each user row + the totals prepend an `.admin-bar-inline`
+  bar via a new **inverted** `rateBarClass` (≥70 green / ≥40 amber / <40 red — higher is better); the
+  7-column grid and numbers unchanged. `tsc -b && vite build` clean.
+- **Phase 13.8–13.10 COMPLETE.** Admin view is now at **visual parity** with the old dashboard — metric
+  tiles + threshold-colored bars (System), inline usage bars (Containers), and watch-rate bars (Users),
+  layered on the 13.5–13.7 live auto-refresh.
 
 ## 9. Deferred / candidate future work
 
