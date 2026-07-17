@@ -39,8 +39,8 @@ export function RequestControls({ value, onChange }: RequestControlsProps) {
   };
 
   return (
-    <div className="request-controls">
-      <label className="request-control">
+    <div className="request-filters">
+      <label className="request-filter">
         <span>Media</span>
         <select
           aria-label="Filter by media type"
@@ -60,7 +60,7 @@ export function RequestControls({ value, onChange }: RequestControlsProps) {
         </select>
       </label>
 
-      <label className="request-control">
+      <label className="request-filter">
         <span>Status</span>
         <select
           aria-label="Filter by status"
@@ -80,7 +80,7 @@ export function RequestControls({ value, onChange }: RequestControlsProps) {
         </select>
       </label>
 
-      <label className="request-control">
+      <label className="request-filter">
         <span>Sort</span>
         <select
           aria-label="Sort by"
@@ -102,7 +102,7 @@ export function RequestControls({ value, onChange }: RequestControlsProps) {
 
       <button
         type="button"
-        className="request-control-dir"
+        className="request-filter-dir"
         onClick={toggleDir}
         aria-label={value.dir === "asc" ? "Sort ascending" : "Sort descending"}
       >
