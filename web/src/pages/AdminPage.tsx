@@ -17,7 +17,6 @@ import {
   type AdminContainersResponse,
   type AdminDockerRow,
   type AdminJob,
-  type AdminJobsResponse,
   type AdminNativeRow,
   type AdminSystem,
   type AdminSystemGpu,
@@ -41,6 +40,7 @@ import {
   issueTypeLabel,
   type IssueView,
 } from "../api/issues";
+import { usePolledResource } from "../hooks/usePolledResource";
 
 type LoadStatus = "loading" | "ready" | "error";
 
@@ -122,43 +122,13 @@ export function AdminPage() {
 }
 
 function SystemPanel() {
-  const [system, setSystem] = useState<AdminSystem | null>(null);
-  const [status, setStatus] = useState<LoadStatus>("loading");
-  const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  const retry = useCallback(() => {
-    setReloadKey((n) => n + 1);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    setStatus("loading");
-    setError(null);
-
-    void fetchAdminSystem()
-      .then((data) => {
-        if (cancelled) {
-          return;
-        }
-        setSystem(data);
-        setStatus("ready");
-      })
-      .catch((err: unknown) => {
-        if (cancelled) {
-          return;
-        }
-        setSystem(null);
-        setStatus("error");
-        setError(
-          err instanceof Error ? err.message : "Failed to load system status",
-        );
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadKey]);
+  const {
+    data: system,
+    status,
+    error,
+    lastUpdated,
+    refresh,
+  } = usePolledResource(fetchAdminSystem, 5000);
 
   return (
     <section className="admin-section" aria-labelledby="system-heading">
@@ -171,14 +141,17 @@ function SystemPanel() {
       {status === "error" ? (
         <div className="stats-error">
           <p className="error">{error ?? "Failed to load system status"}</p>
-          <button type="button" className="btn secondary" onClick={retry}>
+          <button type="button" className="btn secondary" onClick={refresh}>
             Retry
           </button>
         </div>
       ) : null}
 
       {status === "ready" && system !== null ? (
-        <SystemBody system={system} />
+        <>
+          <UpdatedLine lastUpdated={lastUpdated} refreshError={error} />
+          <SystemBody system={system} />
+        </>
       ) : null}
     </section>
   );
@@ -401,43 +374,10 @@ function IssuesPanel() {
 }
 
 function UsersPanel() {
-  const [data, setData] = useState<AdminUsersResponse | null>(null);
-  const [status, setStatus] = useState<LoadStatus>("loading");
-  const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  const retry = useCallback(() => {
-    setReloadKey((n) => n + 1);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    setStatus("loading");
-    setError(null);
-
-    void fetchAdminUsers()
-      .then((response) => {
-        if (cancelled) {
-          return;
-        }
-        setData(response);
-        setStatus("ready");
-      })
-      .catch((err: unknown) => {
-        if (cancelled) {
-          return;
-        }
-        setData(null);
-        setStatus("error");
-        setError(
-          err instanceof Error ? err.message : "Failed to load users",
-        );
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadKey]);
+  const { data, status, error, lastUpdated, refresh } = usePolledResource(
+    fetchAdminUsers,
+    60000,
+  );
 
   return (
     <section className="admin-section" aria-labelledby="users-heading">
@@ -450,14 +390,17 @@ function UsersPanel() {
       {status === "error" ? (
         <div className="stats-error">
           <p className="error">{error ?? "Failed to load users"}</p>
-          <button type="button" className="btn secondary" onClick={retry}>
+          <button type="button" className="btn secondary" onClick={refresh}>
             Retry
           </button>
         </div>
       ) : null}
 
       {status === "ready" && data !== null ? (
-        <UsersBody data={data} />
+        <>
+          <UpdatedLine lastUpdated={lastUpdated} refreshError={error} />
+          <UsersBody data={data} />
+        </>
       ) : null}
     </section>
   );
@@ -591,43 +534,10 @@ function UnwatchedTitlesList({ titles }: { titles: AdminUnwatchedTitle[] }) {
 }
 
 function JobsPanel() {
-  const [data, setData] = useState<AdminJobsResponse | null>(null);
-  const [status, setStatus] = useState<LoadStatus>("loading");
-  const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  const retry = useCallback(() => {
-    setReloadKey((n) => n + 1);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    setStatus("loading");
-    setError(null);
-
-    void fetchAdminJobs()
-      .then((response) => {
-        if (cancelled) {
-          return;
-        }
-        setData(response);
-        setStatus("ready");
-      })
-      .catch((err: unknown) => {
-        if (cancelled) {
-          return;
-        }
-        setData(null);
-        setStatus("error");
-        setError(
-          err instanceof Error ? err.message : "Failed to load jobs",
-        );
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadKey]);
+  const { data, status, error, lastUpdated, refresh } = usePolledResource(
+    fetchAdminJobs,
+    30000,
+  );
 
   return (
     <section className="admin-section" aria-labelledby="jobs-heading">
@@ -640,14 +550,17 @@ function JobsPanel() {
       {status === "error" ? (
         <div className="stats-error">
           <p className="error">{error ?? "Failed to load jobs"}</p>
-          <button type="button" className="btn secondary" onClick={retry}>
+          <button type="button" className="btn secondary" onClick={refresh}>
             Retry
           </button>
         </div>
       ) : null}
 
       {status === "ready" && data !== null ? (
-        <JobsBody jobs={data.jobs} />
+        <>
+          <UpdatedLine lastUpdated={lastUpdated} refreshError={error} />
+          <JobsBody jobs={data.jobs} />
+        </>
       ) : null}
     </section>
   );
@@ -711,43 +624,10 @@ function JobsBody({ jobs }: { jobs: AdminJob[] }) {
 }
 
 function ContainersPanel() {
-  const [data, setData] = useState<AdminContainersResponse | null>(null);
-  const [status, setStatus] = useState<LoadStatus>("loading");
-  const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  const retry = useCallback(() => {
-    setReloadKey((n) => n + 1);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    setStatus("loading");
-    setError(null);
-
-    void fetchAdminContainers()
-      .then((response) => {
-        if (cancelled) {
-          return;
-        }
-        setData(response);
-        setStatus("ready");
-      })
-      .catch((err: unknown) => {
-        if (cancelled) {
-          return;
-        }
-        setData(null);
-        setStatus("error");
-        setError(
-          err instanceof Error ? err.message : "Failed to load containers",
-        );
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadKey]);
+  const { data, status, error, lastUpdated, refresh } = usePolledResource(
+    fetchAdminContainers,
+    5000,
+  );
 
   return (
     <section className="admin-section" aria-labelledby="containers-heading">
@@ -760,16 +640,38 @@ function ContainersPanel() {
       {status === "error" ? (
         <div className="stats-error">
           <p className="error">{error ?? "Failed to load containers"}</p>
-          <button type="button" className="btn secondary" onClick={retry}>
+          <button type="button" className="btn secondary" onClick={refresh}>
             Retry
           </button>
         </div>
       ) : null}
 
       {status === "ready" && data !== null ? (
-        <ContainersBody data={data} />
+        <>
+          <UpdatedLine lastUpdated={lastUpdated} refreshError={error} />
+          <ContainersBody data={data} />
+        </>
       ) : null}
     </section>
+  );
+}
+
+function UpdatedLine({
+  lastUpdated,
+  refreshError,
+}: {
+  lastUpdated: number | null;
+  refreshError: string | null;
+}) {
+  if (lastUpdated === null) {
+    return null;
+  }
+
+  return (
+    <p className="muted">
+      Updated {new Date(lastUpdated).toLocaleTimeString()}
+      {refreshError ? " · couldn't refresh" : ""}
+    </p>
   );
 }
 
