@@ -341,6 +341,26 @@ a:hover {
   transition: width 0.25s ease;
 }
 
+.stats-bar-fill.is-ok {
+  background: var(--ok);
+}
+
+.stats-bar-fill.is-warn {
+  background: var(--warn);
+}
+
+.stats-bar-fill.is-danger {
+  background: var(--danger);
+}
+
+.stats-bar-fill.is-info {
+  background: var(--info);
+}
+
+.stats-bar-fill.is-neutral {
+  background: var(--text-muted);
+}
+
 .stats-totals {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -510,36 +530,45 @@ a:hover {
   margin: 0 0 1rem;
 }
 
-.admin-metrics {
+.admin-tiles {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.85rem 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 0.85rem;
   margin: 0 0 0.5rem;
 }
 
-.admin-metrics div {
-  margin: 0;
-}
-
-.admin-metrics dt {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  margin: 0 0 0.15rem;
-}
-
-.admin-metrics dd {
-  margin: 0;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
+.admin-tile {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.9rem 1rem;
+  box-shadow: var(--shadow-1);
 }
 
-.admin-metric-sub {
-  font-weight: 400;
+.admin-tile-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0 0 0.3rem;
+}
+
+.admin-tile-value {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-tile-meta {
+  margin: 0.2rem 0 0.8rem;
   font-size: 0.8rem;
   line-height: 1.35;
+}
+
+.admin-tile .stats-bar {
+  margin-top: auto;
+  margin-bottom: 0;
 }
 
 .admin-gpu-name {
@@ -553,25 +582,30 @@ a:hover {
 }
 
 .admin-engines {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 0.5rem;
   margin: 0;
 }
 
-.admin-engines div {
-  margin: 0;
+.admin-engine-row {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr) 4rem;
+  align-items: center;
+  gap: 0.75rem;
 }
 
-.admin-engines dt {
-  font-size: 0.75rem;
+.admin-engine-label {
   color: var(--text-muted);
-  margin: 0 0 0.1rem;
+  font-size: 0.8rem;
 }
 
-.admin-engines dd {
+.admin-engine-row .stats-bar {
   margin: 0;
-  font-weight: 600;
+}
+
+.admin-engine-value {
+  text-align: right;
   font-variant-numeric: tabular-nums;
   font-size: 0.9rem;
 }
@@ -2208,14 +2242,6 @@ a:hover {
 
   .stats-totals {
     grid-template-columns: 1fr;
-  }
-
-  .admin-metrics {
-    grid-template-columns: 1fr;
-  }
-
-  .admin-engines {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .admin-storage-head {

@@ -241,6 +241,36 @@ export function formatTempC(value: number | null | undefined): string {
   return `${value.toFixed(0)}°C`;
 }
 
+export function usageBarClass(
+  pct: number | null | undefined,
+): "is-danger" | "is-warn" | "is-ok" | "is-neutral" {
+  if (pct === null || pct === undefined || Number.isNaN(pct)) {
+    return "is-neutral";
+  }
+  if (pct >= 90) {
+    return "is-danger";
+  }
+  if (pct >= 70) {
+    return "is-warn";
+  }
+  return "is-ok";
+}
+
+export function tempBarClass(
+  c: number | null | undefined,
+): "is-danger" | "is-warn" | "is-ok" | "is-neutral" {
+  if (c === null || c === undefined || Number.isNaN(c)) {
+    return "is-neutral";
+  }
+  if (c >= 85) {
+    return "is-danger";
+  }
+  if (c >= 70) {
+    return "is-warn";
+  }
+  return "is-ok";
+}
+
 export function postureBadgeClass(posture: string): string {
   switch (posture) {
     case "Approve freely":

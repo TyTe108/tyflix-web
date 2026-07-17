@@ -14,6 +14,8 @@ import {
   jobStatusBadgeClass,
   postureBadgeClass,
   stateBadgeClass,
+  tempBarClass,
+  usageBarClass,
   type AdminContainersResponse,
   type AdminDockerRow,
   type AdminJob,
@@ -740,8 +742,25 @@ function NativeTable({ rows }: { rows: AdminNativeRow[] }) {
   );
 }
 
+function barWidth(value: number | null | undefined): number {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.min(100, Math.max(0, value));
+}
+
 function SystemBody({ system }: { system: AdminSystem }) {
   const { cpu, mem, load, temps, gpu, storage, services } = system;
+  const gpuUsage = gpu?.usage;
+  const load1 = Number.isFinite(load["1"]) ? load["1"].toFixed(2) : "—";
+  const load5 = Number.isFinite(load["5"]) ? load["5"].toFixed(2) : "—";
+  const load15 = Number.isFinite(load["15"]) ? load["15"].toFixed(2) : "—";
+  const gpuFrequency =
+    gpuUsage &&
+    Number.isFinite(gpuUsage.freq_act) &&
+    Number.isFinite(gpuUsage.freq_max)
+      ? `${gpuUsage.freq_act}/${gpuUsage.freq_max} MHz`
+      : "—";
 
   return (
     <div className="admin-system">
@@ -750,44 +769,89 @@ function SystemBody({ system }: { system: AdminSystem }) {
         <span className="muted"> · up {formatUptime(system.uptime_s)}</span>
       </p>
 
-      <dl className="admin-metrics">
-        <div>
-          <dt>CPU</dt>
-          <dd>
-            {formatPct(cpu.pct)}
-            <span className="muted admin-metric-sub">
-              {cpu.cores} cores · {cpu.model}
-            </span>
-          </dd>
+      <div className="admin-tiles">
+        <div className="admin-tile">
+          <p className="admin-tile-label">CPU</p>
+          <p className="admin-tile-value">{formatPct(cpu.pct)}</p>
+          <p className="muted admin-tile-meta">{cpu.cores} cores</p>
+          <div className="stats-bar">
+            <div
+              className={`stats-bar-fill ${usageBarClass(cpu.pct)}`}
+              style={{ width: `${barWidth(cpu.pct)}%` }}
+            />
+          </div>
         </div>
-        <div>
-          <dt>Memory</dt>
-          <dd>
-            {formatPct(mem.pct)}
-            <span className="muted admin-metric-sub">
-              {mem.used_h} / {mem.total_h}
-            </span>
-          </dd>
+
+        <div className="admin-tile">
+          <p className="admin-tile-label">Memory</p>
+          <p className="admin-tile-value">{formatPct(mem.pct)}</p>
+          <p className="muted admin-tile-meta">
+            {mem.used_h} / {mem.total_h}
+          </p>
+          <div className="stats-bar">
+            <div
+              className={`stats-bar-fill ${usageBarClass(mem.pct)}`}
+              style={{ width: `${barWidth(mem.pct)}%` }}
+            />
+          </div>
         </div>
-        <div>
-          <dt>Load</dt>
-          <dd>
-            {load["1"]} / {load["5"]} / {load["15"]}
-            <span className="muted admin-metric-sub">
-              1m {formatPct(load.pct_1)}
-            </span>
-          </dd>
+
+        <div className="admin-tile">
+          <p className="admin-tile-label">Load (1m)</p>
+          <p className="admin-tile-value">{load1}</p>
+          <p className="muted admin-tile-meta">
+            {load5} · {load15} (5/15m) · {formatPct(load.pct_1)} of {cpu.cores}
+          </p>
+          <div className="stats-bar">
+            <div
+              className={`stats-bar-fill ${usageBarClass(load.pct_1)}`}
+              style={{ width: `${barWidth(load.pct_1)}%` }}
+            />
+          </div>
         </div>
-        <div>
-          <dt>Temps</dt>
-          <dd>
-            CPU {formatTempC(temps.cpu_c)}
-            <span className="muted admin-metric-sub">
-              GPU {formatTempC(temps.gpu_c)}
-            </span>
-          </dd>
+
+        <div className="admin-tile">
+          <p className="admin-tile-label">CPU temp</p>
+          <p className="admin-tile-value">{formatTempC(temps.cpu_c)}</p>
+          <p className="muted admin-tile-meta">
+            package · GPU {formatTempC(temps.gpu_c)}
+          </p>
+          <div className="stats-bar">
+            <div
+              className={`stats-bar-fill ${tempBarClass(temps.cpu_c)}`}
+              style={{ width: `${barWidth(temps.cpu_c)}%` }}
+            />
+          </div>
         </div>
-      </dl>
+
+        <div className="admin-tile">
+          <p className="admin-tile-label">GPU busy</p>
+          <p className="admin-tile-value">{formatPct(gpuUsage?.busy)}</p>
+          <p className="muted admin-tile-meta">{gpuFrequency}</p>
+          {gpu !== null ? (
+            <div className="stats-bar">
+              <div
+                className={`stats-bar-fill ${
+                  gpuUsage && Number.isFinite(gpuUsage.busy)
+                    ? "is-info"
+                    : "is-neutral"
+                }`}
+                style={{ width: `${barWidth(gpuUsage?.busy)}%` }}
+              />
+            </div>
+          ) : null}
+        </div>
+
+        <div className="admin-tile">
+          <p className="admin-tile-label">Transcoder</p>
+          <p className="admin-tile-value">{gpu?.transcodes ?? "—"}</p>
+          <p className="muted admin-tile-meta">
+            {gpu
+              ? `${gpu.name} · ${gpu.streams} stream${gpu.streams === 1 ? "" : "s"}${gpu.hw ? " · HW" : ""}`
+              : "—"}
+          </p>
+        </div>
+      </div>
 
       <GpuBlock gpu={gpu} />
 
@@ -832,6 +896,15 @@ function GpuBlock({ gpu }: { gpu: AdminSystemGpu }) {
 
   const usage = gpu.usage;
   const engines = usage?.engines;
+  const engineRows = engines
+    ? [
+        { label: "Video", value: engines.video },
+        { label: "Enhance", value: engines.video_enhance },
+        { label: "Render", value: engines.render },
+        { label: "Blitter", value: engines.blitter },
+        { label: "Compute", value: engines.compute },
+      ]
+    : [];
 
   return (
     <div className="admin-gpu">
@@ -844,29 +917,23 @@ function GpuBlock({ gpu }: { gpu: AdminSystemGpu }) {
         {usage != null ? ` · busy ${formatPct(usage.busy)}` : null}
       </p>
       {engines != null ? (
-        <dl className="admin-engines">
-          <div>
-            <dt>Video</dt>
-            <dd>{formatPct(engines.video)}</dd>
-          </div>
-          <div>
-            <dt>Enhance</dt>
-            <dd>{formatPct(engines.video_enhance)}</dd>
-          </div>
-          <div>
-            <dt>Render</dt>
-            <dd>{formatPct(engines.render)}</dd>
-          </div>
-          <div>
-            <dt>Blitter</dt>
-            <dd>{formatPct(engines.blitter)}</dd>
-          </div>
-          <div>
-            <dt>Compute</dt>
-            <dd>{formatPct(engines.compute)}</dd>
-          </div>
-        </dl>
-      ) : null}
+        <div className="admin-engines">
+          {engineRows.map(({ label, value }) => (
+            <div className="admin-engine-row" key={label}>
+              <span className="admin-engine-label">{label}</span>
+              <div className="stats-bar">
+                <div
+                  className={`stats-bar-fill ${Number.isFinite(value) ? "is-info" : "is-neutral"}`}
+                  style={{ width: `${barWidth(value)}%` }}
+                />
+              </div>
+              <span className="admin-engine-value">{formatPct(value)}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="muted admin-gpu-meta">No GPU usage data.</p>
+      )}
     </div>
   );
 }
@@ -884,7 +951,7 @@ function StorageRow({ drive }: { drive: AdminSystemStorage }) {
     );
   }
 
-  const pct = Math.min(100, Math.max(0, drive.pct));
+  const pct = barWidth(drive.pct);
 
   return (
     <li className="admin-storage-row">
@@ -905,7 +972,10 @@ function StorageRow({ drive }: { drive: AdminSystemStorage }) {
         aria-valuenow={pct}
         aria-label={`${drive.label} usage`}
       >
-        <div className="stats-bar-fill" style={{ width: `${pct}%` }} />
+        <div
+          className={`stats-bar-fill ${usageBarClass(drive.pct)}`}
+          style={{ width: `${pct}%` }}
+        />
       </div>
     </li>
   );
