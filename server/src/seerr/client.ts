@@ -68,6 +68,7 @@ export type SeerrRequest = {
   media: SeerrMedia;
   seasons: SeerrRequestSeason[];
   createdAt: string;
+  updatedAt: string;
   requestedBy: {
     id: number;
     displayName: string;
@@ -92,6 +93,7 @@ export type RequestView = {
   requestedById: number;
   requestedByName: string;
   createdAt: string;
+  updatedAt: string;
 };
 
 export type CreateSeerrRequestInput = {
@@ -667,6 +669,7 @@ export function toRequestView(
     requestedByName:
       req.requestedBy.displayName || req.requestedBy.plexUsername,
     createdAt: req.createdAt,
+    updatedAt: req.updatedAt,
   };
 }
 
@@ -811,6 +814,7 @@ function mapSeerrRequest(row: unknown): SeerrRequest | null {
   const requestStatus = (row as { status?: unknown }).status;
   const type = (row as { type?: unknown }).type;
   const createdAt = (row as { createdAt?: unknown }).createdAt;
+  const updatedAtRaw = (row as { updatedAt?: unknown }).updatedAt;
   const mediaRaw = (row as { media?: unknown }).media;
   const requestedByRaw = (row as { requestedBy?: unknown }).requestedBy;
   const seasonsRaw = (row as { seasons?: unknown }).seasons;
@@ -825,6 +829,8 @@ function mapSeerrRequest(row: unknown): SeerrRequest | null {
   if (typeof createdAt !== "string") {
     return null;
   }
+  const updatedAt =
+    typeof updatedAtRaw === "string" ? updatedAtRaw : createdAt;
   if (typeof mediaRaw !== "object" || mediaRaw === null) {
     return null;
   }
@@ -887,6 +893,7 @@ function mapSeerrRequest(row: unknown): SeerrRequest | null {
     status: requestStatus,
     type,
     createdAt,
+    updatedAt,
     media: {
       tmdbId,
       tvdbId: typeof tvdbIdRaw === "number" ? tvdbIdRaw : null,

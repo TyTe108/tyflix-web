@@ -53,6 +53,7 @@ function seerrRequest(
     type: "movie",
     seasons: [],
     createdAt: "2026-07-15T00:00:00.000Z",
+    updatedAt: "2026-07-15T01:00:00.000Z",
     requestedBy: {
       id: 7,
       displayName: "Tyler",
@@ -198,6 +199,7 @@ describe("Seerr-backed request routes", () => {
       requestedById: 7,
       requestedByName: "Tyler",
       createdAt: "2026-07-15T00:00:00.000Z",
+      updatedAt: "2026-07-15T01:00:00.000Z",
     });
   });
 

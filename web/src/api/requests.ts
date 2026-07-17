@@ -28,6 +28,7 @@ export type RequestView = {
   requestedById: number;
   requestedByName: string;
   createdAt: string;
+  updatedAt: string;
 };
 
 export type CreateRequestInput = {

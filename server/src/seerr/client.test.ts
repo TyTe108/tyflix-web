@@ -55,6 +55,7 @@ function requestRow(
     type: "movie",
     seasons: [],
     createdAt: "2026-07-15T00:00:00.000Z",
+    updatedAt: "2026-07-15T01:00:00.000Z",
     requestedBy: {
       id: 7,
       displayName: "Alice",
@@ -535,6 +536,8 @@ describe("Seerr requests client", () => {
       });
       assert.equal(view.mediaStatus, mediaStatuses[status - 1]);
       assert.equal(view.posterUrl, "https://img/poster.jpg");
+      assert.equal(view.createdAt, "2026-07-15T00:00:00.000Z");
+      assert.equal(view.updatedAt, "2026-07-15T01:00:00.000Z");
     }
   });
 
