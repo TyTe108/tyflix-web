@@ -451,6 +451,12 @@ Log (newest at bottom):
   (poster→detail link, title, type, status badge, meta, optional approve/decline for pending) used by the admin
   queue (with requester + actions) and My Requests. Verified live (posters DOM-confirmed rendering).
 - **Phase 13 COMPLETE + committed. UI modernized (dark + sidebar + admin tabs + poster request cards).** Next: **Phase 4 deploy**.
+- **Phase 13.5** — auto-refresh admin metric panels: new `usePolledResource<T>(fetcher, intervalMs)` hook
+  (immediate load + `setInterval`, overlap guard, unmount cancel, in-place background refresh) driving System
+  & Containers (5s), Jobs (30s), Users (60s). No loading flash on ticks; a transient poll failure keeps
+  last-good data plus a muted `Updated {time} · couldn't refresh` line; first-load failure still shows
+  error + Retry (wired to `refresh()`). Requests/Issues deferred to 13.6/13.7. Frontend-only;
+  `tsc -b && vite build` clean; net −98 lines in `AdminPage.tsx`.
 
 ## 9. Deferred / candidate future work
 
