@@ -665,6 +665,12 @@ function DockerTable({ rows }: { rows: AdminDockerRow[] }) {
               ) : null}
             </div>
             <div className="admin-containers-cell" role="cell">
+              <span className="admin-bar-inline" aria-hidden="true">
+                <span
+                  className={`stats-bar-fill ${usageBarClass(row.cpu)}`}
+                  style={{ width: `${barWidth(row.cpu)}%` }}
+                />
+              </span>
               {formatPct(row.cpu)}
             </div>
             <div className="admin-containers-cell" role="cell">
@@ -672,6 +678,12 @@ function DockerTable({ rows }: { rows: AdminDockerRow[] }) {
                 {row.mem_used_h} / {row.mem_limit_h}
               </span>
               <span className="muted admin-containers-sub">
+                <span className="admin-bar-inline" aria-hidden="true">
+                  <span
+                    className={`stats-bar-fill ${usageBarClass(row.mem_pct)}`}
+                    style={{ width: `${barWidth(row.mem_pct)}%` }}
+                  />
+                </span>
                 {formatPct(row.mem_pct)}
               </span>
             </div>
@@ -724,6 +736,12 @@ function NativeTable({ rows }: { rows: AdminNativeRow[] }) {
               <span className={stateBadgeClass(row.state)}>{row.state}</span>
             </div>
             <div className="admin-containers-cell" role="cell">
+              <span className="admin-bar-inline" aria-hidden="true">
+                <span
+                  className={`stats-bar-fill ${usageBarClass(row.cpu)}`}
+                  style={{ width: `${barWidth(row.cpu)}%` }}
+                />
+              </span>
               {formatPct(row.cpu)}
             </div>
             <div className="admin-containers-cell" role="cell">

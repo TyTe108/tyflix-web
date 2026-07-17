@@ -992,6 +992,22 @@ a:hover {
   border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
 }
 
+.admin-bar-inline {
+  display: inline-block;
+  vertical-align: middle;
+  width: 4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+  margin-right: 0.5rem;
+}
+
+.admin-bar-inline .stats-bar-fill {
+  display: block;
+  height: 100%;
+}
+
 .admin-containers-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
