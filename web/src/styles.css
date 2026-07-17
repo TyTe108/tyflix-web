@@ -2018,6 +2018,52 @@ a:hover {
   gap: 0.75rem;
 }
 
+.request-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.request-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.request-control select {
+  min-width: 9rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  transition: border-color var(--transition);
+}
+
+.request-control select:hover {
+  border-color: color-mix(in srgb, var(--border) 40%, var(--text));
+}
+
+.request-control-dir {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.request-control-dir:hover {
+  background: color-mix(in srgb, var(--surface-2) 70%, var(--text));
+}
+
 .pagination {
   display: flex;
   align-items: center;

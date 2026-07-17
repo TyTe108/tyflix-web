@@ -32,10 +32,15 @@ import {
   approveRequest,
   declineRequest,
   fetchAllRequests,
-  type RequestView,
 } from "../api/requests";
 import { RequestCard } from "../components/RequestCard";
 import { PaginationControls } from "../components/PaginationControls";
+import { RequestControls } from "../components/RequestControls";
+import {
+  applyRequestControls,
+  DEFAULT_REQUEST_CONTROLS,
+  type RequestControlsState,
+} from "../lib/requestControls";
 import {
   fetchAllIssues,
   formatIssueDate,
@@ -159,20 +164,18 @@ function SystemPanel() {
   );
 }
 
-function pendingFirst(requests: RequestView[]): RequestView[] {
-  return [...requests].sort((a, b) => {
-    const aPending = a.requestStatus === "pending" ? 0 : 1;
-    const bPending = b.requestStatus === "pending" ? 0 : 1;
-    return aPending - bPending;
-  });
-}
-
 function RequestsPanel() {
   const { data, status, error, lastUpdated, refresh } = usePolledResource(
     fetchAllRequests,
     30000,
   );
-  const requests = useMemo(() => pendingFirst(data ?? []), [data]);
+  const [controls, setControls] = useState<RequestControlsState>(
+    DEFAULT_REQUEST_CONTROLS,
+  );
+  const visible = useMemo(
+    () => applyRequestControls(data ?? [], controls),
+    [data, controls],
+  );
   const {
     pageItems,
     page,
@@ -182,7 +185,8 @@ function RequestsPanel() {
     canNext,
     next,
     prev,
-  } = usePagination(requests, 20);
+    setPage,
+  } = usePagination(visible, 20);
   const [actionError, setActionError] = useState<string | null>(null);
   const [activeRequestId, setActiveRequestId] = useState<number | null>(null);
 
@@ -232,35 +236,50 @@ function RequestsPanel() {
       {status === "ready" ? (
         <>
           <UpdatedLine lastUpdated={lastUpdated} refreshError={error} />
-          {requests.length === 0 ? (
+          {(data ?? []).length === 0 ? (
             <p className="muted">No requests yet.</p>
           ) : (
             <>
-              <ul className="request-card-list">
-                {pageItems.map((request) => (
-                  <li key={request.id}>
-                    <RequestCard
-                      request={request}
-                      showRequester
-                      actions={{
-                        onApprove: () => void runAction(request.id, "approve"),
-                        onDecline: () => void runAction(request.id, "decline"),
-                        inFlight: activeRequestId === request.id,
-                        disabled: activeRequestId !== null,
-                      }}
-                    />
-                  </li>
-                ))}
-              </ul>
-              <PaginationControls
-                page={page}
-                pageCount={pageCount}
-                total={total}
-                canPrev={canPrev}
-                canNext={canNext}
-                onPrev={prev}
-                onNext={next}
+              <RequestControls
+                value={controls}
+                onChange={(nextControls) => {
+                  setControls(nextControls);
+                  setPage(1);
+                }}
               />
+              {visible.length === 0 ? (
+                <p className="muted">No requests match these filters.</p>
+              ) : (
+                <>
+                  <ul className="request-card-list">
+                    {pageItems.map((request) => (
+                      <li key={request.id}>
+                        <RequestCard
+                          request={request}
+                          showRequester
+                          actions={{
+                            onApprove: () =>
+                              void runAction(request.id, "approve"),
+                            onDecline: () =>
+                              void runAction(request.id, "decline"),
+                            inFlight: activeRequestId === request.id,
+                            disabled: activeRequestId !== null,
+                          }}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                  <PaginationControls
+                    page={page}
+                    pageCount={pageCount}
+                    total={total}
+                    canPrev={canPrev}
+                    canNext={canNext}
+                    onPrev={prev}
+                    onNext={next}
+                  />
+                </>
+              )}
             </>
           )}
         </>

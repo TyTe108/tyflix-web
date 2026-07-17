@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   fetchMyRequests,
@@ -11,6 +11,12 @@ import {
 } from "../api/me";
 import { RequestCard } from "../components/RequestCard";
 import { PaginationControls } from "../components/PaginationControls";
+import { RequestControls } from "../components/RequestControls";
+import {
+  applyRequestControls,
+  DEFAULT_REQUEST_CONTROLS,
+  type RequestControlsState,
+} from "../lib/requestControls";
 import { usePagination } from "../hooks/usePagination";
 
 type LoadStatus = "loading" | "ready" | "error";
@@ -21,6 +27,13 @@ export function MyRequestsPage() {
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [quota, setQuota] = useState<MyQuota | null | undefined>(undefined);
+  const [controls, setControls] = useState<RequestControlsState>(
+    DEFAULT_REQUEST_CONTROLS,
+  );
+  const visible = useMemo(
+    () => applyRequestControls(requests, controls),
+    [requests, controls],
+  );
   const {
     pageItems,
     page,
@@ -30,7 +43,8 @@ export function MyRequestsPage() {
     canNext,
     next,
     prev,
-  } = usePagination(requests, 20);
+    setPage,
+  } = usePagination(visible, 20);
 
   const retry = useCallback(() => {
     setReloadKey((n) => n + 1);
@@ -135,22 +149,35 @@ export function MyRequestsPage() {
 
         {status === "ready" && requests.length > 0 ? (
           <>
-            <ul className="request-card-list">
-              {pageItems.map((row) => (
-                <li key={row.id}>
-                  <RequestCard request={row} />
-                </li>
-              ))}
-            </ul>
-            <PaginationControls
-              page={page}
-              pageCount={pageCount}
-              total={total}
-              canPrev={canPrev}
-              canNext={canNext}
-              onPrev={prev}
-              onNext={next}
+            <RequestControls
+              value={controls}
+              onChange={(nextControls) => {
+                setControls(nextControls);
+                setPage(1);
+              }}
             />
+            {visible.length === 0 ? (
+              <p className="muted">No requests match these filters.</p>
+            ) : (
+              <>
+                <ul className="request-card-list">
+                  {pageItems.map((row) => (
+                    <li key={row.id}>
+                      <RequestCard request={row} />
+                    </li>
+                  ))}
+                </ul>
+                <PaginationControls
+                  page={page}
+                  pageCount={pageCount}
+                  total={total}
+                  canPrev={canPrev}
+                  canNext={canNext}
+                  onPrev={prev}
+                  onNext={next}
+                />
+              </>
+            )}
           </>
         ) : null}
       </section>
