@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   fetchAdminContainers,
@@ -38,11 +38,8 @@ import {
   issueStatusBadgeClass,
   issueStatusLabel,
   issueTypeLabel,
-  type IssueView,
 } from "../api/issues";
 import { usePolledResource } from "../hooks/usePolledResource";
-
-type LoadStatus = "loading" | "ready" | "error";
 
 const ADMIN_TABS = [
   { id: "requests", label: "Requests" },
@@ -166,75 +163,34 @@ function pendingFirst(requests: RequestView[]): RequestView[] {
 }
 
 function RequestsPanel() {
-  const [requests, setRequests] = useState<RequestView[]>([]);
-  const [status, setStatus] = useState<LoadStatus>("loading");
-  const [error, setError] = useState<string | null>(null);
+  const { data, status, error, lastUpdated, refresh } = usePolledResource(
+    fetchAllRequests,
+    30000,
+  );
+  const requests = useMemo(() => pendingFirst(data ?? []), [data]);
   const [actionError, setActionError] = useState<string | null>(null);
   const [activeRequestId, setActiveRequestId] = useState<number | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  const retry = useCallback(() => {
-    setReloadKey((n) => n + 1);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    setStatus("loading");
-    setError(null);
-
-    void fetchAllRequests()
-      .then((rows) => {
-        if (cancelled) {
-          return;
-        }
-        setRequests(pendingFirst(rows));
-        setStatus("ready");
-      })
-      .catch((err: unknown) => {
-        if (cancelled) {
-          return;
-        }
-        setRequests([]);
-        setStatus("error");
-        setError(
-          err instanceof Error ? err.message : "Failed to load requests",
-        );
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadKey]);
 
   const runAction = useCallback(
     async (id: number, action: "approve" | "decline") => {
       setActiveRequestId(id);
       setActionError(null);
       try {
-        const updated =
-          action === "approve"
-            ? await approveRequest(id)
-            : await declineRequest(id);
-        setRequests((rows) =>
-          pendingFirst(rows.map((row) => (row.id === id ? updated : row))),
-        );
+        if (action === "approve") {
+          await approveRequest(id);
+        } else {
+          await declineRequest(id);
+        }
       } catch (err: unknown) {
         setActionError(
           err instanceof Error ? err.message : `Failed to ${action} request`,
         );
-
-        // Approval failures may persist the request as failed server-side.
-        try {
-          const rows = await fetchAllRequests();
-          setRequests(pendingFirst(rows));
-        } catch {
-          // Preserve the action error and currently displayed rows.
-        }
       } finally {
+        refresh();
         setActiveRequestId(null);
       }
     },
-    [],
+    [refresh],
   );
 
   return (
@@ -248,7 +204,7 @@ function RequestsPanel() {
       {status === "error" ? (
         <div className="stats-error">
           <p className="error">{error ?? "Failed to load requests"}</p>
-          <button type="button" className="btn secondary" onClick={retry}>
+          <button type="button" className="btn secondary" onClick={refresh}>
             Retry
           </button>
         </div>
@@ -258,70 +214,41 @@ function RequestsPanel() {
         <p className="error admin-requests-action-error">{actionError}</p>
       ) : null}
 
-      {status === "ready" && requests.length === 0 ? (
-        <p className="muted">No requests yet.</p>
-      ) : null}
-
-      {status === "ready" && requests.length > 0 ? (
-        <ul className="request-card-list">
-          {requests.map((request) => (
-            <li key={request.id}>
-              <RequestCard
-                request={request}
-                showRequester
-                actions={{
-                  onApprove: () => void runAction(request.id, "approve"),
-                  onDecline: () => void runAction(request.id, "decline"),
-                  inFlight: activeRequestId === request.id,
-                  disabled: activeRequestId !== null,
-                }}
-              />
-            </li>
-          ))}
-        </ul>
+      {status === "ready" ? (
+        <>
+          <UpdatedLine lastUpdated={lastUpdated} refreshError={error} />
+          {requests.length === 0 ? (
+            <p className="muted">No requests yet.</p>
+          ) : (
+            <ul className="request-card-list">
+              {requests.map((request) => (
+                <li key={request.id}>
+                  <RequestCard
+                    request={request}
+                    showRequester
+                    actions={{
+                      onApprove: () => void runAction(request.id, "approve"),
+                      onDecline: () => void runAction(request.id, "decline"),
+                      inFlight: activeRequestId === request.id,
+                      disabled: activeRequestId !== null,
+                    }}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       ) : null}
     </section>
   );
 }
 
 function IssuesPanel() {
-  const [issues, setIssues] = useState<IssueView[]>([]);
-  const [status, setStatus] = useState<LoadStatus>("loading");
-  const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  const retry = useCallback(() => {
-    setReloadKey((value) => value + 1);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    setStatus("loading");
-    setError(null);
-
-    void fetchAllIssues()
-      .then((rows) => {
-        if (cancelled) {
-          return;
-        }
-        setIssues(rows);
-        setStatus("ready");
-      })
-      .catch((err: unknown) => {
-        if (cancelled) {
-          return;
-        }
-        setIssues([]);
-        setStatus("error");
-        setError(
-          err instanceof Error ? err.message : "Failed to load issues",
-        );
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadKey]);
+  const { data, status, error, lastUpdated, refresh } = usePolledResource(
+    fetchAllIssues,
+    60000,
+  );
+  const issues = data ?? [];
 
   return (
     <section className="admin-section" aria-labelledby="issues-heading">
@@ -334,40 +261,43 @@ function IssuesPanel() {
       {status === "error" ? (
         <div className="stats-error">
           <p className="error">{error ?? "Failed to load issues"}</p>
-          <button type="button" className="btn secondary" onClick={retry}>
+          <button type="button" className="btn secondary" onClick={refresh}>
             Retry
           </button>
         </div>
       ) : null}
 
-      {status === "ready" && issues.length === 0 ? (
-        <p className="muted">No issues yet.</p>
-      ) : null}
-
-      {status === "ready" && issues.length > 0 ? (
-        <ul className="admin-requests-list">
-          {issues.map((issue) => (
-            <li key={issue.id} className="admin-request-row">
-              <Link to={`/issues/${issue.id}`} className="admin-issue-link">
-                <div className="admin-request-main">
-                  <span className="admin-request-title">
-                    {issue.media.title ?? `TMDB #${issue.media.tmdbId}`}
-                  </span>
-                  <span className="stats-tag">
-                    {issueTypeLabel(issue.issueType)}
-                  </span>
-                  <span className={issueStatusBadgeClass(issue.status)}>
-                    {issueStatusLabel(issue.status)}
-                  </span>
-                </div>
-                <div className="admin-request-meta muted">
-                  <span>Reported by {issue.createdBy.displayName}</span>
-                  <span>Reported {formatIssueDate(issue.createdAt)}</span>
-                </div>
-              </Link>
-            </li>
-          ))}
-        </ul>
+      {status === "ready" ? (
+        <>
+          <UpdatedLine lastUpdated={lastUpdated} refreshError={error} />
+          {issues.length === 0 ? (
+            <p className="muted">No issues yet.</p>
+          ) : (
+            <ul className="admin-requests-list">
+              {issues.map((issue) => (
+                <li key={issue.id} className="admin-request-row">
+                  <Link to={`/issues/${issue.id}`} className="admin-issue-link">
+                    <div className="admin-request-main">
+                      <span className="admin-request-title">
+                        {issue.media.title ?? `TMDB #${issue.media.tmdbId}`}
+                      </span>
+                      <span className="stats-tag">
+                        {issueTypeLabel(issue.issueType)}
+                      </span>
+                      <span className={issueStatusBadgeClass(issue.status)}>
+                        {issueStatusLabel(issue.status)}
+                      </span>
+                    </div>
+                    <div className="admin-request-meta muted">
+                      <span>Reported by {issue.createdBy.displayName}</span>
+                      <span>Reported {formatIssueDate(issue.createdAt)}</span>
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       ) : null}
     </section>
   );

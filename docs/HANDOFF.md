@@ -457,6 +457,20 @@ Log (newest at bottom):
   last-good data plus a muted `Updated {time} · couldn't refresh` line; first-load failure still shows
   error + Retry (wired to `refresh()`). Requests/Issues deferred to 13.6/13.7. Frontend-only;
   `tsc -b && vite build` clean; net −98 lines in `AdminPage.tsx`.
+- **Phase 13.6** — admin Issues panel auto-refresh: `IssuesPanel` swapped to
+  `usePolledResource(fetchAllIssues, 60000)` (list from `data ?? []`), reusing the shared `UpdatedLine`;
+  Retry → `refresh()`; gates unchanged. Frontend-only; dropped the now-unused `IssueView` import;
+  `tsc -b && vite build` clean.
+- **Phase 13.7** — admin Requests panel auto-refresh: `RequestsPanel` list now driven by
+  `usePolledResource(fetchAllRequests, 30000)`, rows derived via
+  `useMemo(() => pendingFirst(data ?? []), [data])` (no shadow list copy). `actionError`/`activeRequestId`
+  stay local so a background poll can't drop them; `runAction` calls `refresh()` after approve/decline
+  instead of mutating a local copy; Retry → `refresh()`; `UpdatedLine` added. Removed the now-unused
+  `useEffect`/`LoadStatus`, added `useMemo`. `tsc -b && vite build` clean. Caveat: Approve triggers a real
+  Radarr/Sonarr grab — smoke-test the action path only with a disposable pending request.
+- **Phase 13.5–13.7 COMPLETE.** All six admin panels now auto-refresh (System/Containers 5s, Jobs 30s,
+  Users 60s, Requests 30s, Issues 60s) with no loading flash and keep-last-good on transient failures —
+  no manual reload needed.
 
 ## 9. Deferred / candidate future work
 
