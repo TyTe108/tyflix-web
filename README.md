@@ -49,7 +49,9 @@ Browser --https--> Cloudflare edge --tunnel--> cloudflared --> Tyflix (Node)
 
 ## Notable engineering decisions
 
-**Public access with no open ports.** The app is hosted at home but reachable from anywhere. Instead of forwarding ports through the router, it runs behind a Cloudflare Tunnel: a small daemon on the server opens an outbound connection to Cloudflare, and traffic returns down that same connection. Nothing on the home network accepts unsolicited inbound traffic, and TLS plus edge protection come for free.
+**Outbound-only public access (a reverse-invoke model).** The app runs at home but is reachable from anywhere, with no inbound port open on the network. Instead of forwarding a port through the router, which would put a service straight on the public internet, I moved access onto a broker-mediated, outbound-only model built on a Cloudflare Tunnel. A lightweight connector (cloudflared) runs next to the app and dials out to Cloudflare's edge, keeping a persistent connection open from the inside. Cloudflare acts as the broker: when a request arrives for the public hostname, the edge sends it back down that already-open connection to the connector, which passes it to the app over the local Docker network. Every connection starts inside the network and goes out, so the router never accepts unsolicited inbound traffic, and TLS and edge filtering happen at Cloudflare.
+
+This is the same shape as an enterprise pattern like SAP Cloud Connector reaching SAP BTP: the on-premise side opens the tunnel outbound, and the cloud reverse-invokes back through it. The result is a home-hosted service that is publicly reachable while the network perimeter stays closed.
 
 **Rate limiting that sees the real client.** Because the app sits behind the tunnel, every request arrives from the tunnel's address rather than the user's. A naive per-IP limiter would treat all traffic as one client. The limiter keys on the `CF-Connecting-IP` header that Cloudflare sets and overwrites, so a client cannot forge it, and falls back to the socket address for local development. The limit itself was tuned after a real finding: the admin dashboard polls a few endpoints every few seconds, and an early, tighter limit throttled the admin's own page inside a single window.
 
@@ -64,13 +66,9 @@ Browser --https--> Cloudflare edge --tunnel--> cloudflared --> Tyflix (Node)
 - TypeScript across frontend and backend
 - React and Vite
 - Node and Express
-- Docker and Cloudflare Tunnel for deployment
+- Docker for packaging, Cloudflare Tunnel (cloudflared) for access
+- Helmet and express-rate-limit for security headers and request throttling
 - Integrations: Plex, Seerr, TMDB, Radarr, Sonarr
-- Around 100 server-side tests on Node's built-in test runner
-
-## How it is built
-
-The work is done in small, single-purpose increments. Each change is scoped to one concern, written against a short spec, reviewed against that spec, and smoke-tested against a real production build before it is committed. Longer-lived context lives in a handoff document and per-increment specs so any piece can be picked up cold later. The result is a history of small, reviewable commits instead of large drops, and features that were verified running rather than assumed working.
 
 ## Status and roadmap
 
