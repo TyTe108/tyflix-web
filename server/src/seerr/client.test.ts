@@ -103,6 +103,114 @@ function issueRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+describe("createSeerrClient().signInWithPlex", () => {
+  it("POSTs the authToken to /api/v1/auth/plex", async () => {
+    let call:
+      | { url: string; method: string | undefined; body: string | undefined }
+      | undefined;
+    globalThis.fetch = async (input, init) => {
+      call = {
+        url: String(input),
+        method: init?.method,
+        body: typeof init?.body === "string" ? init.body : undefined,
+      };
+      // Seerr's real success body is the *filtered* user (no plexId/email).
+      return jsonResponse(200, {
+        id: 9,
+        plexUsername: "alice",
+        displayName: "Alice",
+        permissions: 2,
+      });
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    await seerr.signInWithPlex("plex-token-abc");
+
+    assert.ok(call);
+    assert.equal(call.url, "http://seerr:5055/api/v1/auth/plex");
+    assert.equal(call.method, "POST");
+    assert.deepEqual(JSON.parse(call.body ?? ""), {
+      authToken: "plex-token-abc",
+    });
+  });
+
+  it("returns null when the sign-in body omits plexId (onboard/token step)", async () => {
+    // Verified live: Seerr filters plexId + email out of the auth/plex body,
+    // so the response is not a complete SeerrUser and callers must fall back
+    // to getUserByPlexId.
+    globalThis.fetch = async () =>
+      jsonResponse(200, {
+        id: 9,
+        plexUsername: "alice",
+        displayName: "Alice",
+        permissions: 2,
+      });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    assert.equal(await seerr.signInWithPlex("plex-token-abc"), null);
+  });
+
+  it("maps and returns the user when the body is a complete SeerrUser", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse(200, userRow({ id: 9, plexId: 42, permissions: 2 }));
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    assert.deepEqual(await seerr.signInWithPlex("plex-token-abc"), {
+      id: 9,
+      plexId: 42,
+      plexUsername: "alice",
+      displayName: "Alice",
+      email: "a@example.com",
+      permissions: 2,
+    });
+  });
+
+  it("throws a 403 SeerrUpstreamError when Seerr refuses a non-member", async () => {
+    // Live-verified: an account without Plex-server access gets 403.
+    globalThis.fetch = async () =>
+      jsonResponse(403, { message: "Access denied." });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    await assert.rejects(
+      () => seerr.signInWithPlex("plex-token-abc"),
+      (err: unknown) =>
+        err instanceof SeerrUpstreamError && err.status === 403,
+    );
+  });
+
+  it("throws a 500 SeerrUpstreamError for an unauthenticated/invalid token", async () => {
+    // Live-verified: a bogus Plex token yields 500 "Unable to authenticate.".
+    globalThis.fetch = async () =>
+      jsonResponse(500, { message: "Unable to authenticate." });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    await assert.rejects(
+      () => seerr.signInWithPlex("bogus"),
+      (err: unknown) =>
+        err instanceof SeerrUpstreamError && err.status === 500,
+    );
+  });
+});
+
 describe("createSeerrClient().getUserByPlexId", () => {
   it("requests with X-Api-Key and returns the matching user", async () => {
     const calls: Array<{ url: string; headers: HeadersInit | undefined }> = [];

@@ -187,6 +187,28 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return requestJson("POST", path, {}, body);
   }
 
+  async function signInWithPlex(authToken: string): Promise<SeerrUser | null> {
+    // Seerr's own Plex sign-in (POST /api/v1/auth/plex). This onboards a
+    // brand-new Plex-server member and, for existing users, refreshes their
+    // stored Plex token so Watchlist syncing / auto-request keeps working.
+    //
+    // Verified against the live Jellyseerr instance (v3.3.0):
+    //  - No X-Api-Key is required; the route is public and reads body.authToken.
+    //    We reuse requestJson (which sends X-Api-Key) because the handler
+    //    ignores req.user, so the header is harmless.
+    //  - On success it returns the *filtered* user object, which OMITS plexId
+    //    and email, so it is not a complete SeerrUser. We therefore map it and
+    //    let a null result fall back to getUserByPlexId. Seerr saves the user
+    //    synchronously before responding, so the follow-up lookup finds them.
+    //  - A non-2xx surfaces as SeerrUpstreamError. Status 401/403/422 means
+    //    Seerr refused the account (no Plex-server access); the caller maps
+    //    that to a 403, while any other status stays a 502 upstream failure.
+    //  - The success response also sets a connect.sid cookie, which we never
+    //    read and never forward to the browser.
+    const body = await postJson("/api/v1/auth/plex", { authToken });
+    return mapSeerrUser(body);
+  }
+
   async function getUserByPlexId(plexId: number): Promise<SeerrUser | null> {
     const take = 100;
     let skip = 0;
@@ -603,6 +625,7 @@ export function createSeerrClient(options: SeerrClientOptions) {
   }
 
   return {
+    signInWithPlex,
     getUserByPlexId,
     listAllRequests,
     listUserRequests,

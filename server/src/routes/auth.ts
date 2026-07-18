@@ -1,6 +1,10 @@
 import { Router } from "express";
 import { PlexUpstreamError, type PlexClient } from "../plex/client";
-import { SeerrUpstreamError, type SeerrClient } from "../seerr/client";
+import {
+  SeerrUpstreamError,
+  type SeerrClient,
+  type SeerrUser,
+} from "../seerr/client";
 import {
   clearSession,
   isAdmin,
@@ -54,7 +58,32 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
       }
 
       const plexUser = await plex.getUser(authToken);
-      const seerrUser = await seerr.getUserByPlexId(plexUser.id);
+
+      // Sign the user into Seerr via its own Plex sign-in. This onboards a
+      // brand-new Plex-server member and refreshes an existing user's stored
+      // Plex token so Watchlist auto-request works. Seerr rejects anyone
+      // without Plex-server access (401/403/422), which stays a 403 for us.
+      let signedInUser: SeerrUser | null;
+      try {
+        signedInUser = await seerr.signInWithPlex(authToken);
+      } catch (err) {
+        if (
+          err instanceof SeerrUpstreamError &&
+          isSeerrAccessDenied(err.status)
+        ) {
+          res.status(403).json({
+            status: "forbidden",
+            message: "Your Plex account isn't a Tyflix member.",
+          });
+          return;
+        }
+        throw err;
+      }
+
+      // Seerr's sign-in response omits plexId, so resolve the authoritative
+      // user record (which carries plexId + permissions) when needed.
+      const seerrUser =
+        signedInUser ?? (await seerr.getUserByPlexId(plexUser.id));
 
       if (seerrUser === null) {
         res.status(403).json({
@@ -121,6 +150,13 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   });
 
   return router;
+}
+
+function isSeerrAccessDenied(status: number): boolean {
+  // Seerr refuses accounts without Plex-server access with a 403 (verified on
+  // the live instance); 401/422 are treated the same defensively. Anything
+  // else (500, network) is a genuine upstream failure -> 502.
+  return status === 401 || status === 403 || status === 422;
 }
 
 function respondUpstreamError(
