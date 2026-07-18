@@ -4,3 +4,6 @@ dist/
 build/
 data/
 *.db
+
+# Local-only ops notes with real IPs/hosts — never commit
+*.local.md
