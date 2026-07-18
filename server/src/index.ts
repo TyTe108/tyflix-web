@@ -1,8 +1,10 @@
 import express from "express";
+import helmet from "helmet";
 import path from "path";
 import { loadConfig, type AppConfig } from "./config";
 import { createDashboardClient } from "./dashboard/client";
 import { requireAdmin, requireAuth } from "./middleware/auth";
+import { apiRateLimiter } from "./middleware/rateLimit";
 import { createPlexClient } from "./plex/client";
 import { createPlexServerClient } from "./plex/server";
 import { createAdminRouter } from "./routes/admin";
@@ -54,12 +56,46 @@ const tmdb = createTmdbClient({
 });
 const mediaEnrichment = createMediaEnrichment(tmdb);
 
+// External hosts the SPA legitimately loads from; allowlisted in the CSP below.
+const GOOGLE_FONTS_STYLESHEET_ORIGIN = "https://fonts.googleapis.com";
+const GOOGLE_FONTS_FILE_ORIGIN = "https://fonts.gstatic.com";
+const TMDB_IMAGE_ORIGIN = "https://image.tmdb.org";
+
 const app = express();
+
+// Baseline security headers. Mounted first so they apply to both /api responses
+// and the production SPA (static assets + index.html fallback).
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        "default-src": ["'self'"],
+        "script-src": ["'self'"],
+        "style-src": ["'self'", "'unsafe-inline'", GOOGLE_FONTS_STYLESHEET_ORIGIN],
+        "font-src": ["'self'", GOOGLE_FONTS_FILE_ORIGIN],
+        "img-src": ["'self'", "data:", TMDB_IMAGE_ORIGIN],
+        "connect-src": ["'self'"],
+        "object-src": ["'none'"],
+        "base-uri": ["'self'"],
+        "frame-ancestors": ["'none'"],
+      },
+    },
+    // The Plex login popup relies on the opener keeping a handle to call
+    // popup.close(); the stricter "same-origin" default can sever that.
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+    // Leave COEP off — enabling it would block TMDB images and Google Fonts.
+    crossOriginEmbedderPolicy: false,
+  }),
+);
+
 app.use(express.json());
 
 app.get("/healthz", (_req, res) => {
   res.json({ ok: true });
 });
+
+app.use("/api", apiRateLimiter);
 
 app.use(
   "/api/auth",
