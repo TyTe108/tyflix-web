@@ -111,6 +111,10 @@ app.use(
   }),
 );
 
+app.use("/api", (_req, res) => {
+  res.status(404).json({ error: "not found" });
+});
+
 if (config.nodeEnv === "production") {
   const webDistPath = path.resolve(__dirname, "../../web/dist");
 
