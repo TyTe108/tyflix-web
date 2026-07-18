@@ -3,7 +3,7 @@
 > Living doc. Its job is to let a fresh conversation pick up this project cold.
 > Keep it current; delete guidance notes as you go.
 >
-> **Last updated after:** Phase 4 — Deploy (2026-07-17). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. **Deployed 2026-07-17 at `tyflix.tylerte.dev`** (Phase 4). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
+> **Last updated after:** Phase 14 (2026-07-17). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. **Deployed 2026-07-17 at `tyflix.tylerte.dev`** (Phase 4). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
 > **Working name:** "Tyflix Web" / repo `tyflix-web` — rename freely.
 
 ---
@@ -530,6 +530,21 @@ Log (newest at bottom):
   `/api/*` → JSON 404, all four upstreams reachable, admin gate 401 unauthenticated over the tunnel. Cookies are
   `Secure` (login only over HTTPS, not the plain-HTTP LAN port). Follow-ups: commit+push 4.1; optional read-only
   deploy key for git-based redeploys; delete stale `RADARR_*`/`SONARR_*` env; optional Cloudflare Access on `/admin`.
+- **Phase 14 — Onboard users into Seerr at login. COMPLETE + DEPLOYED 2026-07-17.** A Tyflix login now signs the
+  user into Seerr via new `seerr.signInWithPlex(authToken)` → `POST /api/v1/auth/plex`, which creates/activates a
+  new Plex-server member AND refreshes an existing user's stored Plex token — so Seerr's Watchlist auto-request
+  works without a separate Seerr login. `/plex/check` resolves the user from the sign-in response or falls back to
+  `getUserByPlexId` (Seerr's auth/plex omits `plexId`); a non-member (Seerr 401/403/422 "Access denied") → our 403
+  "not a Tyflix member"; other upstream errors → 502. Verified against live Jellyseerr v3.3.0 (no X-Api-Key
+  required; `connect.sid` never forwarded). Adds NO store — Seerr stays the single source of truth. 114 server
+  tests. **Caveat:** brand-new members only onboard if Seerr's "Enable New Plex Sign-In" (`newPlexLogin`) is ON;
+  existing-user token refresh works regardless. Owner login re-verified live; never-used-Seerr onboarding pending
+  a test account.
+- **Git-based deploy (2026-07-17).** `/home/tyler/tyflix/tyflix-web` is now a **git checkout** (read-only GitHub
+  deploy key `dell-tyflix-web`; SSH host alias `github-tyflix-web` → `~/.ssh/tyflix-web-deploy`); the original
+  rsync copy is kept as `tyflix-web.rsync-bak`. **Redeploy = `git pull && docker compose up -d --build`** in that
+  dir (`.env` + `docker-compose.yml` are untracked/gitignored and survive pulls). Phase 14 was the first redeploy
+  via this flow.
 
 ## 9. Deferred / candidate future work
 
