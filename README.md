@@ -56,9 +56,6 @@ This is the same shape as an enterprise pattern like SAP Cloud Connector reachin
 **Rate limiting that sees the real client.** Because the app sits behind the tunnel, every request arrives from the tunnel's address rather than the user's. A naive per-IP limiter would treat all traffic as one client. The limiter keys on the `CF-Connecting-IP` header that Cloudflare sets and overwrites, so a client cannot forge it, and falls back to the socket address for local development. The limit itself was tuned after a real finding: the admin dashboard polls a few endpoints every few seconds, and an early, tighter limit throttled the admin's own page inside a single window.
 
 **Security that does not rely on hiding the code.** All authorization happens on the server. Every route checks the session, and admin routes check an admin permission bit that mirrors Seerr's model. The long-lived Plex token never leaves the backend. Security headers ship a Content-Security-Policy scoped to exactly what the app loads: posters from TMDB, fonts from Google, everything else same-origin. The one subtlety is the Plex login popup, which needs a Cross-Origin-Opener-Policy that lets the opener keep a handle on the popup so the sign-in flow can close it when the login completes.
-
-**Video that bypasses the tunnel (designed).** Streaming video through Cloudflare would break its terms for non-enterprise plans, so the playback design has the browser connect straight to Plex over its own remote-access path instead of through the tunnel. To keep per-user watch history correct without ever putting a full-access credential in the browser, the server mints a short-lived transient token from each user's Plex token and hands only that to the client. This is specced and on the roadmap; the rest of the app is live.
-
 **Joining two id systems.** Discovery is keyed by TMDB id, while Plex is keyed by its own rating keys. Availability and playability come from matching the two through Seerr's media records, so the app can show accurate status without guessing by title.
 
 ## Tech stack
@@ -74,7 +71,7 @@ This is the same shape as an enterprise pattern like SAP Cloud Connector reachin
 
 Tyflix is deployed and in daily use on my home server, and it is still an active work in progress. It already covers most of Seerr's user-facing surface, plus features Seerr does not have, like the per-user watched-versus-requested analytics.
 
-The next major piece is in-browser playback, which is fully designed and specced. Today Tyflix stops at request and track; playback turns it into a place you actually watch. The design connects the browser straight to Plex for the video, which keeps heavy streaming off the Cloudflare Tunnel for both cost and terms reasons. Each playback session is authorized with a short-lived, per-user token minted on the server, so the real Plex credential never reaches the browser. Progress is reported back to Plex so it records watch history and resume points. That last part closes a nice loop: watching through Tyflix finally feeds the same watched-versus-requested numbers the analytics already report.
+The next major piece is in-browser playback. Today Tyflix stops at request and track; playback turns it into a place you actually watch, and it closes a nice loop: watching through Tyflix would feed the same watched-versus-requested numbers the analytics already report.
 
 Further out: a continue-watching rail, subtitle and audio-track selection, and adaptive quality. The guiding idea is to keep integrating tools that already exist rather than rebuilding them, so Tyflix stays a thin, sharp layer over Plex and Seerr instead of a second copy of either.
 
