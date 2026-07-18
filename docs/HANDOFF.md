@@ -3,7 +3,7 @@
 > Living doc. Its job is to let a fresh conversation pick up this project cold.
 > Keep it current; delete guidance notes as you go.
 >
-> **Last updated after:** Phase 13.15 (2026-07-17). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. Next: **Phase 4 deploy** (not yet started). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
+> **Last updated after:** Phase 4 — Deploy (2026-07-17). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. **Deployed 2026-07-17 at `tyflix.tylerte.dev`** (Phase 4). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
 > **Working name:** "Tyflix Web" / repo `tyflix-web` — rename freely.
 
 ---
@@ -517,6 +517,19 @@ Log (newest at bottom):
   request button is untouched. `tsc -b && vite build` clean.
 - **Phase 13.13–13.15 COMPLETE.** Request lists now have Seerr-style media/status filters + Most Recent /
   Last Modified sort (with direction), layered on the 13.12 pagination.
+- **Phase 4 — DEPLOY. COMPLETE 2026-07-17.** Live at **https://tyflix.tylerte.dev**. Runs as Docker container
+  `tyflix-web` (image `tyflix/web:latest`) on the Dell at `/home/tyler/tyflix/tyflix-web`, on the
+  **`seerr_default`** network (reaches `seerr:5055`; the `cloudflared` container reaches it by name), published on
+  `<SERVER_LAN_IP>:8788` for LAN. Exposed via the existing token tunnel **`tyflix-dell`** → a **Published application
+  route** (the renamed "Public Hostname" tab) `tyflix.tylerte.dev → http://tyflix-web:4000`. **4.1** added a JSON
+  404 guard for unmatched `/api/*` (prod SPA serving already worked — the old "Cannot GET /" note was stale). Prod
+  `.env` (mode 600) = the dev keys with prod URLs: `NODE_ENV=production`, `SEERR_URL=http://seerr:5055`,
+  `PLEX_BASEURL=http://<SERVER_LAN_IP>:32400` (Plex is **native**, not a container — `plex:32400` won't resolve),
+  `DASHBOARD_URL=http://<SERVER_LAN_IP>:8787`, fresh `SESSION_SECRET`. First deploy transported via **rsync from the
+  Mac** (Dell has no GitHub creds yet). Verified end-to-end: `/healthz` 200, SPA at `/` + deep links, unknown
+  `/api/*` → JSON 404, all four upstreams reachable, admin gate 401 unauthenticated over the tunnel. Cookies are
+  `Secure` (login only over HTTPS, not the plain-HTTP LAN port). Follow-ups: commit+push 4.1; optional read-only
+  deploy key for git-based redeploys; delete stale `RADARR_*`/`SONARR_*` env; optional Cloudflare Access on `/admin`.
 
 ## 9. Deferred / candidate future work
 
@@ -549,9 +562,9 @@ cast/crew, person pages, collections) with **media-status badges**, that request
 with **admin quality-profile selection**; My Requests (with **request-quota display**) + admin approval queue;
 **Plex Watchlist**; **issue reporting** (report/list/detail/comments/resolve + admin panel); **TMDB
 title+poster enrichment**; per-user watched-vs-requested + the full admin dashboard. No own request store
-(retired). **103 server tests.** **Not deployed.** Next: **Phase 4 deploy** (hostname
-`tyflix-dashboard.tylerte.dev`; add the `/api` 404-guard; **prod build currently doesn't serve the SPA at `/`
-("Cannot GET /") — must fix before routing the hostname**). Local dev: `npm run dev`; `.env` carries PLEX_*,
+(retired). **103 server tests.** **DEPLOYED 2026-07-17** — live at **https://tyflix.tylerte.dev** (Docker on the Dell, `seerr_default`
+network, behind the `tyflix-dell` Cloudflare tunnel; LAN `<SERVER_LAN_IP>:8788`). The `/api` 404-guard shipped
+(4.1) and the prod SPA serves `/` + deep links. Local dev: `npm run dev`; `.env` carries PLEX_*,
 SESSION_SECRET, SEERR_URL+key, TMDB_API_KEY, DASHBOARD_URL (`RADARR_*`/`SONARR_*`/`DB_PATH` are stale/ignored —
 safe to delete).
 
