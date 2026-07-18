@@ -3,7 +3,7 @@
 > Living doc. Its job is to let a fresh conversation pick up this project cold.
 > Keep it current; delete guidance notes as you go.
 >
-> **Last updated after:** Phase 13.12 (2026-07-17). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. Next: **Phase 4 deploy** (not yet started). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
+> **Last updated after:** Phase 13.15 (2026-07-17). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. Next: **Phase 4 deploy** (not yet started). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
 > **Working name:** "Tyflix Web" / repo `tyflix-web` — rename freely.
 
 ---
@@ -499,6 +499,24 @@ Log (newest at bottom):
   pendingFirst-sorted list — pending stays on page 1; the 30s poll keeps the current page; approve/decline
   clamps) and `MyRequestsPage`. The hook clamps `safePage` on reads so a shrinking list never shows an empty
   trailing page. UI-only (backend still returns the full list). `tsc -b && vite build` clean.
+- **Phase 13.13** — expose request `updatedAt`: threaded an `updatedAt` ISO string through SeerrRequest
+  (mapped from the raw row, falling back to `createdAt` if absent) → toRequestView → the server + web
+  `RequestView` types, so "Last Modified" sort has a field to use. Backend-only, no UI. Server `npm test`
+  (103) + web build green.
+- **Phase 13.14** — Seerr-style request filter + sort: new pure `web/src/lib/requestControls.ts`
+  (`applyRequestControls` = filter by media + status, then sort by added/modified × asc/desc — non-mutating;
+  status maps over requestStatus/mediaStatus) + a `RequestControls` component (media/status/sort selects + a
+  direction toggle). Wired into the admin `RequestsPanel` and `MyRequestsPage` feeding `usePagination`;
+  default Most Recent ▼ (the old pending-first default is dropped — pending is reached via Status→Pending); a
+  control change resets to page 1, a poll does not. `tsc -b && vite build` clean.
+- **Phase 13.15** — fix `.request-controls` CSS collision: 13.14 reused the class names of the pre-existing
+  request-button/quality-profile controls (MediaDetailPage), whose `.request-controls` is
+  `flex-direction: column`; the new toolbar never set flex-direction, so it inherited column → a vertical
+  right-aligned stack with dead space. Renamed the new classes to `.request-filters` / `.request-filter` /
+  `.request-filter-dir` (component + CSS) and set `flex-direction: row`. Now a horizontal toolbar; the
+  request button is untouched. `tsc -b && vite build` clean.
+- **Phase 13.13–13.15 COMPLETE.** Request lists now have Seerr-style media/status filters + Most Recent /
+  Last Modified sort (with direction), layered on the 13.12 pagination.
 
 ## 9. Deferred / candidate future work
 
