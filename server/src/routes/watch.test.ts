@@ -333,6 +333,89 @@ describe("GET /api/watch/tv/:tmdbId/episodes", () => {
   });
 });
 
+describe("GET /api/watch/episode/:ratingKey", () => {
+  it("rejects a non-numeric ratingKey with 400", async () => {
+    const app = createApp(baseDeps());
+    const response = await fetchLocal(
+      app,
+      "/api/watch/episode/abc",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      error: "ratingKey must be numeric",
+    });
+  });
+
+  it("returns 409 when the session carries no Plex token", async () => {
+    const app = createApp(baseDeps());
+    const response = await fetchLocal(
+      app,
+      "/api/watch/episode/54321",
+      sessionCookie(),
+    );
+
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), { error: "re-login required" });
+  });
+
+  it("returns the episode play descriptor with shared session HLS URLs", async () => {
+    let mintedWith: string | null = null;
+    const deps = baseDeps();
+    deps.transientMinter = {
+      async mint(userToken: string) {
+        mintedWith = userToken;
+        return TRANSIENT;
+      },
+    } as TransientTokenMinter;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/episode/54321",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      mediaType: string;
+      ratingKey: string;
+      connections: typeof CONNECTIONS;
+      transient: string;
+      hls: { local: string | null; remote: string };
+      sessionId: string;
+    };
+
+    assert.equal(body.mediaType, "episode");
+    assert.equal(body.ratingKey, "54321");
+    assert.deepEqual(body.connections, CONNECTIONS);
+    assert.equal(body.transient, TRANSIENT);
+
+    assert.equal(typeof body.sessionId, "string");
+    assert.ok(body.sessionId.length > 0);
+
+    // Both HLS URLs are ready-to-play start.m3u8 URLs carrying the raw ratingKey
+    // and the SAME shared transcode sessionId.
+    assert.ok(
+      body.hls.remote.startsWith(`${CONNECTIONS.remote}/video/:/transcode/`),
+    );
+    assert.ok(body.hls.remote.includes("start.m3u8"));
+    assert.ok(body.hls.remote.includes("54321"));
+    assert.ok(body.hls.remote.includes(body.sessionId));
+
+    assert.notEqual(body.hls.local, null);
+    const localUrl = body.hls.local as string;
+    assert.ok(localUrl.startsWith(`${CONNECTIONS.local}/video/:/transcode/`));
+    assert.ok(localUrl.includes("start.m3u8"));
+    assert.ok(localUrl.includes("54321"));
+    assert.ok(localUrl.includes(body.sessionId));
+
+    // The descriptor mints from the recovered durable token.
+    assert.equal(mintedWith, USER_TOKEN);
+  });
+});
+
 async function fetchLocal(
   app: express.Express,
   path: string,

@@ -657,6 +657,20 @@ Log (newest at bottom):
   heavy for remote users) — add a quality cap; the aac audio target isn't honored (mp3 out, plays fine).
   **NEXT CHAPTER: TV playback** — needs a season/episode browser (a TV show's ratingKey is the show *container*
   → pick an episode → its ratingKey; and some available shows lack even a show-level ratingKey — see 15.4).
+- **Phase 16 — TV playback. STARTED 2026-07-19.** Reuses the movie machinery (transient / connection /
+  transcode / hls.js player); the genuinely new parts are episode listing, an episode play-decision endpoint,
+  and a season/episode browser UI. Increments: **16.1** episode listing → **16.2** episode play endpoint
+  (`GET /api/watch/episode/:ratingKey`) → **16.3** frontend episode browser + per-episode Play. Known gap: shows
+  whose Seerr media has a null show-level ratingKey (e.g. Little House) — a request-based (`request.media.ratingKey`)
+  fallback is deferred.
+- **Phase 16.1 — TV episode listing. COMPLETE + committed 2026-07-19.** `plex/server.ts` gained
+  `episodes(showRatingKey): PlexEpisode[] { ratingKey, seasonNumber, episodeNumber, title }` from
+  `/library/metadata/{rk}/allLeaves` (mirrors `fetchShow`'s leaf parsing — `parentIndex`→season, `index`→episode;
+  drops malformed leaves; sorted by season then episode). New `GET /api/watch/tv/:tmdbId/episodes` (requireAuth;
+  owner-token listing — no user token needed): resolves the show ratingKey via `getRatingKey("tv", tmdbId)`
+  (404 if null), returns `{ tmdbId, showRatingKey, episodes }`. `plexServer` added to `WatchRouterDeps`.
+  **Verified live**: Severance (tmdb 95396) → showRatingKey 2504, 19 episodes with real per-episode ratingKeys
+  (S1E1 "Good News About Hell" → 2517 …). 148 server tests.
 
 ## 9. Deferred / candidate future work
 

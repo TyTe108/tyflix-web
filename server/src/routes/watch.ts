@@ -22,6 +22,16 @@ export type WatchRouterDeps = {
   plexClientId: string;
 };
 
+type PlayDescriptor = {
+  ratingKey: string;
+  connections: Awaited<
+    ReturnType<PlexConnectionResolver["resolveConnections"]>
+  >;
+  transient: string;
+  hls: { local: string | null; remote: string };
+  sessionId: string;
+};
+
 export function createWatchRouter(deps: WatchRouterDeps): Router {
   const {
     plexConnection,
@@ -32,6 +42,45 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     plexClientId,
   } = deps;
   const router = Router();
+
+  // Mints the caller's transient, resolves both connection URLs, and builds one
+  // shared transcode session for a Plex ratingKey. Any mint/connection failure
+  // throws (caught by the caller and turned into a 502) so we never emit a
+  // partial descriptor.
+  async function buildPlayDescriptor(
+    ratingKey: string,
+    userToken: string,
+  ): Promise<PlayDescriptor> {
+    const transient = await transientMinter.mint(userToken);
+    const connections = await plexConnection.resolveConnections();
+
+    // One transcode session shared across both connection URLs so the client
+    // can switch between local/remote without spawning a second transcode.
+    const sessionId = randomUUID();
+    const hls = {
+      remote: buildHlsUrl({
+        connectionUri: connections.remote,
+        ratingKey,
+        token: transient,
+        clientId: plexClientId,
+        sessionId,
+      }),
+      local:
+        connections.local === null
+          ? null
+          : buildHlsUrl({
+              connectionUri: connections.local,
+              ratingKey,
+              token: transient,
+              clientId: plexClientId,
+              sessionId,
+            }),
+    };
+
+    // The transient is returned IN FULL (unlike the masked admin probe): the
+    // browser needs it to authenticate directly to Plex. Intended design.
+    return { ratingKey, connections, transient, hls, sessionId };
+  }
 
   router.get("/movie/:tmdbId", async (req, res) => {
     const tmdbIdRaw = req.params.tmdbId;
@@ -69,43 +118,8 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
         return;
       }
 
-      const transient = await transientMinter.mint(userToken);
-      const connections = await plexConnection.resolveConnections();
-
-      // One transcode session shared across both connection URLs so the client
-      // can switch between local/remote without spawning a second transcode.
-      const sessionId = randomUUID();
-      const hls = {
-        remote: buildHlsUrl({
-          connectionUri: connections.remote,
-          ratingKey,
-          token: transient,
-          clientId: plexClientId,
-          sessionId,
-        }),
-        local:
-          connections.local === null
-            ? null
-            : buildHlsUrl({
-                connectionUri: connections.local,
-                ratingKey,
-                token: transient,
-                clientId: plexClientId,
-                sessionId,
-              }),
-      };
-
-      // The transient is returned IN FULL (unlike the masked admin probe): the
-      // browser needs it to authenticate directly to Plex. Intended design.
-      res.json({
-        mediaType: "movie",
-        tmdbId,
-        ratingKey,
-        connections,
-        transient,
-        hls,
-        sessionId,
-      });
+      const descriptor = await buildPlayDescriptor(ratingKey, userToken);
+      res.json({ mediaType: "movie", tmdbId, ...descriptor });
     } catch (err) {
       respondUpstreamError(res, err);
     }
@@ -130,6 +144,45 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
 
       const episodes = await plexServer.episodes(showRatingKey);
       res.json({ tmdbId, showRatingKey, episodes });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
+  // This endpoint takes a RAW Plex episode ratingKey (the browser already has it
+  // from GET /tv/:tmdbId/episodes) and is intentionally gated only by the user's
+  // own Plex transient: Plex itself enforces what that account may stream, so we
+  // deliberately do NOT re-check Seerr availability or ownership here.
+  router.get("/episode/:ratingKey", async (req, res) => {
+    const ratingKey = req.params.ratingKey;
+    // Plex ratingKeys are numeric strings.
+    if (!/^\d+$/.test(ratingKey)) {
+      res.status(400).json({ error: "ratingKey must be numeric" });
+      return;
+    }
+
+    const session = res.locals.session as SessionPayload | undefined;
+    if (!session) {
+      res.status(401).json({ error: "not authenticated" });
+      return;
+    }
+
+    let userToken: string | null;
+    try {
+      // readPlexToken throws on a tampered/corrupt blob; surface that as 502.
+      userToken = readPlexToken(session, sessionSecret);
+    } catch (err) {
+      respondUpstreamError(res, err);
+      return;
+    }
+    if (userToken === null) {
+      res.status(409).json({ error: "re-login required" });
+      return;
+    }
+
+    try {
+      const descriptor = await buildPlayDescriptor(ratingKey, userToken);
+      res.json({ mediaType: "episode", ...descriptor });
     } catch (err) {
       respondUpstreamError(res, err);
     }
