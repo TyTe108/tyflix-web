@@ -671,6 +671,15 @@ Log (newest at bottom):
   (404 if null), returns `{ tmdbId, showRatingKey, episodes }`. `plexServer` added to `WatchRouterDeps`.
   **Verified live**: Severance (tmdb 95396) → showRatingKey 2504, 19 episodes with real per-episode ratingKeys
   (S1E1 "Good News About Hell" → 2517 …). 148 server tests.
+- **Phase 16.2 — Episode play-decision endpoint. COMPLETE + committed 2026-07-19.** Extracted a shared
+  `buildPlayDescriptor(ratingKey, userToken)` inside `createWatchRouter` (mints transient → resolveConnections →
+  one sessionId → hls via `buildHlsUrl`); the `/movie` route was refactored to use it (response byte-identical,
+  all movie tests unchanged). New `GET /api/watch/episode/:ratingKey` (requireAuth): numeric ratingKey (400) →
+  `readPlexToken` (tampered→502, null→409) → `buildPlayDescriptor` → 200 `{ mediaType:"episode", ratingKey,
+  connections, transient, hls, sessionId }`. Takes a **raw ratingKey**, intentionally gated only by the user's
+  own Plex transient (Plex enforces access; no Seerr re-check). **Verified live**: `/api/watch/episode/2517`
+  (Severance S1E1) → descriptor + fetching the local `start.m3u8` returns a real playlist
+  (`#EXTM3U … RESOLUTION=1920x1080`, HTTP 200) — the episode transcodes. 151 server tests.
 
 ## 9. Deferred / candidate future work
 
