@@ -5,10 +5,14 @@ import type { Request, Response } from "express";
 import {
   SESSION_COOKIE_NAME,
   SESSION_TTL_SECONDS,
+  TokenDecryptError,
   isAdmin,
   issueSession,
+  readPlexToken,
   readSession,
 } from "./session";
+
+const PLEX_TOKEN = "xToKeN-abc123-DEF456";
 
 const SECRET = "sixteen-chars!!!";
 
@@ -168,6 +172,78 @@ describe("readSession rejects invalid tokens", () => {
     assert.equal(
       readSession(fakeReq(`${SESSION_COOKIE_NAME}=${token}`), SECRET),
       null,
+    );
+  });
+});
+
+describe("encrypted Plex token", () => {
+  it("round-trips: encrypts on issue and decrypts back to the original", () => {
+    const { res, cookies } = fakeRes();
+    issueSession(
+      res,
+      { ...sessionData, plexToken: PLEX_TOKEN },
+      { secret: SECRET, secure: false },
+    );
+
+    const session = readSession(
+      fakeReq(`${SESSION_COOKIE_NAME}=${cookies[0].value}`),
+      SECRET,
+    );
+    assert.notEqual(session, null);
+    assert.equal(readPlexToken(session!, SECRET), PLEX_TOKEN);
+  });
+
+  it("does not embed the plaintext token in the signed cookie", () => {
+    const { res, cookies } = fakeRes();
+    issueSession(
+      res,
+      { ...sessionData, plexToken: PLEX_TOKEN },
+      { secret: SECRET, secure: false },
+    );
+
+    const cookieValue = cookies[0].value;
+    assert.equal(cookieValue.includes(PLEX_TOKEN), false);
+
+    // The decoded payload segment must not leak the token either.
+    const payloadPart = cookieValue.split(".")[0];
+    const json = Buffer.from(payloadPart, "base64url").toString("utf8");
+    assert.equal(json.includes(PLEX_TOKEN), false);
+  });
+
+  it("returns null when the session carries no token blob", () => {
+    const { res, cookies } = fakeRes();
+    issueSession(res, sessionData, { secret: SECRET, secure: false });
+
+    const session = readSession(
+      fakeReq(`${SESSION_COOKIE_NAME}=${cookies[0].value}`),
+      SECRET,
+    );
+    assert.notEqual(session, null);
+    assert.equal(readPlexToken(session!, SECRET), null);
+  });
+
+  it("throws TokenDecryptError when the token blob is tampered", () => {
+    const { res, cookies } = fakeRes();
+    const issued = issueSession(
+      res,
+      { ...sessionData, plexToken: PLEX_TOKEN },
+      { secret: SECRET, secure: false },
+    );
+    assert.equal(typeof issued.enc, "string");
+
+    // Flip a fully-significant byte inside the blob (the IV region, at the very
+    // front) rather than the trailing base64url char, avoiding unpadded-
+    // signature flakiness. Tampering the IV breaks GCM authentication.
+    const raw = Buffer.from(issued.enc!, "base64url");
+    raw[0] = raw[0] ^ 0xff;
+    const tampered: typeof issued = {
+      ...issued,
+      enc: raw.toString("base64url"),
+    };
+
+    assert.throws(
+      () => readPlexToken(tampered, SECRET),
+      (err: unknown) => err instanceof TokenDecryptError,
     );
   });
 });

@@ -102,6 +102,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
           displayName: seerrUser.displayName,
           avatar: plexUser.thumb,
           permissions: seerrUser.permissions,
+          plexToken: authToken,
         },
         { secret: sessionSecret, secure: secureCookies },
       );

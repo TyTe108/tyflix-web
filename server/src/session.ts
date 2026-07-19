@@ -1,10 +1,24 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHmac,
+  hkdfSync,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 import type { Request, Response } from "express";
 
 export const SESSION_COOKIE_NAME = "tyflix_session";
 export const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 export const SESSION_MAX_AGE_MS = SESSION_TTL_SECONDS * 1000;
 export const SEERR_ADMIN_BIT = 2;
+
+// AES-256-GCM parameters for the encrypted Plex-token blob. The key is derived
+// from the session secret via HKDF so no new env var/config is introduced.
+const TOKEN_KEY_INFO = "tyflix-session-plex-token-v1";
+const TOKEN_KEY_BYTES = 32;
+const TOKEN_IV_BYTES = 12;
+const TOKEN_TAG_BYTES = 16;
 
 export type SessionPayload = {
   seerrUserId: number;
@@ -15,6 +29,20 @@ export type SessionPayload = {
   permissions: number;
   iat: number;
   exp: number;
+  // Encrypted (AES-256-GCM) Plex auth token blob. Absent on sessions issued
+  // before token capture existed. Never contains plaintext; recover it only
+  // through readPlexToken.
+  enc?: string;
+};
+
+// Identity fields callers supply to issueSession, plus the plaintext Plex token
+// to be encrypted internally. plexToken is intentionally kept off SessionPayload
+// so it can never be serialized into a response.
+export type IssueSessionData = Omit<
+  SessionPayload,
+  "iat" | "exp" | "enc"
+> & {
+  plexToken?: string | null;
 };
 
 export type SessionCookieOptions = {
@@ -22,21 +50,37 @@ export type SessionCookieOptions = {
   secure: boolean;
 };
 
+// Thrown when a session carries a token blob that is present but cannot be
+// authenticated/decrypted (corrupt or tampered). Distinct from the legitimate
+// "no token present" case, which returns null.
+export class TokenDecryptError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "TokenDecryptError";
+  }
+}
+
 export function isAdmin(permissions: number): boolean {
   return (permissions & SEERR_ADMIN_BIT) !== 0;
 }
 
 export function issueSession(
   res: Response,
-  data: Omit<SessionPayload, "iat" | "exp">,
+  data: IssueSessionData,
   options: SessionCookieOptions,
 ): SessionPayload {
+  const { plexToken, ...identity } = data;
   const iat = Math.floor(Date.now() / 1000);
   const payload: SessionPayload = {
-    ...data,
+    ...identity,
     iat,
     exp: iat + SESSION_TTL_SECONDS,
   };
+  // Fail loud: if a token was supplied but encryption fails, throw rather than
+  // silently issuing a tokenless session.
+  if (plexToken !== undefined && plexToken !== null && plexToken !== "") {
+    payload.enc = encryptPlexToken(plexToken, options.secret);
+  }
   const token = signSession(payload, options.secret);
   res.cookie(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
@@ -46,6 +90,44 @@ export function issueSession(
     maxAge: SESSION_MAX_AGE_MS,
   });
   return payload;
+}
+
+// Recovers the plaintext Plex token from a verified session. Returns null when
+// the session predates token capture (no blob). Throws TokenDecryptError when a
+// blob is present but fails authentication/decryption.
+export function readPlexToken(
+  session: SessionPayload,
+  secret: string,
+): string | null {
+  const blob = session.enc;
+  if (blob === undefined || blob === null || blob === "") {
+    return null;
+  }
+
+  const raw = Buffer.from(blob, "base64url");
+  if (raw.length <= TOKEN_IV_BYTES + TOKEN_TAG_BYTES) {
+    throw new TokenDecryptError("token blob is too short to be valid");
+  }
+
+  const iv = raw.subarray(0, TOKEN_IV_BYTES);
+  const tag = raw.subarray(TOKEN_IV_BYTES, TOKEN_IV_BYTES + TOKEN_TAG_BYTES);
+  const ciphertext = raw.subarray(TOKEN_IV_BYTES + TOKEN_TAG_BYTES);
+
+  try {
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      deriveTokenKey(secret),
+      iv,
+    );
+    decipher.setAuthTag(tag);
+    const plaintext = Buffer.concat([
+      decipher.update(ciphertext),
+      decipher.final(),
+    ]);
+    return plaintext.toString("utf8");
+  } catch (err) {
+    throw new TokenDecryptError("failed to decrypt Plex token", { cause: err });
+  }
 }
 
 export function readSession(
@@ -105,6 +187,29 @@ export function clearSession(
   });
 }
 
+function deriveTokenKey(secret: string): Buffer {
+  return Buffer.from(
+    hkdfSync(
+      "sha256",
+      Buffer.from(secret, "utf8"),
+      Buffer.alloc(0),
+      Buffer.from(TOKEN_KEY_INFO, "utf8"),
+      TOKEN_KEY_BYTES,
+    ),
+  );
+}
+
+function encryptPlexToken(token: string, secret: string): string {
+  const iv = randomBytes(TOKEN_IV_BYTES);
+  const cipher = createCipheriv("aes-256-gcm", deriveTokenKey(secret), iv);
+  const ciphertext = Buffer.concat([
+    cipher.update(token, "utf8"),
+    cipher.final(),
+  ]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, ciphertext]).toString("base64url");
+}
+
 function signSession(payload: SessionPayload, secret: string): string {
   const json = JSON.stringify(payload);
   const payloadPart = Buffer.from(json, "utf8").toString("base64url");
@@ -150,6 +255,7 @@ function isSessionPayload(value: unknown): value is SessionPayload {
     (v.avatar === null || typeof v.avatar === "string") &&
     typeof v.permissions === "number" &&
     typeof v.iat === "number" &&
-    typeof v.exp === "number"
+    typeof v.exp === "number" &&
+    (v.enc === undefined || typeof v.enc === "string")
   );
 }
