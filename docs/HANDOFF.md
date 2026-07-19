@@ -615,13 +615,23 @@ Log (newest at bottom):
   probe). **Verified live** (Claude-in-Chrome): `/api/watch/movie/82695` (Les Misérables) → 200 with ratingKey
   6094, both connection URIs, and a fresh 46-char transient. 134 server tests. **All movie-playback backend
   plumbing is complete + verified live.**
-- **Phase 15 roadmap (revised 2026-07-18 — MOVIES FIRST):** 15.1–15.6 DONE (token custody → connection
-  discovery → transient minting → ratingKey → both-connection-URIs → movie play-decision endpoint, each
-  verified live). Remaining: **15.7** transcode HLS URL builder + live-verify a real Plex transcode `decision`
-  (making Plex transcode HEVC→H.264 for the browser, via the client-profile, is the last unknown) → **15.8**
-  frontend player (hls.js + Play on available movies + CSP must allow `*.plex.direct` in connect-src/media-src).
-  The 3 temp admin probes stay as live-verify tools, retired once the player works. TV playback (episode
-  browser) deferred.
+- **Phase 15.7 — Transcode HLS URL. COMPLETE + committed 2026-07-19** (incl. 15.7.1 decision-parse). New
+  `plex/transcodeUrl.ts` `buildHlsUrl({connectionUri, ratingKey, token, clientId, sessionId})` →
+  `{conn}/video/:/transcode/universal/start.m3u8?…` (via URLSearchParams): `directPlay=0`, `directStream=1`,
+  `protocol=hls`, `X-Plex-Platform=Chrome`, an `add-transcode-target(…videoCodec=h264&audioCodec=aac)`
+  client-profile-extra, + session id + transient. Sibling `buildHlsDecisionUrl` → the `/decision` variant. Temp
+  admin probe `GET /api/admin/plex-transcode?type=&tmdbId=` fetches the decision (no transcode started) + parses
+  per-stream `{streamType, codec, decision}`. **Verified live across 8 movies**: video **output = h264** for all
+  (copied when already h264, transcoded when not — HEVC/incompatible sources convert correctly); audio = aac
+  (copied) or **mp3 (transcoded)** — Plex isn't honoring the aac target for transcoded audio, but mp3-in-HLS
+  plays in hls.js (a nit; revisit only if audio is flaky in-browser). 140 server tests.
+- **Phase 15 roadmap (revised 2026-07-19 — MOVIES FIRST):** 15.1–15.7 DONE + verified live (token custody →
+  connection discovery → transient minting → ratingKey → both-connection-URIs → movie play-decision endpoint →
+  transcode HLS URL forcing H.264). Remaining: **15.8** add ready HLS URLs (`hls: {local, remote}` + sessionId)
+  to the `/api/watch/movie` descriptor (server builds via `buildHlsUrl`) → **15.9** frontend player (NEW dep
+  hls.js + Play button on available movies + local→remote fallback + CSP must allow `*.plex.direct` in
+  connect-src and `blob:` in media-src) — the increment where video actually plays in-browser. Retire the 4
+  temp admin probes after. TV playback (episode browser) deferred.
 
 ## 9. Deferred / candidate future work
 

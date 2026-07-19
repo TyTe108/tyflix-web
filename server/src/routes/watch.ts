@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import {
   PlexConnectionError,
   type PlexConnectionResolver,
 } from "../plex/connection";
+import { buildHlsUrl } from "../plex/transcodeUrl";
 import {
   PlexTransientError,
   type TransientTokenMinter,
@@ -15,10 +17,17 @@ export type WatchRouterDeps = {
   transientMinter: TransientTokenMinter;
   mediaStatus: MediaStatusProvider;
   sessionSecret: string;
+  plexClientId: string;
 };
 
 export function createWatchRouter(deps: WatchRouterDeps): Router {
-  const { plexConnection, transientMinter, mediaStatus, sessionSecret } = deps;
+  const {
+    plexConnection,
+    transientMinter,
+    mediaStatus,
+    sessionSecret,
+    plexClientId,
+  } = deps;
   const router = Router();
 
   router.get("/movie/:tmdbId", async (req, res) => {
@@ -60,6 +69,29 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
       const transient = await transientMinter.mint(userToken);
       const connections = await plexConnection.resolveConnections();
 
+      // One transcode session shared across both connection URLs so the client
+      // can switch between local/remote without spawning a second transcode.
+      const sessionId = randomUUID();
+      const hls = {
+        remote: buildHlsUrl({
+          connectionUri: connections.remote,
+          ratingKey,
+          token: transient,
+          clientId: plexClientId,
+          sessionId,
+        }),
+        local:
+          connections.local === null
+            ? null
+            : buildHlsUrl({
+                connectionUri: connections.local,
+                ratingKey,
+                token: transient,
+                clientId: plexClientId,
+                sessionId,
+              }),
+      };
+
       // The transient is returned IN FULL (unlike the masked admin probe): the
       // browser needs it to authenticate directly to Plex. Intended design.
       res.json({
@@ -68,6 +100,8 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
         ratingKey,
         connections,
         transient,
+        hls,
+        sessionId,
       });
     } catch (err) {
       respondUpstreamError(res, err);

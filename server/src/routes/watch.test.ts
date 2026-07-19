@@ -11,6 +11,7 @@ import { createWatchRouter, type WatchRouterDeps } from "./watch";
 const SECRET = "sixteen-chars!!!";
 const USER_TOKEN = "user-durable-token";
 const TRANSIENT = "transient-24b68e46-3eb5-449e-8295-ff59e9a5e6cb";
+const CLIENT_ID = "client-id-1";
 const CONNECTIONS = {
   local: "https://10-0-0-10.machine-abc.plex.direct:32400",
   remote: "https://1-2-3-4.machine-abc.plex.direct:32400",
@@ -42,6 +43,7 @@ function sessionCookie(opts: { plexToken?: string } = {}): string {
 function baseDeps(): WatchRouterDeps {
   return {
     sessionSecret: SECRET,
+    plexClientId: CLIENT_ID,
     mediaStatus: {
       async getStatusMap() {
         return new Map();
@@ -152,16 +154,74 @@ describe("GET /api/watch/movie/:tmdbId", () => {
     );
 
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), {
-      mediaType: "movie",
-      tmdbId: 603,
-      ratingKey: "12345",
-      connections: CONNECTIONS,
-      transient: TRANSIENT,
-    });
+    const body = (await response.json()) as {
+      mediaType: string;
+      tmdbId: number;
+      ratingKey: string;
+      connections: typeof CONNECTIONS;
+      transient: string;
+      hls: { local: string | null; remote: string };
+      sessionId: string;
+    };
+
+    assert.equal(body.mediaType, "movie");
+    assert.equal(body.tmdbId, 603);
+    assert.equal(body.ratingKey, "12345");
+    assert.deepEqual(body.connections, CONNECTIONS);
+    assert.equal(body.transient, TRANSIENT);
+
+    // sessionId is present and both HLS URLs are ready-to-play start.m3u8 URLs
+    // carrying the ratingKey.
+    assert.equal(typeof body.sessionId, "string");
+    assert.ok(body.sessionId.length > 0);
+
+    assert.ok(
+      body.hls.remote.startsWith(`${CONNECTIONS.remote}/video/:/transcode/`),
+    );
+    assert.ok(body.hls.remote.includes("start.m3u8"));
+    assert.ok(body.hls.remote.includes("12345"));
+
+    assert.notEqual(body.hls.local, null);
+    const localUrl = body.hls.local as string;
+    assert.ok(localUrl.startsWith(`${CONNECTIONS.local}/video/:/transcode/`));
+    assert.ok(localUrl.includes("start.m3u8"));
+    assert.ok(localUrl.includes("12345"));
+
+    // The SAME sessionId must appear in both HLS URLs.
+    assert.ok(body.hls.remote.includes(body.sessionId));
+    assert.ok(localUrl.includes(body.sessionId));
+
     // The recovered durable token is what we mint from.
     assert.equal(mintedWith, USER_TOKEN);
     assert.deepEqual(ratingKeyArgs, ["movie", 603]);
+  });
+
+  it("sets hls.local to null when the server advertises no local connection", async () => {
+    const deps = baseDeps();
+    deps.plexConnection = {
+      async resolveConnections() {
+        return { local: null, remote: CONNECTIONS.remote };
+      },
+    } as PlexConnectionResolver;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/movie/603",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      connections: { local: string | null; remote: string };
+      hls: { local: string | null; remote: string };
+      sessionId: string;
+    };
+
+    assert.equal(body.connections.local, null);
+    assert.equal(body.hls.local, null);
+    assert.ok(body.hls.remote.includes("start.m3u8"));
+    assert.ok(body.hls.remote.includes(body.sessionId));
   });
 });
 
