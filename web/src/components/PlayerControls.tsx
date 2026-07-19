@@ -15,6 +15,65 @@ type PlayerControlsProps = {
 
 const HIDE_DELAY_MS = 3000;
 
+const SPEED_OPTIONS = [
+  { value: 0.5, label: "0.5×" },
+  { value: 0.75, label: "0.75×" },
+  { value: 1, label: "Normal" },
+  { value: 1.25, label: "1.25×" },
+  { value: 1.5, label: "1.5×" },
+  { value: 1.75, label: "1.75×" },
+  { value: 2, label: "2×" },
+] as const;
+
+type SettingsOption<T extends string | number> = {
+  value: T;
+  label: string;
+};
+
+function SettingsOptionGroup<T extends string | number>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: ReadonlyArray<SettingsOption<T>>;
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  const headingId = `watch-settings-${label.toLowerCase().replace(/\s+/g, "-")}`;
+
+  return (
+    <div className="watch-settings-group" role="group" aria-labelledby={headingId}>
+      <h3 id={headingId} className="watch-settings-group-label">
+        {label}
+      </h3>
+      <div className="watch-settings-options">
+        {options.map((option) => {
+          const selected = option.value === value;
+          return (
+            <button
+              key={String(option.value)}
+              type="button"
+              className={
+                selected
+                  ? "watch-settings-option watch-settings-option--active"
+                  : "watch-settings-option"
+              }
+              aria-pressed={selected}
+              onClick={() => {
+                onChange(option.value);
+              }}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function PlayerControls({
   videoRef,
   durationMs,
@@ -26,6 +85,7 @@ export function PlayerControls({
   const scrubbingRef = useRef(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settingsOpenRef = useRef(false);
+  const playbackRateRef = useRef(1);
 
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -35,8 +95,10 @@ export function PlayerControls({
   const [fullscreen, setFullscreen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
+  const [playbackRate, setPlaybackRate] = useState(1);
 
   settingsOpenRef.current = settingsOpen;
+  playbackRateRef.current = playbackRate;
 
   const fallbackDuration =
     typeof durationMs === "number" &&
@@ -108,17 +170,28 @@ export function PlayerControls({
       setControlsVisible(true);
       clearHideTimer();
     };
+    const onRateChange = () => {
+      setPlaybackRate(video.playbackRate);
+    };
+    // Re-apply the chosen rate after a source reload (e.g. future quality
+    // restart) so the browser's default 1× does not silently win.
+    const onLoadedMetadata = () => {
+      video.playbackRate = playbackRateRef.current;
+      onTime();
+    };
 
     onPlayback();
     onTime();
     onVolume();
+    onRateChange();
 
     video.addEventListener("play", onPlayback);
     video.addEventListener("pause", onPlayback);
     video.addEventListener("timeupdate", onTime);
     video.addEventListener("durationchange", onTime);
-    video.addEventListener("loadedmetadata", onTime);
+    video.addEventListener("loadedmetadata", onLoadedMetadata);
     video.addEventListener("volumechange", onVolume);
+    video.addEventListener("ratechange", onRateChange);
     video.addEventListener("ended", onEnded);
 
     return () => {
@@ -126,8 +199,9 @@ export function PlayerControls({
       video.removeEventListener("pause", onPlayback);
       video.removeEventListener("timeupdate", onTime);
       video.removeEventListener("durationchange", onTime);
-      video.removeEventListener("loadedmetadata", onTime);
+      video.removeEventListener("loadedmetadata", onLoadedMetadata);
       video.removeEventListener("volumechange", onVolume);
+      video.removeEventListener("ratechange", onRateChange);
       video.removeEventListener("ended", onEnded);
     };
   }, [videoRef]);
@@ -204,6 +278,13 @@ export function PlayerControls({
     });
   };
 
+  const setSpeed = (rate: number) => {
+    setPlaybackRate(rate);
+    withVideo((video) => {
+      video.playbackRate = rate;
+    });
+  };
+
   const toggleFullscreen = () => {
     const shell = shellRef.current;
     if (shell === null) {
@@ -268,6 +349,12 @@ export function PlayerControls({
           hidden={!settingsOpen}
         >
           <h2 className="watch-settings-title">Settings</h2>
+          <SettingsOptionGroup
+            label="Speed"
+            options={SPEED_OPTIONS}
+            value={playbackRate}
+            onChange={setSpeed}
+          />
         </div>
 
         <div className="watch-controls-bar">
