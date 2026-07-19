@@ -6,6 +6,7 @@ import {
   fetchMovieWatch,
   type WatchDescriptor,
 } from "../api/watch";
+import { PlayerControls } from "../components/PlayerControls";
 
 type LoadStatus = "loading" | "ready" | "error";
 
@@ -157,13 +158,17 @@ export function WatchPage() {
       ) : null}
 
       {status === "ready" && descriptor !== null ? (
-        <video
-          ref={videoRef}
-          className="watch-player"
-          controls
-          autoPlay
-          playsInline
-        />
+        <PlayerControls
+          videoRef={videoRef}
+          durationMs={descriptor.durationMs}
+        >
+          <video
+            ref={videoRef}
+            className="watch-player"
+            autoPlay
+            playsInline
+          />
+        </PlayerControls>
       ) : null}
     </main>
   );
