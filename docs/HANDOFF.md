@@ -704,6 +704,17 @@ Log (newest at bottom):
   transcode on the Arc A380 (slow episode cold-start), a bitrate/resolution cap for remote users, and a
   request-based `request.media.ratingKey` fallback for TV shows with a null Seerr show ratingKey (e.g. Little
   House).
+- **Deploy + auto-deploy (2026-07-19).** All of Phases 15–16 shipped to prod in one deploy — the Dell was still
+  on Phase 14 (`b1bc7a8`), so this jumped it to 16.4 and is why prod had no Play button until now. The deploy
+  needed `git reset --hard origin/main` (not `pull --ff-only`): the 2026-07-18 history scrub (filter-repo) had
+  force-pushed `main`, so the deploy checkout was diverged (`[ahead 65, behind 93]`); `.env` +
+  `docker-compose.yml` are untracked and were preserved. **One-time caveat:** sessions created before token
+  custody (15.1) have no `enc` in the cookie → they hit 409 "re-login required" on Play until the user logs
+  out/in once (by design — old sessions still authenticate for identity). **Auto-deploy is now live:**
+  `/home/tyler/tyflix/tyflix-web-autodeploy.sh` (cron `*/5 * * * *`, flock-guarded) fetches `origin/main` and,
+  when it moves, runs `git reset --hard origin/main` + `docker compose up -d --build` (reset --hard so future
+  force-pushes can't wedge it); logs to `tyflix-web-autodeploy.log`. So: commit + **push to `main`** → prod
+  auto-deploys within ~5 min. Manual redeploy still works if needed.
 
 ## 9. Deferred / candidate future work
 
