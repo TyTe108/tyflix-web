@@ -12,6 +12,10 @@ export type MediaStatusProvider = {
     mediaType: "movie" | "tv",
     tmdbId: number,
   ): Promise<number | null>;
+  getRatingKey(
+    mediaType: "movie" | "tv",
+    tmdbId: number,
+  ): Promise<string | null>;
 };
 
 export function createMediaStatusProvider(
@@ -22,6 +26,7 @@ export function createMediaStatusProvider(
         expiresAt: number;
         statuses: ReadonlyMap<string, MediaAvailability>;
         mediaIds: ReadonlyMap<string, number>;
+        ratingKeys: ReadonlyMap<string, string>;
       }
     | undefined;
 
@@ -34,9 +39,13 @@ export function createMediaStatusProvider(
       const media = await seerr.listMedia();
       const statuses = new Map<string, MediaAvailability>();
       const mediaIds = new Map<string, number>();
+      const ratingKeys = new Map<string, string>();
       for (const item of media) {
         const key = `${item.mediaType}:${item.tmdbId}`;
         mediaIds.set(key, item.id);
+        if (item.ratingKey !== null) {
+          ratingKeys.set(key, item.ratingKey);
+        }
         const status = mediaStatusFromCode(item.status);
         if (status !== null) {
           statuses.set(key, status);
@@ -46,6 +55,7 @@ export function createMediaStatusProvider(
         expiresAt: Date.now() + MEDIA_STATUS_TTL_MS,
         statuses,
         mediaIds,
+        ratingKeys,
       };
       return cache;
     } catch (err) {
@@ -69,5 +79,14 @@ export function createMediaStatusProvider(
     return (await loadCache())?.mediaIds.get(`${mediaType}:${tmdbId}`) ?? null;
   }
 
-  return { getStatusMap, getMediaId };
+  async function getRatingKey(
+    mediaType: "movie" | "tv",
+    tmdbId: number,
+  ): Promise<string | null> {
+    return (
+      (await loadCache())?.ratingKeys.get(`${mediaType}:${tmdbId}`) ?? null
+    );
+  }
+
+  return { getStatusMap, getMediaId, getRatingKey };
 }

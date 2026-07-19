@@ -137,6 +137,9 @@ function createApp(
         async getMediaId(mediaType, tmdbId) {
           return mediaType === "movie" && tmdbId === 603 ? mediaId : null;
         },
+        async getRatingKey() {
+          return null;
+        },
       },
       mediaEnrichment,
     }),

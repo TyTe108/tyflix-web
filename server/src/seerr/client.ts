@@ -37,6 +37,7 @@ export type SeerrMediaListItem = {
   tmdbId: number;
   mediaType: "movie" | "tv";
   status: number;
+  ratingKey: string | null;
 };
 
 export type SeerrWatchlistItem = {
@@ -717,7 +718,16 @@ function mapSeerrMediaListItem(row: unknown): SeerrMediaListItem | null {
     return null;
   }
 
-  return { id, tmdbId, mediaType, status };
+  // ratingKey is best-effort: a missing/odd value must not drop the item.
+  const ratingKeyRaw = (row as { ratingKey?: unknown }).ratingKey;
+  const ratingKey =
+    typeof ratingKeyRaw === "string"
+      ? ratingKeyRaw
+      : typeof ratingKeyRaw === "number"
+        ? String(ratingKeyRaw)
+        : null;
+
+  return { id, tmdbId, mediaType, status, ratingKey };
 }
 
 function mapSeerrWatchlistItem(row: unknown): SeerrWatchlistItem | null {

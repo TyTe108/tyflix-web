@@ -9,9 +9,9 @@ describe("createMediaStatusProvider", () => {
       async listMedia() {
         calls += 1;
         return [
-          { id: 10, tmdbId: 603, mediaType: "movie", status: 5 },
-          { id: 20, tmdbId: 1396, mediaType: "tv", status: 4 },
-          { id: 30, tmdbId: 1, mediaType: "movie", status: 99 },
+          { id: 10, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: "45678" },
+          { id: 20, tmdbId: 1396, mediaType: "tv", status: 4, ratingKey: null },
+          { id: 30, tmdbId: 1, mediaType: "movie", status: 99, ratingKey: "999" },
         ];
       },
     });
@@ -25,6 +25,12 @@ describe("createMediaStatusProvider", () => {
     assert.equal(second, first);
     assert.equal(await provider.getMediaId("movie", 603), 10);
     assert.equal(await provider.getMediaId("tv", 603), null);
+    // Available title with a ratingKey → returned as-is.
+    assert.equal(await provider.getRatingKey("movie", 603), "45678");
+    // Tracked but no ratingKey → null.
+    assert.equal(await provider.getRatingKey("tv", 1396), null);
+    // Untracked title → null.
+    assert.equal(await provider.getRatingKey("movie", 999999), null);
     assert.equal(calls, 1);
   });
 
@@ -40,6 +46,7 @@ describe("createMediaStatusProvider", () => {
       const statuses = await provider.getStatusMap();
       assert.equal(statuses.size, 0);
       assert.equal(await provider.getMediaId("movie", 603), null);
+      assert.equal(await provider.getRatingKey("movie", 603), null);
     } finally {
       console.error = originalConsoleError;
     }

@@ -386,7 +386,14 @@ describe("Seerr media client", () => {
         return jsonResponse(200, {
           pageInfo: { results: 101 },
           results: [
-            { id: 10, tmdbId: 603, mediaType: "movie", status: 5, tvdbId: null },
+            {
+              id: 10,
+              tmdbId: 603,
+              mediaType: "movie",
+              status: 5,
+              tvdbId: null,
+              ratingKey: "12345",
+            },
             { id: 11, tmdbId: "bad", mediaType: "movie", status: 2 },
             { id: 12, tmdbId: 1, mediaType: "tv" },
             { id: 13, tmdbId: 2, mediaType: "person", status: 5 },
@@ -405,10 +412,45 @@ describe("Seerr media client", () => {
     });
 
     assert.deepEqual(await seerr.listMedia(), [
-      { id: 10, tmdbId: 603, mediaType: "movie", status: 5 },
-      { id: 20, tmdbId: 1396, mediaType: "tv", status: 4 },
+      { id: 10, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: "12345" },
+      { id: 20, tmdbId: 1396, mediaType: "tv", status: 4, ratingKey: null },
     ]);
     assert.deepEqual(calls, ["?take=100&skip=0", "?take=100&skip=100"]);
+  });
+
+  it("extracts ratingKey leniently without dropping items", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse(200, {
+        pageInfo: { results: 4 },
+        results: [
+          // string ratingKey → used as-is
+          { id: 1, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: "12345" },
+          // number ratingKey → String(n)
+          { id: 2, tmdbId: 1396, mediaType: "tv", status: 4, ratingKey: 67890 },
+          // missing ratingKey → null, item kept
+          { id: 3, tmdbId: 700, mediaType: "movie", status: 5 },
+          // odd ratingKey → null, item kept
+          {
+            id: 4,
+            tmdbId: 701,
+            mediaType: "movie",
+            status: 5,
+            ratingKey: { nope: true },
+          },
+        ],
+      });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    assert.deepEqual(await seerr.listMedia(), [
+      { id: 1, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: "12345" },
+      { id: 2, tmdbId: 1396, mediaType: "tv", status: 4, ratingKey: "67890" },
+      { id: 3, tmdbId: 700, mediaType: "movie", status: 5, ratingKey: null },
+      { id: 4, tmdbId: 701, mediaType: "movie", status: 5, ratingKey: null },
+    ]);
   });
 
   it("maps all known media status codes and returns null for unknown codes", () => {

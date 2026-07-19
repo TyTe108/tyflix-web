@@ -37,6 +37,9 @@ describe("watchlist route", () => {
         async getMediaId() {
           return null;
         },
+        async getRatingKey() {
+          return null;
+        },
       },
       mediaEnrichment: {
         async enrich(items) {
@@ -101,6 +104,9 @@ describe("watchlist route", () => {
           return new Map();
         },
         async getMediaId() {
+          return null;
+        },
+        async getRatingKey() {
           return null;
         },
       },

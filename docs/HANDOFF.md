@@ -574,6 +574,20 @@ Log (newest at bottom):
   exposes it. **Verified live** (Claude-in-Chrome, admin session): returns
   `https://203-0-113-10.<hash>.plex.direct:32400` — the real direct-external URL, confirming the `/resources`
   shape against the live server. 123 server tests.
+- **Phase 15.3 — Transient-token minting. COMPLETE + committed 2026-07-18** (incl. 15.3.1 probe fix). New
+  `plex/transientToken.ts` `createTransientTokenMinter({baseUrl, clientId})` → `mint(userToken)`:
+  `GET {plexBaseUrl}/security/token?type=delegation&scope=all` (X-Plex-Token user token + client id), reads the
+  body as **text** and extracts the transient defensively (attribute → JSON field → `transient-` regex). Live
+  shape verified: XML `<MediaContainer size="0" token="transient-…"/>`. **Fail-loud** `PlexTransientError` (→502)
+  on non-OK or unextractable token. A **temporary** admin probe `GET /api/admin/plex-transient` recovers the
+  admin's durable token (via `readPlexToken`; 409 if none), mints a transient, and verifies it authenticates
+  against `GET {plexBaseUrl}/library/sections` (LAN URL — **15.3.1** fixed this from the external plex.direct URL,
+  which the LAN-bound backend can't reach via NAT hairpin → false negative). Token masked in the response, never
+  returned in full. **Verified live** (Claude-in-Chrome, admin): `{ ok:true, mintedChars:46,
+  authenticatesAgainstServer:true }` — the full 15.1→15.2→15.3 chain confirmed end-to-end. 127 server tests.
+  **NAT-hairpin design note:** a tyflix user **on the home LAN** hits the same wall against the external
+  plex.direct URL in-browser → the 15.4 play-decision endpoint must hand the browser BOTH local + remote
+  connection URIs (the 15.2 resolver currently returns only the external one).
 
 ## 9. Deferred / candidate future work
 

@@ -247,8 +247,8 @@ describe("discovery media status annotation", () => {
         async listMedia() {
           mediaCalls += 1;
           return [
-            { id: 10, tmdbId: 603, mediaType: "movie", status: 5 },
-            { id: 20, tmdbId: 1396, mediaType: "tv", status: 4 },
+            { id: 10, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: "45678" },
+            { id: 20, tmdbId: 1396, mediaType: "tv", status: 4, ratingKey: null },
           ];
         },
       }),
@@ -349,8 +349,8 @@ describe("discover browse routes", () => {
       mediaStatus: createMediaStatusProvider({
         async listMedia() {
           return [
-            { id: 10, tmdbId: 603, mediaType: "movie", status: 5 },
-            { id: 20, tmdbId: 1396, mediaType: "tv", status: 4 },
+            { id: 10, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: "45678" },
+            { id: 20, tmdbId: 1396, mediaType: "tv", status: 4, ratingKey: null },
           ];
         },
       }),
@@ -399,6 +399,9 @@ describe("discover browse routes", () => {
           throw new Error("Seerr unavailable");
         },
         async getMediaId() {
+          return null;
+        },
+        async getRatingKey() {
           return null;
         },
       },
@@ -472,7 +475,9 @@ describe("GET /api/discover/upcoming", () => {
       tmdb: createStubTmdb(),
       mediaStatus: createMediaStatusProvider({
         async listMedia() {
-          return [{ id: 10, tmdbId: 123, mediaType: "movie", status: 5 }];
+          return [
+            { id: 10, tmdbId: 123, mediaType: "movie", status: 5, ratingKey: null },
+          ];
         },
       }),
     });
@@ -547,6 +552,9 @@ describe("GET /api/discover/:mediaType/:id/recommendations", () => {
         async getMediaId() {
           return null;
         },
+        async getRatingKey() {
+          return null;
+        },
       },
     });
     const originalConsoleError = console.error;
@@ -610,6 +618,9 @@ describe("GET /api/discover/:mediaType/:id/credits", () => {
           return new Map();
         },
         async getMediaId() {
+          return null;
+        },
+        async getRatingKey() {
           return null;
         },
       },
@@ -697,7 +708,9 @@ describe("GET /api/discover/person/:id", () => {
       tmdb: createStubTmdb(),
       mediaStatus: createMediaStatusProvider({
         async listMedia() {
-          return [{ id: 10, tmdbId: 603, mediaType: "movie", status: 5 }];
+          return [
+            { id: 10, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: null },
+          ];
         },
       }),
     });
@@ -732,6 +745,9 @@ describe("GET /api/discover/person/:id", () => {
           throw new Error("Seerr unavailable");
         },
         async getMediaId() {
+          return null;
+        },
+        async getRatingKey() {
           return null;
         },
       },
@@ -804,7 +820,9 @@ describe("GET /api/discover/collection/:id", () => {
       tmdb: createStubTmdb(),
       mediaStatus: createMediaStatusProvider({
         async listMedia() {
-          return [{ id: 10, tmdbId: 603, mediaType: "movie", status: 5 }];
+          return [
+            { id: 10, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: null },
+          ];
         },
       }),
     });

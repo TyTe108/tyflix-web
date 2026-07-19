@@ -11,6 +11,7 @@ import {
   PlexTransientError,
   type TransientTokenMinter,
 } from "../plex/transientToken";
+import type { MediaStatusProvider } from "../seerr/mediaStatusProvider";
 import { readPlexToken, type SessionPayload } from "../session";
 
 export type AdminRouterDeps = {
@@ -19,6 +20,7 @@ export type AdminRouterDeps = {
   transientMinter: TransientTokenMinter;
   sessionSecret: string;
   plexBaseUrl: string;
+  mediaStatus: MediaStatusProvider;
 };
 
 const PROXY_PATHS = ["system", "users", "jobs", "containers"] as const;
@@ -30,6 +32,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
     transientMinter,
     sessionSecret,
     plexBaseUrl,
+    mediaStatus,
   } = deps;
   const router = Router();
 
@@ -104,6 +107,35 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
         authenticatesAgainstServer,
         directUri,
       });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
+  // TEMPORARY probe: returns the Plex ratingKey Seerr tracks for a title so we
+  // can confirm Seerr surfaces a real ratingKey for a known-available title.
+  // Admin-gated (requireAdmin at mount time). REMOVE once the /api/watch
+  // play-decision endpoint lands.
+  router.get("/plex-ratingkey", async (req, res) => {
+    const typeRaw = req.query.type;
+    const tmdbIdRaw = req.query.tmdbId;
+
+    if (typeRaw !== "movie" && typeRaw !== "tv") {
+      res.status(400).json({ error: "type must be 'movie' or 'tv'" });
+      return;
+    }
+    if (typeof tmdbIdRaw !== "string" || !/^\d+$/.test(tmdbIdRaw)) {
+      res.status(400).json({ error: "tmdbId must be a numeric query param" });
+      return;
+    }
+
+    const tmdbId = Number(tmdbIdRaw);
+
+    try {
+      const status =
+        (await mediaStatus.getStatusMap()).get(`${typeRaw}:${tmdbId}`) ?? null;
+      const ratingKey = await mediaStatus.getRatingKey(typeRaw, tmdbId);
+      res.json({ tmdbId, mediaType: typeRaw, status, ratingKey });
     } catch (err) {
       respondUpstreamError(res, err);
     }
