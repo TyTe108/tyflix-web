@@ -6,6 +6,7 @@ import { createDashboardClient } from "./dashboard/client";
 import { requireAdmin, requireAuth } from "./middleware/auth";
 import { apiRateLimiter } from "./middleware/rateLimit";
 import { createPlexClient } from "./plex/client";
+import { createPlexConnectionResolver } from "./plex/connection";
 import { createPlexServerClient } from "./plex/server";
 import { createAdminRouter } from "./routes/admin";
 import { createAuthRouter } from "./routes/auth";
@@ -39,6 +40,12 @@ const plex = createPlexClient({
 const plexServer = createPlexServerClient({
   baseUrl: config.plexBaseUrl,
   token: config.plexToken,
+});
+
+const plexConnection = createPlexConnectionResolver({
+  baseUrl: config.plexBaseUrl,
+  token: config.plexToken,
+  clientId: config.plexClientId,
 });
 
 const seerr = createSeerrClient({
@@ -116,7 +123,7 @@ app.use(
 app.use(
   "/api/admin",
   requireAdmin(config.sessionSecret),
-  createAdminRouter({ dashboard }),
+  createAdminRouter({ dashboard, plexConnection }),
 );
 
 app.use(
