@@ -9,7 +9,11 @@ import {
   PlexTransientError,
   type TransientTokenMinter,
 } from "../plex/transientToken";
-import type { PlexServerClient } from "../plex/server";
+import type {
+  AudioStream,
+  PlexServerClient,
+  SubtitleStream,
+} from "../plex/server";
 import type { MediaStatusProvider } from "../seerr/mediaStatusProvider";
 import { readPlexToken, type SessionPayload } from "../session";
 
@@ -30,6 +34,8 @@ type PlayDescriptor = {
   transient: string;
   hls: { local: string | null; remote: string };
   sessionId: string;
+  streams: { audio: AudioStream[]; subtitle: SubtitleStream[] };
+  durationMs: number | null;
 };
 
 export function createWatchRouter(deps: WatchRouterDeps): Router {
@@ -51,6 +57,8 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     ratingKey: string,
     userToken: string,
   ): Promise<PlayDescriptor> {
+    // Fail before minting if the ratingKey has no metadata document.
+    const meta = await plexServer.playbackMeta(ratingKey);
     const transient = await transientMinter.mint(userToken);
     const connections = await plexConnection.resolveConnections();
 
@@ -79,7 +87,15 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
 
     // The transient is returned IN FULL (unlike the masked admin probe): the
     // browser needs it to authenticate directly to Plex. Intended design.
-    return { ratingKey, connections, transient, hls, sessionId };
+    return {
+      ratingKey,
+      connections,
+      transient,
+      hls,
+      sessionId,
+      streams: { audio: meta.audio, subtitle: meta.subtitle },
+      durationMs: meta.durationMs,
+    };
   }
 
   router.get("/movie/:tmdbId", async (req, res) => {

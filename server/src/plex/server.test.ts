@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { createPlexServerClient } from "./server";
+import {
+  createPlexServerClient,
+  PlexServerUpstreamError,
+} from "./server";
 
 const originalFetch = globalThis.fetch;
 
@@ -116,5 +119,172 @@ describe("plexServer.episodes", () => {
       assert.equal((err as { status?: number }).status, 503);
       return true;
     });
+  });
+});
+
+describe("plexServer.playbackMeta", () => {
+  it("parses duration and streams from mediaIndex=0/partIndex=0 only", async () => {
+    let requestedUrl: string | null = null;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      requestedUrl =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      return jsonResponse(200, {
+        MediaContainer: {
+          Metadata: [
+            {
+              duration: 5_400_000,
+              Media: [
+                {
+                  Part: [
+                    {
+                      Stream: [
+                        {
+                          id: 100,
+                          streamType: 1,
+                          codec: "h264",
+                        },
+                        {
+                          id: 101,
+                          streamType: 2,
+                          language: "English",
+                          codec: "aac",
+                          channels: 2,
+                          title: "Stereo",
+                          default: 1,
+                        },
+                        {
+                          id: 102,
+                          streamType: 3,
+                          language: "English",
+                          codec: "srt",
+                          title: "English SDH",
+                          key: "/library/streams/102",
+                          forced: 0,
+                        },
+                        {
+                          id: 103,
+                          streamType: 3,
+                          language: "French",
+                          codec: "pgs",
+                          title: "Forced FR",
+                          forced: 1,
+                        },
+                      ],
+                    },
+                    // Second Part — ignored (partIndex=0 only).
+                    {
+                      Stream: [
+                        {
+                          id: 999,
+                          streamType: 2,
+                          language: "Ignored Part",
+                          codec: "ac3",
+                          channels: 6,
+                          default: 1,
+                        },
+                      ],
+                    },
+                  ],
+                },
+                // Second Media — ignored (mediaIndex=0 only).
+                {
+                  Part: [
+                    {
+                      Stream: [
+                        {
+                          id: 888,
+                          streamType: 2,
+                          language: "Ignored Media",
+                          codec: "dts",
+                          channels: 8,
+                          default: 1,
+                        },
+                        {
+                          id: 889,
+                          streamType: 3,
+                          language: "Ignored Sub",
+                          codec: "ass",
+                          key: "/library/streams/889",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      });
+    }) as typeof fetch;
+
+    const meta = await client().playbackMeta("12345");
+
+    assert.equal(
+      requestedUrl,
+      `${BASE_URL}/library/metadata/12345`,
+    );
+    assert.equal(meta.durationMs, 5_400_000);
+    assert.deepEqual(meta.audio, [
+      {
+        id: "101",
+        language: "English",
+        codec: "aac",
+        channels: 2,
+        title: "Stereo",
+        default: true,
+      },
+    ]);
+    assert.deepEqual(meta.subtitle, [
+      {
+        id: "102",
+        language: "English",
+        codec: "srt",
+        title: "English SDH",
+        forced: false,
+        external: true,
+        textBased: true,
+      },
+      {
+        id: "103",
+        language: "French",
+        codec: "pgs",
+        title: "Forced FR",
+        forced: true,
+        external: false,
+        textBased: false,
+      },
+    ]);
+  });
+
+  it("returns empty stream lists when Media or Part is missing", async () => {
+    globalThis.fetch = (async () =>
+      jsonResponse(200, {
+        MediaContainer: {
+          Metadata: [{ duration: 1_000, Media: [] }],
+        },
+      })) as typeof fetch;
+
+    const meta = await client().playbackMeta("12345");
+    assert.equal(meta.durationMs, 1_000);
+    assert.deepEqual(meta.audio, []);
+    assert.deepEqual(meta.subtitle, []);
+  });
+
+  it("throws PlexServerUpstreamError when MediaContainer has no metadata", async () => {
+    globalThis.fetch = (async () =>
+      jsonResponse(200, { MediaContainer: {} })) as typeof fetch;
+
+    await assert.rejects(
+      client().playbackMeta("12345"),
+      (err: unknown) => {
+        assert.ok(err instanceof PlexServerUpstreamError);
+        assert.equal(err.status, 502);
+        return true;
+      },
+    );
   });
 });

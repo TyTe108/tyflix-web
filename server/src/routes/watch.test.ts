@@ -70,6 +70,9 @@ function baseDeps(): WatchRouterDeps {
       async episodes() {
         return [];
       },
+      async playbackMeta() {
+        return { durationMs: null, audio: [], subtitle: [] };
+      },
     } as unknown as PlexServerClient,
   };
 }
@@ -168,6 +171,8 @@ describe("GET /api/watch/movie/:tmdbId", () => {
       transient: string;
       hls: { local: string | null; remote: string };
       sessionId: string;
+      streams: { audio: unknown[]; subtitle: unknown[] };
+      durationMs: number | null;
     };
 
     assert.equal(body.mediaType, "movie");
@@ -175,6 +180,8 @@ describe("GET /api/watch/movie/:tmdbId", () => {
     assert.equal(body.ratingKey, "12345");
     assert.deepEqual(body.connections, CONNECTIONS);
     assert.equal(body.transient, TRANSIENT);
+    assert.deepEqual(body.streams, { audio: [], subtitle: [] });
+    assert.equal(body.durationMs, null);
 
     // sessionId is present and both HLS URLs are ready-to-play start.m3u8 URLs
     // carrying the ratingKey.
@@ -385,12 +392,16 @@ describe("GET /api/watch/episode/:ratingKey", () => {
       transient: string;
       hls: { local: string | null; remote: string };
       sessionId: string;
+      streams: { audio: unknown[]; subtitle: unknown[] };
+      durationMs: number | null;
     };
 
     assert.equal(body.mediaType, "episode");
     assert.equal(body.ratingKey, "54321");
     assert.deepEqual(body.connections, CONNECTIONS);
     assert.equal(body.transient, TRANSIENT);
+    assert.deepEqual(body.streams, { audio: [], subtitle: [] });
+    assert.equal(body.durationMs, null);
 
     assert.equal(typeof body.sessionId, "string");
     assert.ok(body.sessionId.length > 0);

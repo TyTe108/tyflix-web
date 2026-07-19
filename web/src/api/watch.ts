@@ -8,6 +8,25 @@ export type WatchHls = {
   remote: string;
 };
 
+export type AudioStream = {
+  id: string;
+  language: string | null;
+  codec: string | null;
+  channels: number | null;
+  title: string | null;
+  default: boolean;
+};
+
+export type SubtitleStream = {
+  id: string;
+  language: string | null;
+  codec: string | null;
+  title: string | null;
+  forced: boolean;
+  external: boolean;
+  textBased: boolean;
+};
+
 // Local to the watch flow: the backend only ever plays movies or episodes, and
 // episodes carry no tmdbId (they're keyed on a raw Plex ratingKey).
 export type WatchMediaType = "movie" | "episode";
@@ -20,6 +39,8 @@ export type WatchDescriptor = {
   transient: string;
   hls: WatchHls;
   sessionId: string;
+  streams: { audio: AudioStream[]; subtitle: SubtitleStream[] };
+  durationMs: number | null;
 };
 
 export async function fetchMovieWatch(

@@ -37,6 +37,31 @@ export type PlexEpisode = {
   title: string;
 };
 
+export type AudioStream = {
+  id: string;
+  language: string | null;
+  codec: string | null;
+  channels: number | null;
+  title: string | null;
+  default: boolean;
+};
+
+export type SubtitleStream = {
+  id: string;
+  language: string | null;
+  codec: string | null;
+  title: string | null;
+  forced: boolean;
+  external: boolean;
+  textBased: boolean;
+};
+
+export type PlaybackMeta = {
+  durationMs: number | null;
+  audio: AudioStream[];
+  subtitle: SubtitleStream[];
+};
+
 export function createPlexServerClient(options: PlexServerClientOptions) {
   const { baseUrl, token } = options;
   const itemCache = new Map<string, PlexItem>();
@@ -251,7 +276,85 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     return result;
   }
 
-  return { accounts, history, item, episodes };
+  async function playbackMeta(ratingKey: string): Promise<PlaybackMeta> {
+    const body = await getJson(`/library/metadata/${ratingKey}`);
+    const meta = firstMetadata(body);
+    if (!meta) {
+      throw new PlexServerUpstreamError(
+        `Plex playback metadata missing for ${ratingKey}`,
+        502,
+      );
+    }
+
+    const durationMs =
+      typeof meta.duration === "number" ? meta.duration : null;
+    const audio: AudioStream[] = [];
+    const subtitle: SubtitleStream[] = [];
+
+    // Transcode URLs pin mediaIndex=0/partIndex=0, so only expose streams from
+    // the first Media's first Part — later versions would map to the wrong ids.
+    const medium = asArray(meta.Media)[0];
+    const part =
+      typeof medium === "object" && medium !== null
+        ? asArray((medium as { Part?: unknown }).Part)[0]
+        : undefined;
+    const streams =
+      typeof part === "object" && part !== null
+        ? asArray((part as { Stream?: unknown }).Stream)
+        : [];
+
+    for (const stream of streams) {
+      if (typeof stream !== "object" || stream === null) {
+        continue;
+      }
+      const row = stream as {
+        id?: unknown;
+        streamType?: unknown;
+        language?: unknown;
+        codec?: unknown;
+        channels?: unknown;
+        title?: unknown;
+        default?: unknown;
+        forced?: unknown;
+        key?: unknown;
+      };
+      if (row.id === undefined || row.id === null) {
+        continue;
+      }
+      const id = String(row.id);
+      const language =
+        typeof row.language === "string" ? row.language : null;
+      const codec = typeof row.codec === "string" ? row.codec : null;
+      const title = typeof row.title === "string" ? row.title : null;
+
+      if (row.streamType === 2) {
+        audio.push({
+          id,
+          language,
+          codec,
+          channels: typeof row.channels === "number" ? row.channels : null,
+          title,
+          default: plexBool(row.default),
+        });
+      } else if (row.streamType === 3) {
+        subtitle.push({
+          id,
+          language,
+          codec,
+          title,
+          forced: plexBool(row.forced),
+          external: typeof row.key === "string" && row.key.length > 0,
+          // Heuristic: text-based codecs that can become sidecar VTT.
+          // Unknown codecs are treated as non-text (image/burn-in).
+          textBased: isTextBasedSubtitleCodec(codec),
+        });
+      }
+    }
+
+    return { durationMs, audio, subtitle };
+  }
+
+  return { accounts, history, item, episodes, playbackMeta };
 }
 
 export type PlexServerClient = ReturnType<typeof createPlexServerClient>;
@@ -278,13 +381,13 @@ function asArray(value: unknown): unknown[] {
 
 function firstMetadata(
   body: unknown,
-): { title?: unknown; Media?: unknown } | null {
+): { title?: unknown; Media?: unknown; duration?: unknown } | null {
   const rows = asArray(mediaContainer(body)?.Metadata);
   const first = rows[0];
   if (typeof first !== "object" || first === null) {
     return null;
   }
-  return first as { title?: unknown; Media?: unknown };
+  return first as { title?: unknown; Media?: unknown; duration?: unknown };
 }
 
 function sumMediaPartSizes(media: unknown): number {
@@ -304,4 +407,26 @@ function sumMediaPartSizes(media: unknown): number {
     }
   }
   return total;
+}
+
+function plexBool(value: unknown): boolean {
+  return value === true || value === 1 || value === "1";
+}
+
+function isTextBasedSubtitleCodec(codec: string | null): boolean {
+  if (codec === null) {
+    return false;
+  }
+  switch (codec.toLowerCase()) {
+    case "srt":
+    case "subrip":
+    case "ass":
+    case "ssa":
+    case "mov_text":
+    case "webvtt":
+    case "text":
+      return true;
+    default:
+      return false;
+  }
 }
