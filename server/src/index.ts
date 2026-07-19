@@ -8,6 +8,7 @@ import { apiRateLimiter } from "./middleware/rateLimit";
 import { createPlexClient } from "./plex/client";
 import { createPlexConnectionResolver } from "./plex/connection";
 import { createPlexServerClient } from "./plex/server";
+import { createTransientTokenMinter } from "./plex/transientToken";
 import { createAdminRouter } from "./routes/admin";
 import { createAuthRouter } from "./routes/auth";
 import { createDiscoverRouter } from "./routes/discover";
@@ -45,6 +46,11 @@ const plexServer = createPlexServerClient({
 const plexConnection = createPlexConnectionResolver({
   baseUrl: config.plexBaseUrl,
   token: config.plexToken,
+  clientId: config.plexClientId,
+});
+
+const transientMinter = createTransientTokenMinter({
+  baseUrl: config.plexBaseUrl,
   clientId: config.plexClientId,
 });
 
@@ -123,7 +129,13 @@ app.use(
 app.use(
   "/api/admin",
   requireAdmin(config.sessionSecret),
-  createAdminRouter({ dashboard, plexConnection }),
+  createAdminRouter({
+    dashboard,
+    plexConnection,
+    transientMinter,
+    sessionSecret: config.sessionSecret,
+    plexBaseUrl: config.plexBaseUrl,
+  }),
 );
 
 app.use(

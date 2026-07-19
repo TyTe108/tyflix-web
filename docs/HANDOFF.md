@@ -563,6 +563,17 @@ Log (newest at bottom):
   the decoded `tyflix_session` payload holds only the `enc` ciphertext (48 bytes = 12 IV + 16 GCM tag + 20-byte
   ciphertext = a 20-char Plex token, encrypted); `/api/auth/me` returns no token; `localStorage`/`sessionStorage`
   empty; cookie is httpOnly. Backward-compatible (`enc` optional → no forced logout). 118 server tests.
+- **Phase 15.2 — Connection discovery. COMPLETE + committed 2026-07-18.** New `plex/connection.ts`
+  `createPlexConnectionResolver({baseUrl, token, clientId})` → `resolveExternalUri()`: fetches our
+  `machineIdentifier` from `GET {plexBaseUrl}/identity`, then
+  `GET plex.tv/api/v2/resources?includeHttps=1&includeRelay=1` (owner token + client id), matches the resource by
+  `clientIdentifier`, and returns the connection with `local===false && relay===false` (prefers the https
+  `.plex.direct` uri). **Fail-loud** `PlexConnectionError` (→502) if no match or relay/local-only — never falls
+  back to a relay URI. ~10-min in-instance cache. Uses the owner token (the external address is user-independent).
+  A **temporary** admin-only probe `GET /api/admin/plex-connection` (remove when the play-decision endpoint lands)
+  exposes it. **Verified live** (Claude-in-Chrome, admin session): returns
+  `https://203-0-113-10.<hash>.plex.direct:32400` — the real direct-external URL, confirming the `/resources`
+  shape against the live server. 123 server tests.
 
 ## 9. Deferred / candidate future work
 
