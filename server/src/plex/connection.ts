@@ -1,7 +1,9 @@
-// Resolves our Plex Media Server's direct, external plex.direct HTTPS base URL —
-// the address a browser can stream from. Uses the OWNER token (config.plexToken),
-// never a per-user session token. Fails loud rather than ever handing back a
-// relay URI (relay is capped ~2 Mbps / SD and unusable for playback).
+// Resolves our Plex Media Server's direct plex.direct base URLs — the addresses
+// a browser can stream from. Returns BOTH the remote (external) and local URIs
+// so the player can use whichever the client can reach (a LAN browser can't hit
+// the external public IP via NAT hairpin). Uses the OWNER token
+// (config.plexToken), never a per-user session token. Relay connections are
+// excluded entirely (relay is capped ~2 Mbps / SD and unusable for playback).
 
 export class PlexConnectionError extends Error {
   readonly status: number;
@@ -22,6 +24,13 @@ export type PlexConnectionResolverOptions = {
   clientId: string;
 };
 
+// Direct plex.direct URIs for our server. remote is required (external,
+// browser-reachable off-LAN); local is null when the server advertises none.
+export type PlexConnections = {
+  local: string | null;
+  remote: string;
+};
+
 // A single connection entry from plex.tv/api/v2/resources. Only the fields we
 // rely on are typed; the live payload also carries address, port, and IPv6.
 type PlexResourceConnection = {
@@ -34,7 +43,7 @@ type PlexResourceConnection = {
 const RESOURCES_URL =
   "https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1";
 
-// The resolved URI rarely changes, so cache it briefly to avoid re-hitting
+// The resolved URIs rarely change, so cache them briefly to avoid re-hitting
 // plex.tv on every play decision.
 const CACHE_TTL_MS = 10 * 60 * 1000;
 
@@ -42,22 +51,22 @@ export function createPlexConnectionResolver(
   options: PlexConnectionResolverOptions,
 ) {
   const { baseUrl, token, clientId } = options;
-  let cache: { uri: string; expiresAt: number } | null = null;
+  let cache: { value: PlexConnections; expiresAt: number } | null = null;
 
-  // Returns our server's direct, external HTTPS (.plex.direct) base URL.
-  // Throws PlexConnectionError if the server can't be matched or only
-  // relay/local connections exist.
-  async function resolveExternalUri(): Promise<string> {
+  // Returns our server's direct local + remote HTTPS (.plex.direct) base URLs.
+  // Throws PlexConnectionError if the server can't be matched or exposes no
+  // non-relay remote connection.
+  async function resolveConnections(): Promise<PlexConnections> {
     const now = Date.now();
     if (cache !== null && cache.expiresAt > now) {
-      return cache.uri;
+      return cache.value;
     }
 
     const machineIdentifier = await fetchMachineIdentifier();
-    const uri = await fetchDirectExternalUri(machineIdentifier);
+    const value = await fetchDirectConnections(machineIdentifier);
 
-    cache = { uri, expiresAt: now + CACHE_TTL_MS };
-    return uri;
+    cache = { value, expiresAt: now + CACHE_TTL_MS };
+    return value;
   }
 
   async function fetchMachineIdentifier(): Promise<string> {
@@ -84,9 +93,9 @@ export function createPlexConnectionResolver(
     return machineIdentifier;
   }
 
-  async function fetchDirectExternalUri(
+  async function fetchDirectConnections(
     machineIdentifier: string,
-  ): Promise<string> {
+  ): Promise<PlexConnections> {
     const body = await getJson(RESOURCES_URL, {
       "X-Plex-Token": token,
       "X-Plex-Client-Identifier": clientId,
@@ -117,28 +126,28 @@ export function createPlexConnectionResolver(
       (resource as { connections?: unknown }).connections,
     );
 
-    // Direct external only: never local, never relay. Relay is bandwidth-capped
-    // and unusable for streaming, so we do NOT fall back to it.
-    const external = connections.filter(
-      (conn) => conn.local === false && conn.relay === false,
+    // Relay is bandwidth-capped and unusable for streaming, so it is excluded
+    // from both local and remote — we never fall back to it.
+    const remote = pickPreferredUri(
+      connections.filter(
+        (conn) => conn.local === false && conn.relay === false,
+      ),
     );
 
-    if (external.length === 0) {
+    if (remote === null) {
       throw new PlexConnectionError(
-        "Plex server has no direct external connection (relay/local only)",
+        "Plex server has no direct remote connection (relay/local only)",
       );
     }
 
-    // Prefer the HTTPS .plex.direct URI (valid cert + streamable in a browser).
-    const preferred =
-      external.find(
-        (conn) =>
-          conn.protocol === "https" && conn.uri.includes(".plex.direct"),
-      ) ??
-      external.find((conn) => conn.protocol === "https") ??
-      external[0];
+    // local is best-effort — null when the server advertises none.
+    const local = pickPreferredUri(
+      connections.filter(
+        (conn) => conn.local === true && conn.relay === false,
+      ),
+    );
 
-    return preferred.uri;
+    return { local, remote };
   }
 
   async function getJson(
@@ -163,12 +172,27 @@ export function createPlexConnectionResolver(
     return res.json();
   }
 
-  return { resolveExternalUri };
+  return { resolveConnections };
 }
 
 export type PlexConnectionResolver = ReturnType<
   typeof createPlexConnectionResolver
 >;
+
+// Prefer the HTTPS .plex.direct URI (valid cert + streamable in a browser),
+// then any https, then whatever is left. Returns null for an empty list.
+function pickPreferredUri(
+  connections: PlexResourceConnection[],
+): string | null {
+  const preferred =
+    connections.find(
+      (conn) => conn.protocol === "https" && conn.uri.includes(".plex.direct"),
+    ) ??
+    connections.find((conn) => conn.protocol === "https") ??
+    connections[0];
+
+  return preferred?.uri ?? null;
+}
 
 function parseConnections(value: unknown): PlexResourceConnection[] {
   if (!Array.isArray(value)) {

@@ -72,7 +72,7 @@ function stubFetch(handlers: StubHandlers) {
 }
 
 describe("createPlexConnectionResolver", () => {
-  it("selects the direct external https connection from a mixed list", async () => {
+  it("selects both local and remote direct connections from a mixed list", async () => {
     stubFetch({
       resources: () =>
         jsonResponse(200, [
@@ -113,17 +113,93 @@ describe("createPlexConnectionResolver", () => {
         ]),
     });
 
-    const uri = await resolver().resolveExternalUri();
-    assert.equal(uri, DIRECT_URI);
+    const connections = await resolver().resolveConnections();
+    assert.deepEqual(connections, { local: LOCAL_URI, remote: DIRECT_URI });
   });
 
-  it("caches the resolved uri so repeated calls don't re-hit plex.tv", async () => {
+  it("excludes relay connections from both local and remote", async () => {
+    stubFetch({
+      resources: () =>
+        jsonResponse(200, [
+          {
+            clientIdentifier: MACHINE_ID,
+            connections: [
+              // A local relay must NOT become the local URI.
+              {
+                protocol: "https",
+                uri: "https://local-relay.machine-abc.plex.direct:8443",
+                local: true,
+                relay: true,
+              },
+              {
+                protocol: "https",
+                uri: LOCAL_URI,
+                local: true,
+                relay: false,
+              },
+              {
+                protocol: "https",
+                uri: DIRECT_URI,
+                local: false,
+                relay: false,
+              },
+              // A remote relay must NOT become the remote URI.
+              {
+                protocol: "https",
+                uri: RELAY_URI,
+                local: false,
+                relay: true,
+              },
+            ],
+          },
+        ]),
+    });
+
+    const connections = await resolver().resolveConnections();
+    assert.deepEqual(connections, { local: LOCAL_URI, remote: DIRECT_URI });
+  });
+
+  it("returns local null when the server advertises no local connection", async () => {
+    stubFetch({
+      resources: () =>
+        jsonResponse(200, [
+          {
+            clientIdentifier: MACHINE_ID,
+            connections: [
+              {
+                protocol: "https",
+                uri: DIRECT_URI,
+                local: false,
+                relay: false,
+              },
+              {
+                protocol: "https",
+                uri: RELAY_URI,
+                local: false,
+                relay: true,
+              },
+            ],
+          },
+        ]),
+    });
+
+    const connections = await resolver().resolveConnections();
+    assert.deepEqual(connections, { local: null, remote: DIRECT_URI });
+  });
+
+  it("caches the resolved connections so repeated calls don't re-hit plex.tv", async () => {
     const calls = stubFetch({
       resources: () =>
         jsonResponse(200, [
           {
             clientIdentifier: MACHINE_ID,
             connections: [
+              {
+                protocol: "https",
+                uri: LOCAL_URI,
+                local: true,
+                relay: false,
+              },
               {
                 protocol: "https",
                 uri: DIRECT_URI,
@@ -136,16 +212,16 @@ describe("createPlexConnectionResolver", () => {
     });
 
     const r = resolver();
-    const first = await r.resolveExternalUri();
-    const second = await r.resolveExternalUri();
+    const first = await r.resolveConnections();
+    const second = await r.resolveConnections();
 
-    assert.equal(first, DIRECT_URI);
-    assert.equal(second, DIRECT_URI);
+    assert.deepEqual(first, { local: LOCAL_URI, remote: DIRECT_URI });
+    assert.equal(second, first);
     assert.equal(calls.identity, 1);
     assert.equal(calls.resources, 1);
   });
 
-  it("throws when only relay/local connections are available", async () => {
+  it("throws when only relay/local connections are available (no remote)", async () => {
     stubFetch({
       resources: () =>
         jsonResponse(200, [
@@ -170,7 +246,7 @@ describe("createPlexConnectionResolver", () => {
     });
 
     await assert.rejects(
-      () => resolver().resolveExternalUri(),
+      () => resolver().resolveConnections(),
       (err: unknown) => err instanceof PlexConnectionError,
     );
   });
@@ -194,7 +270,7 @@ describe("createPlexConnectionResolver", () => {
     });
 
     await assert.rejects(
-      () => resolver().resolveExternalUri(),
+      () => resolver().resolveConnections(),
       (err: unknown) => err instanceof PlexConnectionError,
     );
   });
@@ -205,7 +281,7 @@ describe("createPlexConnectionResolver", () => {
     });
 
     await assert.rejects(
-      () => resolver().resolveExternalUri(),
+      () => resolver().resolveConnections(),
       (err: unknown) => err instanceof PlexConnectionError,
     );
   });

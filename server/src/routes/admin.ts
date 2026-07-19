@@ -53,8 +53,8 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // play-decision endpoint lands.
   router.get("/plex-connection", async (_req, res) => {
     try {
-      const uri = await plexConnection.resolveExternalUri();
-      res.json({ uri });
+      const { local, remote } = await plexConnection.resolveConnections();
+      res.json({ local, remote });
     } catch (err) {
       respondUpstreamError(res, err);
     }
@@ -94,7 +94,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
 
     try {
       const transient = await transientMinter.mint(userToken);
-      const directUri = await plexConnection.resolveExternalUri();
+      const { remote: directUri } = await plexConnection.resolveConnections();
       const authenticatesAgainstServer = await verifyAgainstServer(
         plexBaseUrl,
         transient,

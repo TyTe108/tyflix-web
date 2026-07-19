@@ -588,6 +588,21 @@ Log (newest at bottom):
   **NAT-hairpin design note:** a tyflix user **on the home LAN** hits the same wall against the external
   plex.direct URL in-browser → the 15.4 play-decision endpoint must hand the browser BOTH local + remote
   connection URIs (the 15.2 resolver currently returns only the external one).
+- **Phase 15.4 — ratingKey resolution. COMPLETE + committed 2026-07-18.** `SeerrMediaListItem` gained
+  `ratingKey: string | null`; `mapSeerrMediaListItem` extracts it leniently (string as-is, number→String, else
+  null — never drops the item). `mediaStatusProvider` builds a `mediaType:tmdbId → ratingKey` map from the same
+  cached `listMedia()` and exposes `getRatingKey(mediaType, tmdbId)` (null when untracked/keyless; degrades to
+  null on Seerr failure, never throws). Temporary admin probe `GET /api/admin/plex-ratingkey?type=&tmdbId=`
+  (400 on bad params; remove when the play endpoint lands). **Live finding** (Claude-in-Chrome, admin): Seerr
+  `/api/v1/media` carries `ratingKey` for **all movies (10/10)** and **most TV (3/4)** — but an *available* title
+  can still be null (e.g. "Little House on the Prairie", a Seerr↔Plex data gap), so the play endpoint MUST
+  fail-loud on null. A TV show's key is the show *container* → TV playback needs episode selection. 128 server
+  tests.
+- **Phase 15 roadmap (revised 2026-07-18 — MOVIES FIRST, TV episode-browser deferred):** 15.5 connection
+  resolver returns BOTH local + remote URIs (a LAN-based tyflix user hits NAT hairpin on the external plex.direct
+  URL in-browser) → 15.6 movie play-decision endpoint `GET /api/watch/movie/:tmdbId` (ratingKey→transient→
+  connections; fail-loud on null ratingKey; TV not-yet-supported; retire the 3 temp probes) → 15.7 frontend
+  player (hls.js + Play on available movies + CSP must allow `*.plex.direct` in connect-src/media-src).
 
 ## 9. Deferred / candidate future work
 
