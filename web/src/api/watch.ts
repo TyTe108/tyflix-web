@@ -1,5 +1,3 @@
-import type { MediaType } from "./discover";
-
 export type WatchConnections = {
   local: string | null;
   remote: string;
@@ -10,9 +8,13 @@ export type WatchHls = {
   remote: string;
 };
 
+// Local to the watch flow: the backend only ever plays movies or episodes, and
+// episodes carry no tmdbId (they're keyed on a raw Plex ratingKey).
+export type WatchMediaType = "movie" | "episode";
+
 export type WatchDescriptor = {
-  mediaType: MediaType;
-  tmdbId: number;
+  mediaType: WatchMediaType;
+  tmdbId?: number;
   ratingKey: string;
   connections: WatchConnections;
   transient: string;
@@ -23,7 +25,17 @@ export type WatchDescriptor = {
 export async function fetchMovieWatch(
   tmdbId: number,
 ): Promise<WatchDescriptor> {
-  const res = await fetch(`/api/watch/movie/${tmdbId}`);
+  return fetchWatch(`/api/watch/movie/${tmdbId}`);
+}
+
+export async function fetchEpisodeWatch(
+  ratingKey: string,
+): Promise<WatchDescriptor> {
+  return fetchWatch(`/api/watch/episode/${ratingKey}`);
+}
+
+async function fetchWatch(path: string): Promise<WatchDescriptor> {
+  const res = await fetch(path);
   if (!res.ok) {
     // Surface the backend's { error } message when present (e.g. 404 "not
     // playable", 409 "re-login required") so the UI can show why.

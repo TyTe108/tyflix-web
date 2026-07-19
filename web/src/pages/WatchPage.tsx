@@ -1,7 +1,11 @@
 import Hls from "hls.js";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { fetchMovieWatch, type WatchDescriptor } from "../api/watch";
+import {
+  fetchEpisodeWatch,
+  fetchMovieWatch,
+  type WatchDescriptor,
+} from "../api/watch";
 
 type LoadStatus = "loading" | "ready" | "error";
 
@@ -14,7 +18,15 @@ function parseTmdbId(raw: string | undefined): number | null {
 }
 
 export function WatchPage() {
-  const { tmdbId: rawTmdbId } = useParams<{ tmdbId: string }>();
+  const { tmdbId: rawTmdbId, ratingKey: rawRatingKey } = useParams<{
+    tmdbId: string;
+    ratingKey: string;
+  }>();
+  // The /watch/episode/:ratingKey route always supplies ratingKey; the
+  // /watch/movie/:tmdbId route supplies tmdbId. Pick the source accordingly.
+  const isEpisode = rawRatingKey !== undefined;
+  const ratingKey =
+    isEpisode && /^\d+$/.test(rawRatingKey) ? rawRatingKey : null;
   const tmdbId = parseTmdbId(rawTmdbId);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [descriptor, setDescriptor] = useState<WatchDescriptor | null>(null);
@@ -22,10 +34,19 @@ export function WatchPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (tmdbId === null) {
+    let load: (() => Promise<WatchDescriptor>) | null = null;
+    if (isEpisode) {
+      if (ratingKey !== null) {
+        load = () => fetchEpisodeWatch(ratingKey);
+      }
+    } else if (tmdbId !== null) {
+      load = () => fetchMovieWatch(tmdbId);
+    }
+
+    if (load === null) {
       setDescriptor(null);
       setStatus("error");
-      setError("Invalid title");
+      setError(isEpisode ? "Invalid episode" : "Invalid title");
       return;
     }
 
@@ -34,7 +55,7 @@ export function WatchPage() {
     setError(null);
     setDescriptor(null);
 
-    void fetchMovieWatch(tmdbId)
+    void load()
       .then((result) => {
         if (cancelled) {
           return;
@@ -54,7 +75,7 @@ export function WatchPage() {
     return () => {
       cancelled = true;
     };
-  }, [tmdbId]);
+  }, [isEpisode, ratingKey, tmdbId]);
 
   // Wire up playback once a descriptor is ready. Tries the local connection
   // first and falls back to the remote one on a fatal hls.js error.

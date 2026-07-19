@@ -28,6 +28,7 @@ export function App() {
           <Route path="/issues/:id" element={<IssueDetailPage />} />
           <Route path="/media/:type/:id" element={<MediaDetailPage />} />
           <Route path="/watch/movie/:tmdbId" element={<WatchPage />} />
+          <Route path="/watch/episode/:ratingKey" element={<WatchPage />} />
           <Route path="/person/:id" element={<PersonPage />} />
           <Route path="/collection/:id" element={<CollectionPage />} />
           <Route element={<AdminRoute />}>
