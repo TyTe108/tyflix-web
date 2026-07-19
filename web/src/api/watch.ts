@@ -34,6 +34,40 @@ export async function fetchEpisodeWatch(
   return fetchWatch(`/api/watch/episode/${ratingKey}`);
 }
 
+export type Episode = {
+  ratingKey: string;
+  seasonNumber: number;
+  episodeNumber: number;
+  title: string;
+};
+
+export type EpisodesResponse = {
+  showRatingKey: string;
+  episodes: Episode[];
+};
+
+export async function fetchEpisodes(
+  tmdbId: number,
+): Promise<EpisodesResponse> {
+  const res = await fetch(`/api/watch/tv/${tmdbId}/episodes`);
+  if (!res.ok) {
+    // Surface the backend's { error } message when present (e.g. 404 "not
+    // playable") so the UI can show why.
+    const message = await readErrorMessage(res);
+    throw new Error(message ?? `Failed to load episodes (${res.status})`);
+  }
+  const body = (await res.json()) as {
+    showRatingKey?: unknown;
+    episodes?: unknown;
+  };
+  return {
+    showRatingKey: String(body.showRatingKey ?? ""),
+    episodes: Array.isArray(body.episodes)
+      ? (body.episodes as Episode[])
+      : [],
+  };
+}
+
 async function fetchWatch(path: string): Promise<WatchDescriptor> {
   const res = await fetch(path);
   if (!res.ok) {

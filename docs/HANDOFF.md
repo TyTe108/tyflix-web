@@ -680,6 +680,16 @@ Log (newest at bottom):
   own Plex transient (Plex enforces access; no Seerr re-check). **Verified live**: `/api/watch/episode/2517`
   (Severance S1E1) → descriptor + fetching the local `start.m3u8` returns a real playlist
   (`#EXTM3U … RESOLUTION=1920x1080`, HTTP 200) — the episode transcodes. 151 server tests.
+- **Phase 16.3 — Episode playback route. COMPLETE + committed 2026-07-19.** `web/src/api/watch.ts`:
+  `WatchDescriptor.mediaType` generalized to `"movie" | "episode"`, `tmdbId` optional; added
+  `fetchEpisodeWatch(ratingKey)` (shared `fetchWatch` helper). `App.tsx`: new route `/watch/episode/:ratingKey`
+  → the same `WatchPage`, which now picks the source by route param (episode ratingKey vs movie tmdbId); the
+  hls.js player effect is unchanged. **Verified live in-browser**: `/watch/episode/2517` (Severance S1E1) plays
+  — "An Apple Original" intro at 0:06/57:17, 1080p, video + audio decoding. **Caveat:** the episode transcode
+  cold-started slowly (~25s to first segments vs seconds for movies) — likely an HEVC source on CPU transcode
+  (HW transcode on the Arc A380 unconfirmed) compounded by several concurrent test transcode sessions; plays
+  fine once started. If TV startup/rebuffering is sluggish in real use, the levers are the deferred
+  HW-transcode + bitrate/resolution-cap items.
 
 ## 9. Deferred / candidate future work
 

@@ -31,6 +31,7 @@ import {
   type RequestProfiles,
 } from "../api/requests";
 import { useAuth } from "../auth/AuthContext";
+import { EpisodeBrowser } from "../components/EpisodeBrowser";
 import { MediaCard } from "../components/MediaCard";
 
 type LoadStatus = "loading" | "ready" | "error";
@@ -326,7 +327,15 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
           </section>
         ) : null}
 
-        {detail.mediaType === "tv" ? (
+        {detail.mediaType === "tv" &&
+        (detail.mediaStatus === "available" ||
+          detail.mediaStatus === "partially_available") ? (
+          <EpisodeBrowser tmdbId={detail.tmdbId} />
+        ) : null}
+
+        {detail.mediaType === "tv" &&
+        detail.mediaStatus !== "available" &&
+        detail.mediaStatus !== "partially_available" ? (
           <section
             className="media-detail-seasons"
             aria-labelledby="seasons-heading"
