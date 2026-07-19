@@ -3,7 +3,7 @@
 > Living doc. Its job is to let a fresh conversation pick up this project cold.
 > Keep it current; delete guidance notes as you go.
 >
-> **Last updated after:** Phase 14 (2026-07-17). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. **Deployed 2026-07-17 at `tyflix.tylerte.dev`** (Phase 4). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
+> **Last updated after:** Phase 15.1 (2026-07-18; playback work started — see §8). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. **Deployed 2026-07-17 at `tyflix.tylerte.dev`** (Phase 4). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
 > **Working name:** "Tyflix Web" / repo `tyflix-web` — rename freely.
 
 ---
@@ -545,6 +545,24 @@ Log (newest at bottom):
   rsync copy is kept as `tyflix-web.rsync-bak`. **Redeploy = `git pull && docker compose up -d --build`** in that
   dir (`.env` + `docker-compose.yml` are untracked/gitignored and survive pulls). Phase 14 was the first redeploy
   via this flow.
+- **Phase 15 — Playback (direct play via Plex). STARTED 2026-07-18.** First feature *beyond* Seerr parity
+  (Seerr can't play media). Chosen architecture: the browser plays **directly** from the server's `plex.direct`
+  URI (bypasses the Cloudflare tunnel) using a per-user Plex **transient token**; Plex does the transcode +
+  delivery. Full Considered/Rejected/Chosen decision log in `docs/phase-15-streaming-spec.md`. Increments:
+  15.1 token custody → 15.2 connection discovery → 15.3 play-decision endpoint → 15.4 player + Play button →
+  15.5 progress/resume. Gating prereqs (config, not code): Plex HW transcode on the Arc A380; PMS patched past
+  1.42.2.10156 (transient-token escalation bug). Known upcoming change: the helmet CSP (`connect-src`/`media-src`
+  = `'self'`) must allow `*.plex.direct` for the 15.4 player — deferred to that increment.
+- **Phase 15.1 — Token custody. COMPLETE + committed 2026-07-18.** Login now captures the user's Plex
+  `authToken` and retains it in the session **encrypted** (AES-256-GCM; 32-byte key HKDF-derived from
+  `SESSION_SECRET` with a distinct info label — no new env var/config), stored as the optional `enc` field
+  inside the signed cookie payload. Recovered server-side only via a new `readPlexToken(session, secret)`
+  (returns null for pre-change sessions; throws `TokenDecryptError` on a present-but-corrupt/tampered blob).
+  `issueSession` now takes the plaintext token and encrypts internally; the sole caller (`auth.ts /plex/check`)
+  passes `authToken`. Plaintext never reaches the browser or any response — **verified live** (Claude-in-Chrome):
+  the decoded `tyflix_session` payload holds only the `enc` ciphertext (48 bytes = 12 IV + 16 GCM tag + 20-byte
+  ciphertext = a 20-char Plex token, encrypted); `/api/auth/me` returns no token; `localStorage`/`sessionStorage`
+  empty; cookie is httpOnly. Backward-compatible (`enc` optional → no forced logout). 118 server tests.
 
 ## 9. Deferred / candidate future work
 
@@ -597,5 +615,7 @@ safe to delete).
 - `docs/phase-5-replacement-spec.md` — **SUPERSEDED / HISTORICAL.** Describes the own-store request MVP we
   built (5.1–5.7) then retired in the 2026-07-15 Seerr-backed pivot. Kept for decision history; do NOT build
   from it — the live architecture is §3 + the Phase 5 log above.
+- `docs/phase-15-streaming-spec.md` — **Phase 15 (playback) design + decision log**: direct-play via Plex +
+  transient token. Current; implementation in progress (15.1 done).
 - Reference (external): `Home Media Server/dashboard/app/main.py` — the dashboard analytics/metrics source of
   truth (proxied by Phase 3).
