@@ -9,6 +9,7 @@ import {
   PlexTransientError,
   type TransientTokenMinter,
 } from "../plex/transientToken";
+import type { PlexServerClient } from "../plex/server";
 import type { MediaStatusProvider } from "../seerr/mediaStatusProvider";
 import { readPlexToken, type SessionPayload } from "../session";
 
@@ -16,6 +17,7 @@ export type WatchRouterDeps = {
   plexConnection: PlexConnectionResolver;
   transientMinter: TransientTokenMinter;
   mediaStatus: MediaStatusProvider;
+  plexServer: PlexServerClient;
   sessionSecret: string;
   plexClientId: string;
 };
@@ -25,6 +27,7 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     plexConnection,
     transientMinter,
     mediaStatus,
+    plexServer,
     sessionSecret,
     plexClientId,
   } = deps;
@@ -103,6 +106,30 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
         hls,
         sessionId,
       });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
+  router.get("/tv/:tmdbId/episodes", async (req, res) => {
+    const tmdbIdRaw = req.params.tmdbId;
+    if (!/^\d+$/.test(tmdbIdRaw)) {
+      res.status(400).json({ error: "tmdbId must be numeric" });
+      return;
+    }
+    const tmdbId = Number(tmdbIdRaw);
+
+    try {
+      // Some shows have no Seerr show-level ratingKey — a request-based
+      // fallback is a later increment, so treat that as not playable for now.
+      const showRatingKey = await mediaStatus.getRatingKey("tv", tmdbId);
+      if (showRatingKey === null) {
+        res.status(404).json({ error: "not playable" });
+        return;
+      }
+
+      const episodes = await plexServer.episodes(showRatingKey);
+      res.json({ tmdbId, showRatingKey, episodes });
     } catch (err) {
       respondUpstreamError(res, err);
     }

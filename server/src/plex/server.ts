@@ -30,6 +30,13 @@ export type PlexItem = {
   episodes: PlexEpisodeLeaf[] | null;
 };
 
+export type PlexEpisode = {
+  ratingKey: string;
+  seasonNumber: number;
+  episodeNumber: number;
+  title: string;
+};
+
 export function createPlexServerClient(options: PlexServerClientOptions) {
   const { baseUrl, token } = options;
   const itemCache = new Map<string, PlexItem>();
@@ -206,7 +213,45 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     return { title, sizeBytes, episodes };
   }
 
-  return { accounts, history, item };
+  async function episodes(showRatingKey: string): Promise<PlexEpisode[]> {
+    const leavesBody = await getJson(
+      `/library/metadata/${showRatingKey}/allLeaves`,
+    );
+    const leaves = asArray(mediaContainer(leavesBody)?.Metadata);
+    const result: PlexEpisode[] = [];
+
+    for (const row of leaves) {
+      if (typeof row !== "object" || row === null) {
+        continue;
+      }
+      const rk = (row as { ratingKey?: unknown }).ratingKey;
+      const season = (row as { parentIndex?: unknown }).parentIndex;
+      const episode = (row as { index?: unknown }).index;
+      const title = (row as { title?: unknown }).title;
+      if (
+        rk === undefined ||
+        rk === null ||
+        typeof season !== "number" ||
+        typeof episode !== "number"
+      ) {
+        continue;
+      }
+      result.push({
+        ratingKey: String(rk),
+        seasonNumber: season,
+        episodeNumber: episode,
+        title: typeof title === "string" ? title : "",
+      });
+    }
+
+    result.sort(
+      (a, b) =>
+        a.seasonNumber - b.seasonNumber || a.episodeNumber - b.episodeNumber,
+    );
+    return result;
+  }
+
+  return { accounts, history, item, episodes };
 }
 
 export type PlexServerClient = ReturnType<typeof createPlexServerClient>;

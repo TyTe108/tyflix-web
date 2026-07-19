@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import express from "express";
 import { requireAuth } from "../middleware/auth";
 import type { PlexConnectionResolver } from "../plex/connection";
+import type { PlexEpisode, PlexServerClient } from "../plex/server";
 import type { TransientTokenMinter } from "../plex/transientToken";
 import type { MediaStatusProvider } from "../seerr/mediaStatusProvider";
 import { issueSession, SESSION_COOKIE_NAME } from "../session";
@@ -65,6 +66,11 @@ function baseDeps(): WatchRouterDeps {
         return CONNECTIONS;
       },
     } as PlexConnectionResolver,
+    plexServer: {
+      async episodes() {
+        return [];
+      },
+    } as unknown as PlexServerClient,
   };
 }
 
@@ -222,6 +228,108 @@ describe("GET /api/watch/movie/:tmdbId", () => {
     assert.equal(body.hls.local, null);
     assert.ok(body.hls.remote.includes("start.m3u8"));
     assert.ok(body.hls.remote.includes(body.sessionId));
+  });
+});
+
+describe("GET /api/watch/tv/:tmdbId/episodes", () => {
+  it("rejects a non-numeric tmdbId with 400", async () => {
+    const app = createApp(baseDeps());
+    const response = await fetchLocal(
+      app,
+      "/api/watch/tv/abc/episodes",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: "tmdbId must be numeric" });
+  });
+
+  it("returns 404 when the show has no Plex ratingKey", async () => {
+    const deps = baseDeps();
+    deps.mediaStatus = {
+      async getStatusMap() {
+        return new Map();
+      },
+      async getMediaId() {
+        return null;
+      },
+      async getRatingKey() {
+        return null;
+      },
+    } as MediaStatusProvider;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/tv/1399/episodes",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 404);
+    assert.deepEqual(await response.json(), { error: "not playable" });
+  });
+
+  it("returns the episode list for a resolved show ratingKey", async () => {
+    const episodes: PlexEpisode[] = [
+      { ratingKey: "201", seasonNumber: 1, episodeNumber: 1, title: "Pilot" },
+      { ratingKey: "202", seasonNumber: 1, episodeNumber: 2, title: "Second" },
+    ];
+    let ratingKeyArgs: [string, number] | null = null;
+    let episodesArg: string | null = null;
+
+    const deps = baseDeps();
+    deps.mediaStatus = {
+      async getStatusMap() {
+        return new Map();
+      },
+      async getMediaId() {
+        return null;
+      },
+      async getRatingKey(mediaType: "movie" | "tv", tmdbId: number) {
+        ratingKeyArgs = [mediaType, tmdbId];
+        return "9000";
+      },
+    } as MediaStatusProvider;
+    deps.plexServer = {
+      async episodes(showRatingKey: string) {
+        episodesArg = showRatingKey;
+        return episodes;
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/tv/1399/episodes",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      tmdbId: 1399,
+      showRatingKey: "9000",
+      episodes,
+    });
+    assert.deepEqual(ratingKeyArgs, ["tv", 1399]);
+    assert.equal(episodesArg, "9000");
+  });
+
+  it("returns 502 when the Plex lookup fails upstream", async () => {
+    const deps = baseDeps();
+    deps.plexServer = {
+      async episodes() {
+        throw new Error("Plex server allLeaves failed (503)");
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/tv/1399/episodes",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 502);
   });
 });
 

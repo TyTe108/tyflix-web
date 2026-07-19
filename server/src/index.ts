@@ -172,6 +172,7 @@ app.use(
     plexConnection,
     transientMinter,
     mediaStatus,
+    plexServer,
     sessionSecret: config.sessionSecret,
     plexClientId: config.plexClientId,
   }),
