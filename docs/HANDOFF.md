@@ -3,7 +3,7 @@
 > Living doc. Its job is to let a fresh conversation pick up this project cold.
 > Keep it current; delete guidance notes as you go.
 >
-> **Last updated after:** Phase 15.10 (2026-07-19; **movie playback SHIPPED** — see §8; TV playback is the next chapter). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. **Deployed 2026-07-17 at `tyflix.tylerte.dev`** (Phase 4). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
+> **Last updated after:** Phase 16.4 (2026-07-19; **movie + TV playback SHIPPED** — see §8). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. **Deployed 2026-07-17 at `tyflix.tylerte.dev`** (Phase 4). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
 > **Working name:** "Tyflix Web" / repo `tyflix-web` — rename freely.
 
 ---
@@ -690,6 +690,20 @@ Log (newest at bottom):
   (HW transcode on the Arc A380 unconfirmed) compounded by several concurrent test transcode sessions; plays
   fine once started. If TV startup/rebuffering is sluggish in real use, the levers are the deferred
   HW-transcode + bitrate/resolution-cap items.
+- **Phase 16.4 — Episode browser UI. COMPLETE + committed 2026-07-19.** New `web/src/components/
+  EpisodeBrowser.tsx` ({tmdbId}) fetches `/api/watch/tv/:tmdbId/episodes` (via new `fetchEpisodes` in
+  `api/watch.ts`), groups by season, and renders each episode as `E{n} · {title}` + a `.btn` Play Link to
+  `/watch/episode/{ratingKey}`; loading/error+retry states. `MediaDetailPage` shows `<EpisodeBrowser>` for
+  available TV (available/partially_available) and keeps the static TMDB seasons list for non-available TV;
+  movies unaffected. **Verified live in-browser**: Severance page → S1 E1–E9 + S2 E1–E2 with Play buttons →
+  clicking Play → `/watch/episode/2513` streams the episode (0:06/37:26, "An Apple Original", subtitles).
+- **✅ PHASE 16 — TV PLAYBACK SHIPPED (2026-07-19).** 16.1–16.4 complete + verified live: open a show → browse
+  seasons/episodes → per-episode Play → the episode streams in-browser, reusing the entire movie pipeline
+  (encrypted token → transient → both plex.direct connections → forced-H.264 transcode → hls.js) keyed on the
+  episode's Plex ratingKey. **Both movies and TV now play end-to-end.** Deferred (unchanged): enable Plex HW
+  transcode on the Arc A380 (slow episode cold-start), a bitrate/resolution cap for remote users, and a
+  request-based `request.media.ratingKey` fallback for TV shows with a null Seerr show ratingKey (e.g. Little
+  House).
 
 ## 9. Deferred / candidate future work
 
