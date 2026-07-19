@@ -3,7 +3,7 @@
 > Living doc. Its job is to let a fresh conversation pick up this project cold.
 > Keep it current; delete guidance notes as you go.
 >
-> **Last updated after:** Phase 15.1 (2026-07-18; playback work started — see §8). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. **Deployed 2026-07-17 at `tyflix.tylerte.dev`** (Phase 4). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
+> **Last updated after:** Phase 15.10 (2026-07-19; **movie playback SHIPPED** — see §8; TV playback is the next chapter). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. **Deployed 2026-07-17 at `tyflix.tylerte.dev`** (Phase 4). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
 > **Working name:** "Tyflix Web" / repo `tyflix-web` — rename freely.
 
 ---
@@ -642,13 +642,21 @@ Log (newest at bottom):
   currentTime advancing, and `webkitAudioDecodedByteCount>0` confirms **MP3 audio decodes** too. Dev caveat: Vite
   serves the SPA in dev so the CSP isn't exercised there (correct in code; applies in prod). **Movie playback
   works end-to-end.**
-- **Phase 15 roadmap (revised 2026-07-19 — MOVIES FIRST):** 15.1–15.9 DONE + verified live in-browser (movie
-  video **plays**, AAC + MP3 audio confirmed). Remaining: **15.10** — Play button on `MediaDetailPage` for
-  available movies (the user-facing entry point) + retire the 4 temporary admin probes (`/api/admin/plex-*`) and
-  their now-dead deps. Then Phase 15 (movies) is SHIPPED. **Deferred optimizations:** the transcode profile sets
-  no bitrate/resolution cap → Plex transcodes at full source res (fine on LAN, heavy for remote users) — add a
-  quality cap later; the aac audio target isn't honored (mp3 out, but plays). **TV playback (episode browser) is
-  the next chapter.**
+- **Phase 15.10 — Play button + probe cleanup. COMPLETE + committed 2026-07-19.** `MediaDetailPage` shows a
+  `▶ Play` `.btn` Link to `/watch/movie/:tmdbId` for available **movies** only (mediaType movie + status
+  available/partially_available); TV/non-available show none. The 4 temporary admin probes (`/plex-connection`,
+  `/plex-transient`, `/plex-ratingkey`, `/plex-transcode`) + all probe-only deps/imports/helpers removed from
+  `routes/admin.ts` (back to proxy-only, `AdminRouterDeps = { dashboard }`); `index.ts` calls
+  `createAdminRouter({ dashboard })` (shared plex services kept for `/api/watch`). **Verified live**
+  (Claude-in-Chrome): on the Les Misérables page, clicked ▶ Play → navigated to `/watch/movie/82695` → video
+  **playing** (readyState 4, currentTime advancing). 141 server tests.
+- **✅ PHASE 15 — MOVIE PLAYBACK SHIPPED (2026-07-19).** 15.1–15.10 complete + verified live end-to-end: a user
+  clicks Play on an available movie and it streams in-browser (Plex login → encrypted session token → per-user
+  transient → direct `plex.direct` connection → Seerr ratingKey → forced-H.264 universal transcode → hls.js).
+  AAC + MP3 audio both confirmed. **Deferred optimizations:** transcode has no bitrate/resolution cap (full-res,
+  heavy for remote users) — add a quality cap; the aac audio target isn't honored (mp3 out, plays fine).
+  **NEXT CHAPTER: TV playback** — needs a season/episode browser (a TV show's ratingKey is the show *container*
+  → pick an episode → its ratingKey; and some available shows lack even a show-level ratingKey — see 15.4).
 
 ## 9. Deferred / candidate future work
 
