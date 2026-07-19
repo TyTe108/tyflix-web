@@ -598,6 +598,14 @@ Log (newest at bottom):
   can still be null (e.g. "Little House on the Prairie", a Seerr↔Plex data gap), so the play endpoint MUST
   fail-loud on null. A TV show's key is the show *container* → TV playback needs episode selection. 128 server
   tests.
+- **Phase 15.5 — Both connection URIs. COMPLETE + committed 2026-07-18.** `plex/connection.ts` replaced
+  `resolveExternalUri()` with `resolveConnections(): { local: string|null; remote: string }` — remote = the
+  non-local non-relay direct URI (required, fail-loud), local = the local non-relay direct URI (null if none),
+  relay excluded from BOTH; shared `pickPreferredUri` (https `.plex.direct` → any https → first). Both admin
+  probe callers updated. **Verified live** (Claude-in-Chrome, admin): `{ local:
+  "https://10-0-0-10.<hash>.plex.direct:32400", remote: "https://203-0-113-10.<hash>.plex.direct:32400" }`
+  — the server advertises both, so a LAN browser uses `local` (no NAT hairpin) and a remote browser uses
+  `remote`. 130 server tests.
 - **Phase 15 roadmap (revised 2026-07-18 — MOVIES FIRST, TV episode-browser deferred):** 15.5 connection
   resolver returns BOTH local + remote URIs (a LAN-based tyflix user hits NAT hairpin on the external plex.direct
   URL in-browser) → 15.6 movie play-decision endpoint `GET /api/watch/movie/:tmdbId` (ratingKey→transient→
