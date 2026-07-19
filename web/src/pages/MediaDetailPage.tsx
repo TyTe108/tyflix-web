@@ -270,6 +270,16 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
           <p className="muted">No overview available.</p>
         )}
 
+        {detail.mediaType === "movie" &&
+        (detail.mediaStatus === "available" ||
+          detail.mediaStatus === "partially_available") ? (
+          <p className="media-detail-play">
+            <Link className="btn" to={`/watch/movie/${detail.tmdbId}`}>
+              ▶ Play
+            </Link>
+          </p>
+        ) : null}
+
         <RequestControls detail={detail} />
 
         {detail.mediaStatus !== null ? (

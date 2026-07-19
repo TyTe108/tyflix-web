@@ -134,15 +134,7 @@ app.use(
 app.use(
   "/api/admin",
   requireAdmin(config.sessionSecret),
-  createAdminRouter({
-    dashboard,
-    plexConnection,
-    transientMinter,
-    sessionSecret: config.sessionSecret,
-    plexBaseUrl: config.plexBaseUrl,
-    plexClientId: config.plexClientId,
-    mediaStatus,
-  }),
+  createAdminRouter({ dashboard }),
 );
 
 app.use(
