@@ -136,6 +136,7 @@ app.use(
     transientMinter,
     sessionSecret: config.sessionSecret,
     plexBaseUrl: config.plexBaseUrl,
+    plexClientId: config.plexClientId,
     mediaStatus,
   }),
 );
