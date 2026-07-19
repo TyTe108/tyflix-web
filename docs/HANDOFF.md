@@ -632,12 +632,23 @@ Log (newest at bottom):
   `WatchRouterDeps` gained `plexClientId`. **Verified live**: `/api/watch/movie/82695` → both
   `…plex.direct:32400/video/:/transcode/universal/start.m3u8` URLs (local 10-0-0-10 + remote 203-0-113-10)
   sharing one session id. 141 server tests.
-- **Phase 15 roadmap (revised 2026-07-19 — MOVIES FIRST):** 15.1–15.8 DONE + verified live. Remaining: **15.9**
-  frontend player — the moment video plays in-browser: NEW dep **hls.js**; CSP allow
-  `https://*.plex.direct:32400` in `connect-src` + `blob:` in `media-src`; a WatchPage/route consuming
-  `/api/watch/movie/:tmdbId`'s `hls` (try `local` → fall back to `remote` on a fatal hls.js error); a Play
-  button on available **movies** only. Then retire the 4 temp admin probes + confirm MP3-audio playback. TV
-  playback (episode browser) deferred.
+- **Phase 15.9 — Frontend HLS player. COMPLETE + committed 2026-07-19.** NEW dep **hls.js** (`web/`). New
+  `web/src/api/watch.ts` (`fetchMovieWatch` → descriptor) + `web/src/pages/WatchPage.tsx` at
+  `/watch/movie/:tmdbId` (in AppShell): loads the descriptor, plays via hls.js `{enableWorker:false}` trying
+  `hls.local` → falling back to `hls.remote` on a fatal error (native HLS `video.src` on Safari); loading/error/
+  Back states; destroys the Hls instance on unmount. CSP (index.ts): `connect-src` += `https://*.plex.direct:32400`,
+  new `media-src ['self','blob:','https://*.plex.direct:32400']`. **Verified live in-browser** (Claude-in-Chrome):
+  Les Misérables (AAC) + No Country for Old Men (MP3) both play — readyState 4, video decoding at source res,
+  currentTime advancing, and `webkitAudioDecodedByteCount>0` confirms **MP3 audio decodes** too. Dev caveat: Vite
+  serves the SPA in dev so the CSP isn't exercised there (correct in code; applies in prod). **Movie playback
+  works end-to-end.**
+- **Phase 15 roadmap (revised 2026-07-19 — MOVIES FIRST):** 15.1–15.9 DONE + verified live in-browser (movie
+  video **plays**, AAC + MP3 audio confirmed). Remaining: **15.10** — Play button on `MediaDetailPage` for
+  available movies (the user-facing entry point) + retire the 4 temporary admin probes (`/api/admin/plex-*`) and
+  their now-dead deps. Then Phase 15 (movies) is SHIPPED. **Deferred optimizations:** the transcode profile sets
+  no bitrate/resolution cap → Plex transcodes at full source res (fine on LAN, heavy for remote users) — add a
+  quality cap later; the aac audio target isn't honored (mp3 out, but plays). **TV playback (episode browser) is
+  the next chapter.**
 
 ## 9. Deferred / candidate future work
 
