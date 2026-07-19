@@ -572,7 +572,7 @@ Log (newest at bottom):
   back to a relay URI. ~10-min in-instance cache. Uses the owner token (the external address is user-independent).
   A **temporary** admin-only probe `GET /api/admin/plex-connection` (remove when the play-decision endpoint lands)
   exposes it. **Verified live** (Claude-in-Chrome, admin session): returns
-  `https://203-0-113-10.<hash>.plex.direct:32400` — the real direct-external URL, confirming the `/resources`
+  `https://<PUBLIC_WAN_IP>.<hash>.plex.direct:32400` — the real direct-external URL, confirming the `/resources`
   shape against the live server. 123 server tests.
 - **Phase 15.3 — Transient-token minting. COMPLETE + committed 2026-07-18** (incl. 15.3.1 probe fix). New
   `plex/transientToken.ts` `createTransientTokenMinter({baseUrl, clientId})` → `mint(userToken)`:
@@ -603,7 +603,7 @@ Log (newest at bottom):
   non-local non-relay direct URI (required, fail-loud), local = the local non-relay direct URI (null if none),
   relay excluded from BOTH; shared `pickPreferredUri` (https `.plex.direct` → any https → first). Both admin
   probe callers updated. **Verified live** (Claude-in-Chrome, admin): `{ local:
-  "https://10-0-0-10.<hash>.plex.direct:32400", remote: "https://203-0-113-10.<hash>.plex.direct:32400" }`
+  "https://<SERVER_LAN_IP>.<hash>.plex.direct:32400", remote: "https://<PUBLIC_WAN_IP>.<hash>.plex.direct:32400" }`
   — the server advertises both, so a LAN browser uses `local` (no NAT hairpin) and a remote browser uses
   `remote`. 130 server tests.
 - **Phase 15.6 — Movie play-decision endpoint. COMPLETE + committed 2026-07-18.** New `routes/watch.ts`
@@ -630,7 +630,7 @@ Log (newest at bottom):
   `randomUUID` session id and builds a `start.m3u8` URL per connection via `buildHlsUrl` (same session id +
   transient + `plexClientId`); `hls.local` is null when there's no local connection. Existing fields kept;
   `WatchRouterDeps` gained `plexClientId`. **Verified live**: `/api/watch/movie/82695` → both
-  `…plex.direct:32400/video/:/transcode/universal/start.m3u8` URLs (local 10-0-0-10 + remote 203-0-113-10)
+  `…plex.direct:32400/video/:/transcode/universal/start.m3u8` URLs (local <SERVER_LAN_IP> + remote <PUBLIC_WAN_IP>)
   sharing one session id. 141 server tests.
 - **Phase 15.9 — Frontend HLS player. COMPLETE + committed 2026-07-19.** NEW dep **hls.js** (`web/`). New
   `web/src/api/watch.ts` (`fetchMovieWatch` → descriptor) + `web/src/pages/WatchPage.tsx` at
