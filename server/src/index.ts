@@ -15,6 +15,7 @@ import { createDiscoverRouter } from "./routes/discover";
 import { createIssuesRouter } from "./routes/issues";
 import { createMeRouter } from "./routes/me";
 import { createRequestsRouter } from "./routes/requests";
+import { createWatchRouter } from "./routes/watch";
 import { createWatchlistRouter } from "./routes/watchlist";
 import { createSeerrClient } from "./seerr/client";
 import { createMediaStatusProvider } from "./seerr/mediaStatusProvider";
@@ -163,6 +164,17 @@ app.use(
   createRequestsRouter({
     seerr,
     tmdb,
+    sessionSecret: config.sessionSecret,
+  }),
+);
+
+app.use(
+  "/api/watch",
+  requireAuth(config.sessionSecret),
+  createWatchRouter({
+    plexConnection,
+    transientMinter,
+    mediaStatus,
     sessionSecret: config.sessionSecret,
   }),
 );
