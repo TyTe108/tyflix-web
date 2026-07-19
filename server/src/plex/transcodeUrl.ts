@@ -19,6 +19,15 @@ export type BuildHlsUrlParams = {
   token: string;
   clientId: string;
   sessionId: string;
+  // Optional transcode-tuning params — omitted keys are not emitted, so the
+  // URL stays byte-identical to the fixed-param baseline when all are absent.
+  maxVideoBitrate?: number; // kbps
+  videoResolution?: string; // "WxH", e.g. "1280x720"
+  audioStreamID?: string;
+  subtitleStreamID?: string;
+  // UNVERIFIED against live Plex: param name/behavior (seconds) will be
+  // validated when a caller first uses it (17.5 / Phase 18).
+  offset?: number;
 };
 
 const TRANSCODE_BASE_PATH = "/video/:/transcode/universal";
@@ -54,6 +63,42 @@ function buildTranscodeUrl(
   search.set("session", params.sessionId);
   search.set("X-Plex-Client-Profile-Extra", H264_HLS_PROFILE_EXTRA);
   search.set("X-Plex-Token", params.token);
+
+  // Optional tuning params appended after the fixed set so the omitted-case
+  // query string is unchanged.
+  if (params.maxVideoBitrate !== undefined) {
+    if (
+      !Number.isInteger(params.maxVideoBitrate) ||
+      params.maxVideoBitrate <= 0
+    ) {
+      throw new Error("maxVideoBitrate must be a positive integer");
+    }
+    search.set("maxVideoBitrate", String(params.maxVideoBitrate));
+  }
+  if (params.videoResolution !== undefined) {
+    if (!/^\d+x\d+$/.test(params.videoResolution)) {
+      throw new Error('videoResolution must match "WxH" (e.g. "1280x720")');
+    }
+    search.set("videoResolution", params.videoResolution);
+  }
+  if (params.audioStreamID !== undefined) {
+    if (params.audioStreamID.trim() === "") {
+      throw new Error("audioStreamID must be a non-empty string");
+    }
+    search.set("audioStreamID", params.audioStreamID);
+  }
+  if (params.subtitleStreamID !== undefined) {
+    if (params.subtitleStreamID.trim() === "") {
+      throw new Error("subtitleStreamID must be a non-empty string");
+    }
+    search.set("subtitleStreamID", params.subtitleStreamID);
+  }
+  if (params.offset !== undefined) {
+    if (!Number.isFinite(params.offset) || params.offset < 0) {
+      throw new Error("offset must be a finite number >= 0");
+    }
+    search.set("offset", String(params.offset));
+  }
 
   const base = params.connectionUri.replace(/\/+$/, "");
   return `${base}${TRANSCODE_BASE_PATH}/${pathSegment}?${search.toString()}`;

@@ -76,6 +76,79 @@ describe("buildHlsUrl", () => {
     // The profile-extra parens/ampersands must be encoded too.
     assert.ok(query.includes("X-Plex-Client-Profile-Extra=add-transcode-target%28"));
   });
+
+  it("omits optional tuning params when none are provided", () => {
+    const parsed = new URL(buildHlsUrl(PARAMS));
+    assert.equal(parsed.searchParams.get("maxVideoBitrate"), null);
+    assert.equal(parsed.searchParams.get("videoResolution"), null);
+    assert.equal(parsed.searchParams.get("audioStreamID"), null);
+    assert.equal(parsed.searchParams.get("subtitleStreamID"), null);
+    assert.equal(parsed.searchParams.get("offset"), null);
+  });
+
+  it("emits maxVideoBitrate when provided", () => {
+    const parsed = new URL(
+      buildHlsUrl({ ...PARAMS, maxVideoBitrate: 4000 }),
+    );
+    assert.equal(parsed.searchParams.get("maxVideoBitrate"), "4000");
+  });
+
+  it("emits videoResolution when provided", () => {
+    const parsed = new URL(
+      buildHlsUrl({ ...PARAMS, videoResolution: "1280x720" }),
+    );
+    assert.equal(parsed.searchParams.get("videoResolution"), "1280x720");
+  });
+
+  it("emits audioStreamID when provided", () => {
+    const parsed = new URL(
+      buildHlsUrl({ ...PARAMS, audioStreamID: "101" }),
+    );
+    assert.equal(parsed.searchParams.get("audioStreamID"), "101");
+  });
+
+  it("emits subtitleStreamID when provided", () => {
+    const parsed = new URL(
+      buildHlsUrl({ ...PARAMS, subtitleStreamID: "102" }),
+    );
+    assert.equal(parsed.searchParams.get("subtitleStreamID"), "102");
+  });
+
+  it("emits offset when provided", () => {
+    const parsed = new URL(buildHlsUrl({ ...PARAMS, offset: 90.5 }));
+    assert.equal(parsed.searchParams.get("offset"), "90.5");
+  });
+
+  it("throws on invalid optional tuning params", () => {
+    assert.throws(
+      () => buildHlsUrl({ ...PARAMS, maxVideoBitrate: 0 }),
+      /maxVideoBitrate/,
+    );
+    assert.throws(
+      () => buildHlsUrl({ ...PARAMS, maxVideoBitrate: -1 }),
+      /maxVideoBitrate/,
+    );
+    assert.throws(
+      () => buildHlsUrl({ ...PARAMS, maxVideoBitrate: 1.5 }),
+      /maxVideoBitrate/,
+    );
+    assert.throws(
+      () => buildHlsUrl({ ...PARAMS, offset: -1 }),
+      /offset/,
+    );
+    assert.throws(
+      () => buildHlsUrl({ ...PARAMS, videoResolution: "720p" }),
+      /videoResolution/,
+    );
+    assert.throws(
+      () => buildHlsUrl({ ...PARAMS, audioStreamID: "   " }),
+      /audioStreamID/,
+    );
+    assert.throws(
+      () => buildHlsUrl({ ...PARAMS, subtitleStreamID: "" }),
+      /subtitleStreamID/,
+    );
+  });
 });
 
 describe("buildHlsDecisionUrl", () => {
