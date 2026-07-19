@@ -606,11 +606,22 @@ Log (newest at bottom):
   "https://10-0-0-10.<hash>.plex.direct:32400", remote: "https://203-0-113-10.<hash>.plex.direct:32400" }`
   — the server advertises both, so a LAN browser uses `local` (no NAT hairpin) and a remote browser uses
   `remote`. 130 server tests.
-- **Phase 15 roadmap (revised 2026-07-18 — MOVIES FIRST, TV episode-browser deferred):** 15.5 connection
-  resolver returns BOTH local + remote URIs (a LAN-based tyflix user hits NAT hairpin on the external plex.direct
-  URL in-browser) → 15.6 movie play-decision endpoint `GET /api/watch/movie/:tmdbId` (ratingKey→transient→
-  connections; fail-loud on null ratingKey; TV not-yet-supported; retire the 3 temp probes) → 15.7 frontend
-  player (hls.js + Play on available movies + CSP must allow `*.plex.direct` in connect-src/media-src).
+- **Phase 15.6 — Movie play-decision endpoint. COMPLETE + committed 2026-07-18.** New `routes/watch.ts`
+  `createWatchRouter({plexConnection, transientMinter, mediaStatus, sessionSecret})` mounted at `/api/watch`
+  behind `requireAuth`. `GET /api/watch/movie/:tmdbId`: numeric guard (400) → `readPlexToken` (tampered→502,
+  null→409 "re-login required") → `getRatingKey("movie", tmdbId)` (null→404 "not playable" — the Little House
+  case) → mint transient + `resolveConnections` → 200 `{ mediaType, tmdbId, ratingKey, connections:{local,
+  remote}, transient }`. The transient is returned **in full** (the browser needs it; masked only in the admin
+  probe). **Verified live** (Claude-in-Chrome): `/api/watch/movie/82695` (Les Misérables) → 200 with ratingKey
+  6094, both connection URIs, and a fresh 46-char transient. 134 server tests. **All movie-playback backend
+  plumbing is complete + verified live.**
+- **Phase 15 roadmap (revised 2026-07-18 — MOVIES FIRST):** 15.1–15.6 DONE (token custody → connection
+  discovery → transient minting → ratingKey → both-connection-URIs → movie play-decision endpoint, each
+  verified live). Remaining: **15.7** transcode HLS URL builder + live-verify a real Plex transcode `decision`
+  (making Plex transcode HEVC→H.264 for the browser, via the client-profile, is the last unknown) → **15.8**
+  frontend player (hls.js + Play on available movies + CSP must allow `*.plex.direct` in connect-src/media-src).
+  The 3 temp admin probes stay as live-verify tools, retired once the player works. TV playback (episode
+  browser) deferred.
 
 ## 9. Deferred / candidate future work
 
