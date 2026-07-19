@@ -74,6 +74,9 @@ const mediaEnrichment = createMediaEnrichment(tmdb);
 const GOOGLE_FONTS_STYLESHEET_ORIGIN = "https://fonts.googleapis.com";
 const GOOGLE_FONTS_FILE_ORIGIN = "https://fonts.gstatic.com";
 const TMDB_IMAGE_ORIGIN = "https://image.tmdb.org";
+// Plex's direct-connection hosts (…plex.direct:32400) the browser streams HLS
+// from — needed for both the manifest fetch (connect-src) and playback (media-src).
+const PLEX_DIRECT_ORIGIN = "https://*.plex.direct:32400";
 
 const app = express();
 
@@ -89,7 +92,8 @@ app.use(
         "style-src": ["'self'", "'unsafe-inline'", GOOGLE_FONTS_STYLESHEET_ORIGIN],
         "font-src": ["'self'", GOOGLE_FONTS_FILE_ORIGIN],
         "img-src": ["'self'", "data:", TMDB_IMAGE_ORIGIN],
-        "connect-src": ["'self'"],
+        "connect-src": ["'self'", PLEX_DIRECT_ORIGIN],
+        "media-src": ["'self'", "blob:", PLEX_DIRECT_ORIGIN],
         "object-src": ["'none'"],
         "base-uri": ["'self'"],
         "frame-ancestors": ["'none'"],

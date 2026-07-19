@@ -625,13 +625,19 @@ Log (newest at bottom):
   (copied when already h264, transcoded when not — HEVC/incompatible sources convert correctly); audio = aac
   (copied) or **mp3 (transcoded)** — Plex isn't honoring the aac target for transcoded audio, but mp3-in-HLS
   plays in hls.js (a nit; revisit only if audio is flaky in-browser). 140 server tests.
-- **Phase 15 roadmap (revised 2026-07-19 — MOVIES FIRST):** 15.1–15.7 DONE + verified live (token custody →
-  connection discovery → transient minting → ratingKey → both-connection-URIs → movie play-decision endpoint →
-  transcode HLS URL forcing H.264). Remaining: **15.8** add ready HLS URLs (`hls: {local, remote}` + sessionId)
-  to the `/api/watch/movie` descriptor (server builds via `buildHlsUrl`) → **15.9** frontend player (NEW dep
-  hls.js + Play button on available movies + local→remote fallback + CSP must allow `*.plex.direct` in
-  connect-src and `blob:` in media-src) — the increment where video actually plays in-browser. Retire the 4
-  temp admin probes after. TV playback (episode browser) deferred.
+- **Phase 15.8 — HLS URLs in descriptor. COMPLETE + committed 2026-07-19.** `/api/watch/movie/:tmdbId` now
+  also returns `hls: { local: string|null; remote: string }` + `sessionId` — the server generates one
+  `randomUUID` session id and builds a `start.m3u8` URL per connection via `buildHlsUrl` (same session id +
+  transient + `plexClientId`); `hls.local` is null when there's no local connection. Existing fields kept;
+  `WatchRouterDeps` gained `plexClientId`. **Verified live**: `/api/watch/movie/82695` → both
+  `…plex.direct:32400/video/:/transcode/universal/start.m3u8` URLs (local 10-0-0-10 + remote 203-0-113-10)
+  sharing one session id. 141 server tests.
+- **Phase 15 roadmap (revised 2026-07-19 — MOVIES FIRST):** 15.1–15.8 DONE + verified live. Remaining: **15.9**
+  frontend player — the moment video plays in-browser: NEW dep **hls.js**; CSP allow
+  `https://*.plex.direct:32400` in `connect-src` + `blob:` in `media-src`; a WatchPage/route consuming
+  `/api/watch/movie/:tmdbId`'s `hls` (try `local` → fall back to `remote` on a fatal hls.js error); a Play
+  button on available **movies** only. Then retire the 4 temp admin probes + confirm MP3-audio playback. TV
+  playback (episode browser) deferred.
 
 ## 9. Deferred / candidate future work
 
