@@ -10,6 +10,7 @@ import {
 type PlayerControlsProps = {
   videoRef: RefObject<HTMLVideoElement | null>;
   durationMs: number | null;
+  onSelectQuality: (quality: QualityId) => Promise<void>;
   children: ReactNode;
 };
 
@@ -24,6 +25,15 @@ const SPEED_OPTIONS = [
   { value: 1.75, label: "1.75×" },
   { value: 2, label: "2×" },
 ] as const;
+
+export type QualityId = "original" | "1080p" | "720p" | "480p";
+
+const QUALITY_OPTIONS: ReadonlyArray<{ value: QualityId; label: string }> = [
+  { value: "original", label: "Original" },
+  { value: "1080p", label: "1080p" },
+  { value: "720p", label: "720p" },
+  { value: "480p", label: "480p" },
+];
 
 type SettingsOption<T extends string | number> = {
   value: T;
@@ -77,6 +87,7 @@ function SettingsOptionGroup<T extends string | number>({
 export function PlayerControls({
   videoRef,
   durationMs,
+  onSelectQuality,
   children,
 }: PlayerControlsProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -97,6 +108,7 @@ export function PlayerControls({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [quality, setQuality] = useState<QualityId>("original");
 
   settingsOpenRef.current = settingsOpen;
   playbackRateRef.current = playbackRate;
@@ -299,6 +311,19 @@ export function PlayerControls({
     });
   };
 
+  const selectQuality = (next: QualityId) => {
+    if (next === quality) {
+      return;
+    }
+    void onSelectQuality(next)
+      .then(() => {
+        setQuality(next);
+      })
+      .catch(() => {
+        // WatchPage surfaces the failure; keep the previous highlight.
+      });
+  };
+
   const toggleFullscreen = () => {
     const shell = shellRef.current;
     if (shell === null) {
@@ -372,6 +397,12 @@ export function PlayerControls({
             options={SPEED_OPTIONS}
             value={playbackRate}
             onChange={setSpeed}
+          />
+          <SettingsOptionGroup
+            label="Quality"
+            options={QUALITY_OPTIONS}
+            value={quality}
+            onChange={selectQuality}
           />
         </div>
 
