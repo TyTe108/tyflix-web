@@ -38,6 +38,12 @@ type PlayDescriptor = {
   durationMs: number | null;
 };
 
+type PlayTuning = {
+  maxVideoBitrate?: number;
+  videoResolution?: string;
+  offset?: number;
+};
+
 export function createWatchRouter(deps: WatchRouterDeps): Router {
   const {
     plexConnection,
@@ -56,6 +62,7 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
   async function buildPlayDescriptor(
     ratingKey: string,
     userToken: string,
+    tuning: PlayTuning = {},
   ): Promise<PlayDescriptor> {
     // Fail before minting if the ratingKey has no metadata document.
     const meta = await plexServer.playbackMeta(ratingKey);
@@ -65,23 +72,24 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     // One transcode session shared across both connection URLs so the client
     // can switch between local/remote without spawning a second transcode.
     const sessionId = randomUUID();
+    const hlsParams = {
+      ratingKey,
+      token: transient,
+      clientId: plexClientId,
+      sessionId,
+      ...tuning,
+    };
     const hls = {
       remote: buildHlsUrl({
         connectionUri: connections.remote,
-        ratingKey,
-        token: transient,
-        clientId: plexClientId,
-        sessionId,
+        ...hlsParams,
       }),
       local:
         connections.local === null
           ? null
           : buildHlsUrl({
               connectionUri: connections.local,
-              ratingKey,
-              token: transient,
-              clientId: plexClientId,
-              sessionId,
+              ...hlsParams,
             }),
     };
 
@@ -105,6 +113,12 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
       return;
     }
     const tmdbId = Number(tmdbIdRaw);
+
+    const tuningResult = parsePlayTuning(req.query);
+    if (!tuningResult.ok) {
+      res.status(400).json({ error: tuningResult.error });
+      return;
+    }
 
     const session = res.locals.session as SessionPayload | undefined;
     if (!session) {
@@ -134,7 +148,11 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
         return;
       }
 
-      const descriptor = await buildPlayDescriptor(ratingKey, userToken);
+      const descriptor = await buildPlayDescriptor(
+        ratingKey,
+        userToken,
+        tuningResult.value,
+      );
       res.json({ mediaType: "movie", tmdbId, ...descriptor });
     } catch (err) {
       respondUpstreamError(res, err);
@@ -177,6 +195,12 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
       return;
     }
 
+    const tuningResult = parsePlayTuning(req.query);
+    if (!tuningResult.ok) {
+      res.status(400).json({ error: tuningResult.error });
+      return;
+    }
+
     const session = res.locals.session as SessionPayload | undefined;
     if (!session) {
       res.status(401).json({ error: "not authenticated" });
@@ -197,7 +221,11 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     }
 
     try {
-      const descriptor = await buildPlayDescriptor(ratingKey, userToken);
+      const descriptor = await buildPlayDescriptor(
+        ratingKey,
+        userToken,
+        tuningResult.value,
+      );
       res.json({ mediaType: "episode", ...descriptor });
     } catch (err) {
       respondUpstreamError(res, err);
@@ -205,6 +233,68 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
   });
 
   return router;
+}
+
+function parsePlayTuning(
+  query: Record<string, unknown>,
+): { ok: true; value: PlayTuning } | { ok: false; error: string } {
+  const tuning: PlayTuning = {};
+
+  if (query.maxVideoBitrate !== undefined) {
+    const raw = firstQueryValue(query.maxVideoBitrate);
+    if (raw === undefined) {
+      return {
+        ok: false,
+        error: "maxVideoBitrate must be a positive integer",
+      };
+    }
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n <= 0) {
+      return {
+        ok: false,
+        error: "maxVideoBitrate must be a positive integer",
+      };
+    }
+    tuning.maxVideoBitrate = n;
+  }
+
+  if (query.videoResolution !== undefined) {
+    const raw = firstQueryValue(query.videoResolution);
+    if (raw === undefined || !/^\d+x\d+$/.test(raw)) {
+      return {
+        ok: false,
+        error: 'videoResolution must match "WxH" (e.g. "1280x720")',
+      };
+    }
+    tuning.videoResolution = raw;
+  }
+
+  if (query.offset !== undefined) {
+    const raw = firstQueryValue(query.offset);
+    if (raw === undefined) {
+      return { ok: false, error: "offset must be a finite number >= 0" };
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      return { ok: false, error: "offset must be a finite number >= 0" };
+    }
+    tuning.offset = n;
+  }
+
+  return { ok: true, value: tuning };
+}
+
+function firstQueryValue(value: unknown): string | undefined {
+  if (Array.isArray(value)) {
+    value = value[0];
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  return undefined;
 }
 
 function respondUpstreamError(

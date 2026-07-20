@@ -236,6 +236,87 @@ describe("GET /api/watch/movie/:tmdbId", () => {
     assert.ok(body.hls.remote.includes("start.m3u8"));
     assert.ok(body.hls.remote.includes(body.sessionId));
   });
+
+  it("applies valid tuning query params to both HLS URLs", async () => {
+    const app = createApp(baseDeps());
+    const response = await fetchLocal(
+      app,
+      "/api/watch/movie/603?maxVideoBitrate=4000&videoResolution=1280x720&offset=90.5",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      hls: { local: string | null; remote: string };
+    };
+    assert.notEqual(body.hls.local, null);
+    const localUrl = body.hls.local as string;
+
+    for (const url of [body.hls.remote, localUrl]) {
+      const parsed = new URL(url);
+      assert.equal(parsed.searchParams.get("maxVideoBitrate"), "4000");
+      assert.equal(parsed.searchParams.get("videoResolution"), "1280x720");
+      assert.equal(parsed.searchParams.get("offset"), "90.5");
+    }
+  });
+
+  it("omits tuning keys from HLS URLs when query params are absent", async () => {
+    const app = createApp(baseDeps());
+    const response = await fetchLocal(
+      app,
+      "/api/watch/movie/603",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      hls: { local: string | null; remote: string };
+    };
+    assert.notEqual(body.hls.local, null);
+    const localUrl = body.hls.local as string;
+
+    for (const url of [body.hls.remote, localUrl]) {
+      const parsed = new URL(url);
+      assert.equal(parsed.searchParams.get("maxVideoBitrate"), null);
+      assert.equal(parsed.searchParams.get("videoResolution"), null);
+      assert.equal(parsed.searchParams.get("offset"), null);
+    }
+  });
+
+  it("rejects invalid tuning query params with 400", async () => {
+    const app = createApp(baseDeps());
+    const cookie = sessionCookie({ plexToken: USER_TOKEN });
+
+    const badBitrate = await fetchLocal(
+      app,
+      "/api/watch/movie/603?maxVideoBitrate=abc",
+      cookie,
+    );
+    assert.equal(badBitrate.status, 400);
+    assert.deepEqual(await badBitrate.json(), {
+      error: "maxVideoBitrate must be a positive integer",
+    });
+
+    const badOffset = await fetchLocal(
+      app,
+      "/api/watch/movie/603?offset=-5",
+      cookie,
+    );
+    assert.equal(badOffset.status, 400);
+    assert.deepEqual(await badOffset.json(), {
+      error: "offset must be a finite number >= 0",
+    });
+
+    const badResolution = await fetchLocal(
+      app,
+      "/api/watch/movie/603?videoResolution=720p",
+      cookie,
+    );
+    assert.equal(badResolution.status, 400);
+    assert.deepEqual(await badResolution.json(), {
+      error: 'videoResolution must match "WxH" (e.g. "1280x720")',
+    });
+  });
 });
 
 describe("GET /api/watch/tv/:tmdbId/episodes", () => {
@@ -424,6 +505,43 @@ describe("GET /api/watch/episode/:ratingKey", () => {
 
     // The descriptor mints from the recovered durable token.
     assert.equal(mintedWith, USER_TOKEN);
+  });
+
+  it("applies valid tuning query params to both HLS URLs", async () => {
+    const app = createApp(baseDeps());
+    const response = await fetchLocal(
+      app,
+      "/api/watch/episode/54321?maxVideoBitrate=2000&videoResolution=1920x1080&offset=0",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      hls: { local: string | null; remote: string };
+    };
+    assert.notEqual(body.hls.local, null);
+    const localUrl = body.hls.local as string;
+
+    for (const url of [body.hls.remote, localUrl]) {
+      const parsed = new URL(url);
+      assert.equal(parsed.searchParams.get("maxVideoBitrate"), "2000");
+      assert.equal(parsed.searchParams.get("videoResolution"), "1920x1080");
+      assert.equal(parsed.searchParams.get("offset"), "0");
+    }
+  });
+
+  it("rejects invalid tuning query params with 400", async () => {
+    const app = createApp(baseDeps());
+    const response = await fetchLocal(
+      app,
+      "/api/watch/episode/54321?maxVideoBitrate=0",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      error: "maxVideoBitrate must be a positive integer",
+    });
   });
 });
 

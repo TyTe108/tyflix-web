@@ -43,16 +43,24 @@ export type WatchDescriptor = {
   durationMs: number | null;
 };
 
+export type WatchTuning = {
+  maxVideoBitrate?: number;
+  videoResolution?: string;
+  offset?: number;
+};
+
 export async function fetchMovieWatch(
   tmdbId: number,
+  tuning?: WatchTuning,
 ): Promise<WatchDescriptor> {
-  return fetchWatch(`/api/watch/movie/${tmdbId}`);
+  return fetchWatch(`/api/watch/movie/${tmdbId}`, tuning);
 }
 
 export async function fetchEpisodeWatch(
   ratingKey: string,
+  tuning?: WatchTuning,
 ): Promise<WatchDescriptor> {
-  return fetchWatch(`/api/watch/episode/${ratingKey}`);
+  return fetchWatch(`/api/watch/episode/${ratingKey}`, tuning);
 }
 
 export type Episode = {
@@ -89,8 +97,22 @@ export async function fetchEpisodes(
   };
 }
 
-async function fetchWatch(path: string): Promise<WatchDescriptor> {
-  const res = await fetch(path);
+async function fetchWatch(
+  path: string,
+  tuning?: WatchTuning,
+): Promise<WatchDescriptor> {
+  const params = new URLSearchParams();
+  if (tuning?.maxVideoBitrate !== undefined) {
+    params.set("maxVideoBitrate", String(tuning.maxVideoBitrate));
+  }
+  if (tuning?.videoResolution !== undefined) {
+    params.set("videoResolution", tuning.videoResolution);
+  }
+  if (tuning?.offset !== undefined) {
+    params.set("offset", String(tuning.offset));
+  }
+  const qs = params.toString();
+  const res = await fetch(qs.length > 0 ? `${path}?${qs}` : path);
   if (!res.ok) {
     // Surface the backend's { error } message when present (e.g. 404 "not
     // playable", 409 "re-login required") so the UI can show why.
