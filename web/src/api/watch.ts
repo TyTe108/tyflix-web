@@ -47,6 +47,7 @@ export type WatchTuning = {
   maxVideoBitrate?: number;
   videoResolution?: string;
   offset?: number;
+  audioStreamID?: string;
 };
 
 export async function fetchMovieWatch(
@@ -110,6 +111,9 @@ async function fetchWatch(
   }
   if (tuning?.offset !== undefined) {
     params.set("offset", String(tuning.offset));
+  }
+  if (tuning?.audioStreamID !== undefined) {
+    params.set("audioStreamID", tuning.audioStreamID);
   }
   const qs = params.toString();
   const res = await fetch(qs.length > 0 ? `${path}?${qs}` : path);

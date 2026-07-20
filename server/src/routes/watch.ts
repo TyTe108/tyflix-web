@@ -42,6 +42,7 @@ type PlayTuning = {
   maxVideoBitrate?: number;
   videoResolution?: string;
   offset?: number;
+  audioStreamID?: string;
 };
 
 export function createWatchRouter(deps: WatchRouterDeps): Router {
@@ -279,6 +280,17 @@ function parsePlayTuning(
       return { ok: false, error: "offset must be a finite number >= 0" };
     }
     tuning.offset = n;
+  }
+
+  if (query.audioStreamID !== undefined) {
+    const raw = firstQueryValue(query.audioStreamID);
+    if (raw === undefined || raw.trim() === "") {
+      return {
+        ok: false,
+        error: "audioStreamID must be a non-empty string",
+      };
+    }
+    tuning.audioStreamID = raw;
   }
 
   return { ok: true, value: tuning };

@@ -241,7 +241,7 @@ describe("GET /api/watch/movie/:tmdbId", () => {
     const app = createApp(baseDeps());
     const response = await fetchLocal(
       app,
-      "/api/watch/movie/603?maxVideoBitrate=4000&videoResolution=1280x720&offset=90.5",
+      "/api/watch/movie/603?maxVideoBitrate=4000&videoResolution=1280x720&offset=90.5&audioStreamID=101",
       sessionCookie({ plexToken: USER_TOKEN }),
     );
 
@@ -257,6 +257,7 @@ describe("GET /api/watch/movie/:tmdbId", () => {
       assert.equal(parsed.searchParams.get("maxVideoBitrate"), "4000");
       assert.equal(parsed.searchParams.get("videoResolution"), "1280x720");
       assert.equal(parsed.searchParams.get("offset"), "90.5");
+      assert.equal(parsed.searchParams.get("audioStreamID"), "101");
     }
   });
 
@@ -280,6 +281,7 @@ describe("GET /api/watch/movie/:tmdbId", () => {
       assert.equal(parsed.searchParams.get("maxVideoBitrate"), null);
       assert.equal(parsed.searchParams.get("videoResolution"), null);
       assert.equal(parsed.searchParams.get("offset"), null);
+      assert.equal(parsed.searchParams.get("audioStreamID"), null);
     }
   });
 
@@ -315,6 +317,16 @@ describe("GET /api/watch/movie/:tmdbId", () => {
     assert.equal(badResolution.status, 400);
     assert.deepEqual(await badResolution.json(), {
       error: 'videoResolution must match "WxH" (e.g. "1280x720")',
+    });
+
+    const badAudio = await fetchLocal(
+      app,
+      "/api/watch/movie/603?audioStreamID=",
+      cookie,
+    );
+    assert.equal(badAudio.status, 400);
+    assert.deepEqual(await badAudio.json(), {
+      error: "audioStreamID must be a non-empty string",
     });
   });
 });
@@ -511,7 +523,7 @@ describe("GET /api/watch/episode/:ratingKey", () => {
     const app = createApp(baseDeps());
     const response = await fetchLocal(
       app,
-      "/api/watch/episode/54321?maxVideoBitrate=2000&videoResolution=1920x1080&offset=0",
+      "/api/watch/episode/54321?maxVideoBitrate=2000&videoResolution=1920x1080&offset=0&audioStreamID=101",
       sessionCookie({ plexToken: USER_TOKEN }),
     );
 
@@ -527,20 +539,32 @@ describe("GET /api/watch/episode/:ratingKey", () => {
       assert.equal(parsed.searchParams.get("maxVideoBitrate"), "2000");
       assert.equal(parsed.searchParams.get("videoResolution"), "1920x1080");
       assert.equal(parsed.searchParams.get("offset"), "0");
+      assert.equal(parsed.searchParams.get("audioStreamID"), "101");
     }
   });
 
   it("rejects invalid tuning query params with 400", async () => {
     const app = createApp(baseDeps());
-    const response = await fetchLocal(
+    const cookie = sessionCookie({ plexToken: USER_TOKEN });
+
+    const badBitrate = await fetchLocal(
       app,
       "/api/watch/episode/54321?maxVideoBitrate=0",
-      sessionCookie({ plexToken: USER_TOKEN }),
+      cookie,
     );
-
-    assert.equal(response.status, 400);
-    assert.deepEqual(await response.json(), {
+    assert.equal(badBitrate.status, 400);
+    assert.deepEqual(await badBitrate.json(), {
       error: "maxVideoBitrate must be a positive integer",
+    });
+
+    const badAudio = await fetchLocal(
+      app,
+      "/api/watch/episode/54321?audioStreamID=",
+      cookie,
+    );
+    assert.equal(badAudio.status, 400);
+    assert.deepEqual(await badAudio.json(), {
+      error: "audioStreamID must be a non-empty string",
     });
   });
 });
