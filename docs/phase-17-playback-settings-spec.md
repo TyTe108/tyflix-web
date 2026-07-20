@@ -121,3 +121,11 @@ Media[0]/Part[0] scoping yields clean single stream-sets; durations match runtim
   burn-in fallback and CANNOT be styled. Subtitle styling (17.8) is therefore
   text-sub-only in practice; image-sub titles get burned-in, unstyleable subs.
   Inherent to bitmap subtitles, not a bug — set expectations accordingly.
+
+## Decomposition revision (2026-07-19)
+
+- **17.3.1** — fix: clicking the video to dismiss the open settings panel also toggled play/pause (media click-to-play overlapped the outside-click close). Media click, when the panel is open, closes it without toggling.
+- **17.5 split** for surgical, independently-verifiable increments:
+  - **17.5 (backend)** — the `/movie/:tmdbId` and `/episode/:ratingKey` watch endpoints accept optional `maxVideoBitrate`/`videoResolution`/`offset` query params → threaded into `buildHlsUrl` (already param-ready from 17.2). Invalid values → 400. Unit-tested + curl-verifiable, no UI.
+  - **17.6 (frontend)** — Quality settings group + the reusable **restart-at-offset** flow: capture `currentTime`, refetch the descriptor with the chosen bitrate/resolution + `offset`, tear down and rebuild hls, resume. First live test of the `offset` param (UNVERIFIED since 17.2).
+- Downstream shift: **17.7** Audio, **17.8** Subtitles (sidecar), **17.9** Subtitle styling, **17.10** Auto Play. The restart-at-offset flow from 17.6 is reused by 17.7/17.8 (audio/subtitle change = same restart, different param).

@@ -82,6 +82,7 @@ export function PlayerControls({
   const shellRef = useRef<HTMLDivElement | null>(null);
   const settingsRef = useRef<HTMLDivElement | null>(null);
   const gearRef = useRef<HTMLButtonElement | null>(null);
+  const mediaRef = useRef<HTMLDivElement | null>(null);
   const scrubbingRef = useRef(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settingsOpenRef = useRef(false);
@@ -238,6 +239,11 @@ export function PlayerControls({
       if (gearRef.current?.contains(target)) {
         return;
       }
+      // Media clicks are handled by onMediaClick so dismiss doesn't race
+      // with play/pause toggle on the same gesture.
+      if (mediaRef.current?.contains(target)) {
+        return;
+      }
       setSettingsOpen(false);
     };
     document.addEventListener("pointerdown", onPointerDown);
@@ -270,6 +276,14 @@ export function PlayerControls({
         video.pause();
       }
     });
+  };
+
+  const onMediaClick = () => {
+    if (settingsOpenRef.current) {
+      setSettingsOpen(false);
+      return;
+    }
+    togglePlay();
   };
 
   const toggleMute = () => {
@@ -332,7 +346,11 @@ export function PlayerControls({
       onPointerMove={revealControls}
       onKeyDown={onShellKeyDown}
     >
-      <div className="watch-player-media" onClick={togglePlay}>
+      <div
+        ref={mediaRef}
+        className="watch-player-media"
+        onClick={onMediaClick}
+      >
         {children}
       </div>
 
