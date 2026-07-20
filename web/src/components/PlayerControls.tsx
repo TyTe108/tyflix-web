@@ -6,11 +6,20 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import type { AudioStream } from "../api/watch";
+
+export type QualityId = "original" | "1080p" | "720p" | "480p";
+
+export type StreamSettings = {
+  quality: QualityId;
+  audioStreamId: string | null;
+};
 
 type PlayerControlsProps = {
   videoRef: RefObject<HTMLVideoElement | null>;
   durationMs: number | null;
-  onSelectQuality: (quality: QualityId) => Promise<void>;
+  audioTracks: AudioStream[];
+  onStreamSettingsChange: (settings: StreamSettings) => Promise<void>;
   children: ReactNode;
 };
 
@@ -25,8 +34,6 @@ const SPEED_OPTIONS = [
   { value: 1.75, label: "1.75×" },
   { value: 2, label: "2×" },
 ] as const;
-
-export type QualityId = "original" | "1080p" | "720p" | "480p";
 
 const QUALITY_OPTIONS: ReadonlyArray<{ value: QualityId; label: string }> = [
   { value: "original", label: "Original" },
@@ -87,7 +94,8 @@ function SettingsOptionGroup<T extends string | number>({
 export function PlayerControls({
   videoRef,
   durationMs,
-  onSelectQuality,
+  audioTracks,
+  onStreamSettingsChange,
   children,
 }: PlayerControlsProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -108,7 +116,9 @@ export function PlayerControls({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [quality, setQuality] = useState<QualityId>("original");
+  const [selectedQuality, setSelectedQuality] = useState<QualityId>("original");
+  // null = use Plex default (highlight the default/first track in the UI).
+  const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
 
   settingsOpenRef.current = settingsOpen;
   playbackRateRef.current = playbackRate;
@@ -311,18 +321,53 @@ export function PlayerControls({
     });
   };
 
-  const selectQuality = (next: QualityId) => {
-    if (next === quality) {
-      return;
-    }
-    void onSelectQuality(next)
+  const defaultAudioId =
+    audioTracks.find((track) => track.default)?.id ??
+    audioTracks[0]?.id ??
+    null;
+  const activeAudioId = selectedAudioId ?? defaultAudioId;
+
+  const applyStreamSettings = (
+    next: StreamSettings,
+    onSuccess: () => void,
+  ) => {
+    void onStreamSettingsChange(next)
       .then(() => {
-        setQuality(next);
+        onSuccess();
       })
       .catch(() => {
-        // WatchPage surfaces the failure; keep the previous highlight.
+        // WatchPage surfaces the failure; keep the previous highlights.
       });
   };
+
+  const selectQuality = (next: QualityId) => {
+    if (next === selectedQuality) {
+      return;
+    }
+    applyStreamSettings(
+      { quality: next, audioStreamId: selectedAudioId },
+      () => {
+        setSelectedQuality(next);
+      },
+    );
+  };
+
+  const selectAudio = (next: string) => {
+    if (next === activeAudioId) {
+      return;
+    }
+    applyStreamSettings(
+      { quality: selectedQuality, audioStreamId: next },
+      () => {
+        setSelectedAudioId(next);
+      },
+    );
+  };
+
+  const audioOptions = audioTracks.map((track) => ({
+    value: track.id,
+    label: formatAudioLabel(track),
+  }));
 
   const toggleFullscreen = () => {
     const shell = shellRef.current;
@@ -401,9 +446,17 @@ export function PlayerControls({
           <SettingsOptionGroup
             label="Quality"
             options={QUALITY_OPTIONS}
-            value={quality}
+            value={selectedQuality}
             onChange={selectQuality}
           />
+          {audioOptions.length > 0 ? (
+            <SettingsOptionGroup
+              label="Audio"
+              options={audioOptions}
+              value={activeAudioId ?? ""}
+              onChange={selectAudio}
+            />
+          ) : null}
         </div>
 
         <div className="watch-controls-bar">
@@ -510,6 +563,26 @@ export function PlayerControls({
       </div>
     </div>
   );
+}
+
+function formatAudioLabel(stream: AudioStream): string {
+  const language =
+    typeof stream.language === "string" && stream.language.trim() !== ""
+      ? stream.language.trim()
+      : "Unknown";
+  const title =
+    typeof stream.title === "string" && stream.title.trim() !== ""
+      ? stream.title.trim()
+      : null;
+  const codec =
+    typeof stream.codec === "string" && stream.codec.trim() !== ""
+      ? stream.codec.trim()
+      : null;
+  const channels =
+    typeof stream.channels === "number" ? `${stream.channels}ch` : null;
+  const tech = [codec, channels].filter(Boolean).join(" ");
+  const head = title !== null ? `${language} · ${title}` : language;
+  return tech.length > 0 ? `${head} (${tech})` : head;
 }
 
 function formatTime(seconds: number): string {

@@ -10,6 +10,7 @@ import {
 import {
   PlayerControls,
   type QualityId,
+  type StreamSettings,
 } from "../components/PlayerControls";
 
 type LoadStatus = "loading" | "ready" | "error";
@@ -27,10 +28,10 @@ function parseTmdbId(raw: string | undefined): number | null {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
-function tuningForQuality(quality: QualityId): WatchTuning | undefined {
+function tuningForQuality(quality: QualityId): WatchTuning {
   switch (quality) {
     case "original":
-      return undefined;
+      return {};
     case "1080p":
       return { maxVideoBitrate: 12000, videoResolution: "1920x1080" };
     case "720p":
@@ -38,6 +39,16 @@ function tuningForQuality(quality: QualityId): WatchTuning | undefined {
     case "480p":
       return { maxVideoBitrate: 1500, videoResolution: "854x480" };
   }
+}
+
+function buildWatchTuning(settings: StreamSettings): WatchTuning | undefined {
+  const tuning: WatchTuning = {
+    ...tuningForQuality(settings.quality),
+    ...(settings.audioStreamId
+      ? { audioStreamID: settings.audioStreamId }
+      : {}),
+  };
+  return Object.keys(tuning).length > 0 ? tuning : undefined;
 }
 
 export function WatchPage() {
@@ -104,8 +115,8 @@ export function WatchPage() {
 
   // Wire up playback once a descriptor is ready. Tries the local connection
   // first and falls back to the remote one on a fatal hls.js error.
-  // Quality switches update descriptor in place (status stays "ready") so the
-  // <video> stays mounted; pendingResumeRef carries position across rebuilds.
+  // Quality/audio switches update descriptor in place (status stays "ready") so
+  // the <video> stays mounted; pendingResumeRef carries position across rebuilds.
   useEffect(() => {
     if (descriptor === null) {
       return;
@@ -199,10 +210,12 @@ export function WatchPage() {
     };
   }, [descriptor]);
 
-  const onSelectQuality = async (quality: QualityId): Promise<void> => {
+  const onStreamSettingsChange = async (
+    settings: StreamSettings,
+  ): Promise<void> => {
     const video = videoRef.current;
     if (video === null) {
-      // No-op for the player; reject so the settings highlight stays put.
+      // No-op for the player; reject so the settings highlights stay put.
       throw new Error("Player not ready");
     }
 
@@ -211,7 +224,7 @@ export function WatchPage() {
       wasPlaying: !video.paused,
     };
 
-    const tuning = tuningForQuality(quality);
+    const tuning = buildWatchTuning(settings);
     try {
       let result: WatchDescriptor;
       if (isEpisode) {
@@ -232,7 +245,7 @@ export function WatchPage() {
       pendingResumeRef.current = null;
       setStatus("error");
       setError(
-        err instanceof Error ? err.message : "Failed to switch quality",
+        err instanceof Error ? err.message : "Failed to switch stream settings",
       );
       throw err;
     }
@@ -261,7 +274,8 @@ export function WatchPage() {
         <PlayerControls
           videoRef={videoRef}
           durationMs={descriptor.durationMs}
-          onSelectQuality={onSelectQuality}
+          audioTracks={descriptor.streams.audio}
+          onStreamSettingsChange={onStreamSettingsChange}
         >
           <video
             ref={videoRef}
