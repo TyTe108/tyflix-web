@@ -96,6 +96,14 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
       return;
     }
 
+    const firstCharacterResult = parseFirstCharacterQuery(
+      req.query.firstCharacter,
+    );
+    if (firstCharacterResult === null) {
+      res.status(400).json({ error: "invalid firstCharacter" });
+      return;
+    }
+
     try {
       const result = await plexServer.sectionItems({
         sectionKey,
@@ -104,6 +112,9 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
         size: size ?? 50,
         ...(genreResult !== undefined ? { genre: genreResult } : {}),
         ...(unwatchedResult ? { unwatched: true } : {}),
+        ...(firstCharacterResult !== undefined
+          ? { firstCharacter: firstCharacterResult }
+          : {}),
       });
       res.json({
         items: result.items,
@@ -113,6 +124,7 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
         sort,
         genre: genreResult ?? null,
         unwatched: unwatchedResult,
+        firstCharacter: firstCharacterResult ?? null,
       });
     } catch (err) {
       respondUpstreamError(res, err);
@@ -129,6 +141,21 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
     try {
       const genres = await plexServer.sectionGenres(sectionKey);
       res.json({ genres });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
+  router.get("/sections/:key/first-characters", async (req, res) => {
+    const sectionKey = req.params.key;
+    if (!/^\d+$/.test(sectionKey)) {
+      res.status(400).json({ error: "invalid section key" });
+      return;
+    }
+
+    try {
+      const characters = await plexServer.sectionFirstCharacters(sectionKey);
+      res.json({ characters });
     } catch (err) {
       respondUpstreamError(res, err);
     }
@@ -182,6 +209,16 @@ function parseUnwatchedQuery(raw: unknown): boolean | null {
     return true;
   }
   return null;
+}
+
+function parseFirstCharacterQuery(raw: unknown): string | null | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (typeof raw !== "string" || !/^[A-Za-z0-9#]$/.test(raw)) {
+    return null;
+  }
+  return raw;
 }
 
 function respondUpstreamError(

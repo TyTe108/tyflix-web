@@ -462,8 +462,10 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     size: number;
     genre?: string;
     unwatched?: boolean;
+    firstCharacter?: string;
   }): Promise<{ items: LibraryItem[]; totalSize: number }> {
-    const { sectionKey, sort, start, size, genre, unwatched } = options;
+    const { sectionKey, sort, start, size, genre, unwatched, firstCharacter } =
+      options;
     const query: Record<string, string> = {
       sort: mapLibrarySort(sort),
       includeGuids: "1",
@@ -477,7 +479,12 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
       query.unwatched = "1";
     }
 
-    const body = await getJson(`/library/sections/${sectionKey}/all`, query);
+    const path =
+      firstCharacter !== undefined
+        ? `/library/sections/${sectionKey}/firstCharacter/${encodeURIComponent(firstCharacter)}`
+        : `/library/sections/${sectionKey}/all`;
+
+    const body = await getJson(path, query);
 
     const container = mediaContainer(body);
     const rows = asArray(container?.Metadata);
@@ -540,6 +547,33 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
         continue;
       }
       result.push({ id: String(key), title });
+    }
+
+    return result;
+  }
+
+  async function sectionFirstCharacters(
+    sectionKey: string,
+  ): Promise<{ label: string; count: number }[]> {
+    const body = await getJson(
+      `/library/sections/${sectionKey}/firstCharacter`,
+    );
+    const rows = asArray(mediaContainer(body)?.Directory);
+    const result: { label: string; count: number }[] = [];
+
+    for (const row of rows) {
+      if (typeof row !== "object" || row === null) {
+        continue;
+      }
+      const title = (row as { title?: unknown }).title;
+      const size = (row as { size?: unknown }).size;
+      if (typeof title !== "string") {
+        continue;
+      }
+      result.push({
+        label: title,
+        count: typeof size === "number" ? size : 0,
+      });
     }
 
     return result;
@@ -629,6 +663,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     sections,
     sectionItems,
     sectionGenres,
+    sectionFirstCharacters,
     fetchImage,
     selectSubtitle,
   };

@@ -744,6 +744,65 @@ describe("plexServer.sectionItems", () => {
     assert.equal(parsed.searchParams.get("includeGuids"), "1");
     assert.equal(parsed.searchParams.get("X-Plex-Container-Start"), "0");
     assert.equal(parsed.searchParams.get("X-Plex-Container-Size"), "50");
+    assert.equal(parsed.pathname, "/library/sections/1/all");
+  });
+
+  it("uses the firstCharacter path when provided, including # as %23", async () => {
+    let requestedUrlB: string | null = null;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      requestedUrlB =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      return jsonResponse(200, {
+        MediaContainer: { size: 6, Metadata: [] },
+      });
+    }) as typeof fetch;
+
+    await client().sectionItems({
+      sectionKey: "1",
+      sort: "title",
+      start: 0,
+      size: 48,
+      firstCharacter: "B",
+      genre: "1131",
+      unwatched: true,
+    });
+
+    assert.ok(requestedUrlB);
+    const parsedB = new URL(requestedUrlB);
+    assert.equal(parsedB.pathname, "/library/sections/1/firstCharacter/B");
+    assert.equal(parsedB.searchParams.get("genre"), "1131");
+    assert.equal(parsedB.searchParams.get("unwatched"), "1");
+    assert.equal(parsedB.searchParams.get("sort"), "titleSort:asc");
+    assert.equal(parsedB.searchParams.get("includeGuids"), "1");
+
+    let requestedUrlHash: string | null = null;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      requestedUrlHash =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      return jsonResponse(200, {
+        MediaContainer: { size: 2, Metadata: [] },
+      });
+    }) as typeof fetch;
+
+    await client().sectionItems({
+      sectionKey: "1",
+      sort: "title",
+      start: 0,
+      size: 48,
+      firstCharacter: "#",
+    });
+
+    assert.ok(requestedUrlHash);
+    const parsedHash = new URL(requestedUrlHash);
+    assert.equal(parsedHash.pathname, "/library/sections/1/firstCharacter/%23");
   });
 });
 
@@ -776,6 +835,41 @@ describe("plexServer.sectionGenres", () => {
     assert.deepEqual(genres, [
       { id: "1131", title: "Action" },
       { id: "18", title: "Drama" },
+    ]);
+  });
+});
+
+describe("plexServer.sectionFirstCharacters", () => {
+  it("parses Directory[] into { label, count }, skipping malformed rows", async () => {
+    let requestedUrl: string | null = null;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      requestedUrl =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      return jsonResponse(200, {
+        MediaContainer: {
+          Directory: [
+            { key: 1, title: "#", size: 2 },
+            { key: 2, title: "A", size: 11 },
+            { key: 3, title: "B", size: 6 },
+            { size: 99 },
+            { key: 4, size: 5 },
+            { key: 5, title: 123, size: 1 },
+          ],
+        },
+      });
+    }) as typeof fetch;
+
+    const characters = await client().sectionFirstCharacters("1");
+
+    assert.equal(requestedUrl, `${BASE_URL}/library/sections/1/firstCharacter`);
+    assert.deepEqual(characters, [
+      { label: "#", count: 2 },
+      { label: "A", count: 11 },
+      { label: "B", count: 6 },
     ]);
   });
 });

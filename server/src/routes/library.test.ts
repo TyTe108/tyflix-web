@@ -127,6 +127,7 @@ describe("library routes", () => {
       sort: "year",
       genre: null,
       unwatched: false,
+      firstCharacter: null,
     });
   });
 
@@ -180,6 +181,7 @@ describe("library routes", () => {
       sort: "title",
       genre: "1131",
       unwatched: true,
+      firstCharacter: null,
     });
   });
 
@@ -209,6 +211,128 @@ describe("library routes", () => {
     );
     assert.equal(badUnwatched.status, 400);
     assert.deepEqual(await badUnwatched.json(), { error: "invalid unwatched" });
+  });
+
+  it("GET /sections/:key/items passes firstCharacter through and echoes it", async () => {
+    const calls: Array<{
+      sectionKey: string;
+      sort: string;
+      start: number;
+      size: number;
+      firstCharacter?: string;
+    }> = [];
+    const app = createApp({
+      async sections() {
+        return [];
+      },
+      async sectionItems(options: {
+        sectionKey: string;
+        sort: LibrarySortKey;
+        start: number;
+        size: number;
+        firstCharacter?: string;
+      }) {
+        calls.push(options);
+        return { items: [], totalSize: 6 };
+      },
+    } as unknown as PlexServerClient);
+
+    const response = await fetchLocal(
+      app,
+      "/api/library/sections/1/items?firstCharacter=B",
+      sessionCookie(),
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(calls, [
+      {
+        sectionKey: "1",
+        sort: "title",
+        start: 0,
+        size: 50,
+        firstCharacter: "B",
+      },
+    ]);
+    assert.deepEqual(await response.json(), {
+      items: [],
+      totalSize: 6,
+      start: 0,
+      size: 50,
+      sort: "title",
+      genre: null,
+      unwatched: false,
+      firstCharacter: "B",
+    });
+  });
+
+  it("GET /sections/:key/items rejects invalid firstCharacter with 400", async () => {
+    const app = createApp({
+      async sections() {
+        return [];
+      },
+      async sectionItems() {
+        throw new Error("should not be called");
+      },
+    } as unknown as PlexServerClient);
+    const cookie = sessionCookie();
+
+    const badMulti = await fetchLocal(
+      app,
+      "/api/library/sections/1/items?firstCharacter=AB",
+      cookie,
+    );
+    assert.equal(badMulti.status, 400);
+    assert.deepEqual(await badMulti.json(), { error: "invalid firstCharacter" });
+
+    const badSymbol = await fetchLocal(
+      app,
+      "/api/library/sections/1/items?firstCharacter=%24",
+      cookie,
+    );
+    assert.equal(badSymbol.status, 400);
+    assert.deepEqual(await badSymbol.json(), { error: "invalid firstCharacter" });
+  });
+
+  it("GET /sections/:key/first-characters returns the character index", async () => {
+    const app = createApp({
+      async sectionFirstCharacters(sectionKey: string) {
+        assert.equal(sectionKey, "1");
+        return [
+          { label: "#", count: 2 },
+          { label: "A", count: 11 },
+          { label: "B", count: 6 },
+        ];
+      },
+    } as unknown as PlexServerClient);
+
+    const response = await fetchLocal(
+      app,
+      "/api/library/sections/1/first-characters",
+      sessionCookie(),
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      characters: [
+        { label: "#", count: 2 },
+        { label: "A", count: 11 },
+        { label: "B", count: 6 },
+      ],
+    });
+  });
+
+  it("GET /sections/:key/first-characters rejects a non-numeric section key with 400", async () => {
+    const app = createApp({
+      async sectionFirstCharacters() {
+        throw new Error("should not be called");
+      },
+    } as unknown as PlexServerClient);
+
+    const response = await fetchLocal(
+      app,
+      "/api/library/sections/abc/first-characters",
+      sessionCookie(),
+    );
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: "invalid section key" });
   });
 
   it("GET /sections/:key/genres returns the genre list", async () => {
@@ -291,6 +415,7 @@ describe("library routes", () => {
       sort: "title",
       genre: null,
       unwatched: false,
+      firstCharacter: null,
     });
   });
 
