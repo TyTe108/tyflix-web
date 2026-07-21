@@ -73,8 +73,18 @@ const LogoutIcon = (
   </svg>
 );
 
+const LibraryIcon = (
+  <svg {...iconProps}>
+    <rect x="3" y="3" width="7" height="7" rx="1" />
+    <rect x="14" y="3" width="7" height="7" rx="1" />
+    <rect x="3" y="14" width="7" height="7" rx="1" />
+    <rect x="14" y="14" width="7" height="7" rx="1" />
+  </svg>
+);
+
 const NAV_ITEMS: NavItem[] = [
-  { to: "/", label: "Home", icon: HomeIcon, end: true },
+  { to: "/library", label: "Library", icon: LibraryIcon },
+  { to: "/home", label: "Home", icon: HomeIcon },
   { to: "/discover", label: "Discover", icon: DiscoverIcon },
   { to: "/watchlist", label: "Watchlist", icon: WatchlistIcon },
   { to: "/requests", label: "My Requests", icon: RequestsIcon },

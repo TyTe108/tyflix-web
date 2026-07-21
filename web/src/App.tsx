@@ -6,6 +6,7 @@ import { CollectionPage } from "./pages/CollectionPage";
 import { DiscoverPage } from "./pages/DiscoverPage";
 import { HomePage } from "./pages/HomePage";
 import { IssueDetailPage } from "./pages/IssueDetailPage";
+import { LibraryPage } from "./pages/LibraryPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MediaDetailPage } from "./pages/MediaDetailPage";
 import { MyIssuesPage } from "./pages/MyIssuesPage";
@@ -20,7 +21,10 @@ export function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route element={<ProtectedRoute />}>
         <Route element={<AppShell />}>
-          <Route path="/" element={<HomePage />} />
+          <Route path="/" element={<Navigate to="/library" replace />} />
+          <Route path="/home" element={<HomePage />} />
+          <Route path="/library" element={<LibraryPage />} />
+          <Route path="/library/:mediaType" element={<LibraryPage />} />
           <Route path="/discover" element={<DiscoverPage />} />
           <Route path="/watchlist" element={<WatchlistPage />} />
           <Route path="/requests" element={<MyRequestsPage />} />
