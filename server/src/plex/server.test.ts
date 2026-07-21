@@ -569,3 +569,145 @@ describe("plexServer.selectSubtitle", () => {
     );
   });
 });
+
+describe("plexServer.sections", () => {
+  it("returns movie and show sections, skipping other types and malformed rows", async () => {
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      assert.equal(url, `${BASE_URL}/library/sections`);
+      return jsonResponse(200, {
+        MediaContainer: {
+          Directory: [
+            { key: 1, title: "Movies", type: "movie" },
+            { key: 2, title: "TV Shows", type: "show" },
+            { key: 3, title: "Music", type: "artist" },
+            { key: 4, title: "Photos", type: "photo" },
+            { title: "No Key", type: "movie" },
+            { key: 5, type: "movie" },
+            { key: "6", title: "Bad Type", type: "unknown" },
+          ],
+        },
+      });
+    }) as typeof fetch;
+
+    const sections = await client().sections();
+    assert.deepEqual(sections, [
+      { key: "1", title: "Movies", type: "movie" },
+      { key: "2", title: "TV Shows", type: "show" },
+    ]);
+  });
+});
+
+describe("plexServer.sectionItems", () => {
+  it("pages and parses library items with best-effort fields", async () => {
+    let requestedUrl: string | null = null;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      requestedUrl =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      return jsonResponse(200, {
+        MediaContainer: {
+          totalSize: 120,
+          Metadata: [
+            {
+              ratingKey: 1001,
+              type: "movie",
+              title: "Inception",
+              year: 2010,
+              thumb: "/library/metadata/1001/thumb/1",
+              addedAt: 1700000000,
+              Guid: [{ id: "tmdb://27205" }, { id: "imdb://tt1375666" }],
+            },
+            {
+              ratingKey: 2002,
+              type: "show",
+              title: "Severance",
+              Guid: [{ id: "tmdb://95396" }],
+            },
+            // Missing ratingKey — skipped.
+            { type: "movie", title: "Ghost" },
+            // Malformed guid rows should not throw.
+            {
+              ratingKey: 3003,
+              type: "movie",
+              title: "No TMDB",
+              Guid: [{ id: "imdb://tt0111161" }, { id: 123 }],
+            },
+          ],
+        },
+      });
+    }) as typeof fetch;
+
+    const result = await client().sectionItems({
+      sectionKey: "1",
+      sort: "added",
+      start: 50,
+      size: 25,
+    });
+
+    assert.ok(requestedUrl);
+    const parsed = new URL(requestedUrl);
+    assert.equal(parsed.pathname, "/library/sections/1/all");
+    assert.equal(parsed.searchParams.get("sort"), "addedAt:desc");
+    assert.equal(parsed.searchParams.get("includeGuids"), "1");
+    assert.equal(parsed.searchParams.get("X-Plex-Container-Start"), "50");
+    assert.equal(parsed.searchParams.get("X-Plex-Container-Size"), "25");
+
+    assert.equal(result.totalSize, 120);
+    assert.deepEqual(result.items, [
+      {
+        ratingKey: "1001",
+        type: "movie",
+        title: "Inception",
+        year: 2010,
+        thumb: "/library/metadata/1001/thumb/1",
+        addedAt: 1700000000,
+        tmdbId: 27205,
+      },
+      {
+        ratingKey: "2002",
+        type: "show",
+        title: "Severance",
+        year: null,
+        thumb: null,
+        addedAt: null,
+        tmdbId: 95396,
+      },
+      {
+        ratingKey: "3003",
+        type: "movie",
+        title: "No TMDB",
+        year: null,
+        thumb: null,
+        addedAt: null,
+        tmdbId: null,
+      },
+    ]);
+  });
+
+  it("falls back to container size then items length for totalSize", async () => {
+    globalThis.fetch = (async () =>
+      jsonResponse(200, {
+        MediaContainer: {
+          size: 3,
+          Metadata: [{ ratingKey: 1, type: "movie", title: "A" }],
+        },
+      })) as typeof fetch;
+
+    const result = await client().sectionItems({
+      sectionKey: "2",
+      sort: "title",
+      start: 0,
+      size: 50,
+    });
+    assert.equal(result.totalSize, 3);
+  });
+});

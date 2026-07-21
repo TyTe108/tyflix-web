@@ -65,6 +65,35 @@ export type PlaybackMeta = {
   subtitle: SubtitleStream[];
 };
 
+export type LibrarySection = {
+  key: string;
+  title: string;
+  type: "movie" | "show";
+};
+
+export type LibraryItem = {
+  ratingKey: string;
+  type: string;
+  title: string;
+  year: number | null;
+  thumb: string | null;
+  addedAt: number | null;
+  tmdbId: number | null;
+};
+
+export type LibrarySortKey = "title" | "added" | "year" | "rating";
+
+const LIBRARY_SORT_TO_PLEX: Record<LibrarySortKey, string> = {
+  title: "titleSort:asc",
+  added: "addedAt:desc",
+  year: "year:desc",
+  rating: "rating:desc",
+};
+
+export function mapLibrarySort(sort: LibrarySortKey): string {
+  return LIBRARY_SORT_TO_PLEX[sort];
+}
+
 export function createPlexServerClient(options: PlexServerClientOptions) {
   const { baseUrl, token } = options;
   const itemCache = new Map<string, PlexItem>();
@@ -399,6 +428,88 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     return { durationMs, creditsOffsetMs, partId, audio, subtitle };
   }
 
+  async function sections(): Promise<LibrarySection[]> {
+    const body = await getJson("/library/sections");
+    const rows = asArray(mediaContainer(body)?.Directory);
+    const result: LibrarySection[] = [];
+
+    for (const row of rows) {
+      if (typeof row !== "object" || row === null) {
+        continue;
+      }
+      const key = (row as { key?: unknown }).key;
+      const title = (row as { title?: unknown }).title;
+      const type = (row as { type?: unknown }).type;
+      if (key === undefined || key === null) {
+        continue;
+      }
+      if (typeof title !== "string") {
+        continue;
+      }
+      if (type !== "movie" && type !== "show") {
+        continue;
+      }
+      result.push({ key: String(key), title, type });
+    }
+
+    return result;
+  }
+
+  async function sectionItems(options: {
+    sectionKey: string;
+    sort: LibrarySortKey;
+    start: number;
+    size: number;
+  }): Promise<{ items: LibraryItem[]; totalSize: number }> {
+    const { sectionKey, sort, start, size } = options;
+    const body = await getJson(`/library/sections/${sectionKey}/all`, {
+      sort: mapLibrarySort(sort),
+      includeGuids: "1",
+      "X-Plex-Container-Start": String(start),
+      "X-Plex-Container-Size": String(size),
+    });
+
+    const container = mediaContainer(body);
+    const rows = asArray(container?.Metadata);
+    const items: LibraryItem[] = [];
+
+    for (const row of rows) {
+      if (typeof row !== "object" || row === null) {
+        continue;
+      }
+      const ratingKey = (row as { ratingKey?: unknown }).ratingKey;
+      if (ratingKey === undefined || ratingKey === null) {
+        continue;
+      }
+
+      const typeRaw = (row as { type?: unknown }).type;
+      const titleRaw = (row as { title?: unknown }).title;
+      const yearRaw = (row as { year?: unknown }).year;
+      const thumbRaw = (row as { thumb?: unknown }).thumb;
+      const addedAtRaw = (row as { addedAt?: unknown }).addedAt;
+      const guidRaw = (row as { Guid?: unknown }).Guid;
+
+      items.push({
+        ratingKey: String(ratingKey),
+        type: typeof typeRaw === "string" ? typeRaw : "",
+        title: typeof titleRaw === "string" ? titleRaw : "",
+        year: typeof yearRaw === "number" ? yearRaw : null,
+        thumb: typeof thumbRaw === "string" ? thumbRaw : null,
+        addedAt: typeof addedAtRaw === "number" ? addedAtRaw : null,
+        tmdbId: tmdbIdFromGuids(guidRaw),
+      });
+    }
+
+    const totalSize =
+      typeof container?.totalSize === "number"
+        ? container.totalSize
+        : typeof container?.size === "number"
+          ? container.size
+          : items.length;
+
+    return { items, totalSize };
+  }
+
   // Selects (or clears with subtitleStreamID "0") the burned-in subtitle for
   // the calling user on a media part. Uses the USER's token — selection is
   // per-account on the Plex server, not the owner token.
@@ -441,6 +552,8 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     episodes,
     nextEpisode,
     playbackMeta,
+    sections,
+    sectionItems,
     selectSubtitle,
   };
 }
@@ -550,6 +663,25 @@ function sumMediaPartSizes(media: unknown): number {
 
 function plexBool(value: unknown): boolean {
   return value === true || value === 1 || value === "1";
+}
+
+const TMDB_GUID_RE = /^tmdb:\/\/(\d+)$/;
+
+function tmdbIdFromGuids(guids: unknown): number | null {
+  for (const row of asArray(guids)) {
+    if (typeof row !== "object" || row === null) {
+      continue;
+    }
+    const id = (row as { id?: unknown }).id;
+    if (typeof id !== "string") {
+      continue;
+    }
+    const match = TMDB_GUID_RE.exec(id);
+    if (match) {
+      return Number(match[1]);
+    }
+  }
+  return null;
 }
 
 function isTextBasedSubtitleCodec(codec: string | null): boolean {

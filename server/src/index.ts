@@ -12,6 +12,7 @@ import { createTransientTokenMinter } from "./plex/transientToken";
 import { createAdminRouter } from "./routes/admin";
 import { createAuthRouter } from "./routes/auth";
 import { createDiscoverRouter } from "./routes/discover";
+import { createLibraryRouter } from "./routes/library";
 import { createIssuesRouter } from "./routes/issues";
 import { createMeRouter } from "./routes/me";
 import { createRequestsRouter } from "./routes/requests";
@@ -141,6 +142,12 @@ app.use(
   "/api/discover",
   requireAuth(config.sessionSecret),
   createDiscoverRouter({ tmdb, mediaStatus }),
+);
+
+app.use(
+  "/api/library",
+  requireAuth(config.sessionSecret),
+  createLibraryRouter({ plexServer }),
 );
 
 app.use(
