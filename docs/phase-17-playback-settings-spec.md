@@ -141,3 +141,25 @@ Media[0]/Part[0] scoping yields clean single stream-sets; durations match runtim
 - **17.7 (backend)** — add `audioStreamID` to `parsePlayTuning` + `PlayTuning` + `WatchTuning` + `fetchWatch` (mirrors 17.5's params; `buildHlsUrl` already accepts it from 17.2). Unit-tested, no UI.
 - **17.8 (frontend)** — Audio settings group (populated from `descriptor.streams.audio`) + generalize the restart to a COMBINED tuning so changing audio preserves the current quality (and vice-versa); resume via the same in-place rebuild as 17.6.
 - Downstream shift: **17.9** Subtitles (sidecar), **17.10** Subtitle styling, **17.11** Auto Play. `subtitleStreamID` gets added to the backend when subtitles are built (17.9), same as audio here.
+
+### 17.9 subtitle decision — BURN-IN (Tyler, 2026-07-19; supersedes D2 sidecar plan)
+
+Live probe (Les Mis, srt subs, via a subtitleStreamID transcode request): the master playlist came back with ONLY a video `EXT-X-STREAM-INF` — no `TYPE=SUBTITLES` rendition — i.e. Plex **burns the subtitle into the video**. `subtitles=auto` → 400. So the styleable-sidecar path (D2) is NOT trivially available; a WebVTT rendition would need reverse-engineering Plex's subtitle-transcode profile params (fiddly, version-dependent, text-only). Tyler chose **burn-in**: functional parity (on/off + track selection, works for ALL sub types incl. PGS/image), no client-side styling/position/offset.
+
+- **Subtitle styling (old 17.10) is DROPPED** — burned-in subs can't be styled.
+- **17.9 (bundled backend + frontend)** — backend: add `subtitleStreamID` to `parsePlayTuning`/`PlayTuning`/`WatchTuning`/`fetchWatch` (mirror 17.7's audioStreamID). Frontend: a Subtitle group ("Off" + every `descriptor.streams.subtitle` track) extending `StreamSettings` to `{ quality, audioStreamId, subtitleStreamId }`; reuses the 17.8 combined-tuning restart so changing subtitle preserves quality + audio and resumes. Default = Off.
+- **17.10** — Auto Play (next episode).
+- Verify burn-in LIVE (screenshot: enable a sub → text visible on the picture). If `subtitleStreamID` alone doesn't burn, the fix is adding `subtitles=burn` to `buildHlsUrl` (small transcodeUrl change) — flagged, not assumed.
+
+### 17.9.1 — subtitle burn fix (verified live 2026-07-19)
+
+Smoke test of 17.9 failed: subtitle selected (English highlighted) but NOT visible on the picture → `subtitleStreamID` alone does not burn. Live probe on the transcode URL: **`subtitles=burn` → 200** (works); `subtitles=auto`, `subtitles=none`, and `directStream=0` all → **400** with our forced-H.264 profile. Fix: `buildTranscodeUrl` emits `subtitles=burn` whenever `subtitleStreamID` is set (keep `directStream=1`). Off (no `subtitleStreamID`) → no `subtitles` param. 17.9 + 17.9.1 commit together once burn-in is confirmed visible.
+
+### 17.9 / 17.9.1 DEFERRED — subtitles blocked on transcode profile + HW (2026-07-19)
+
+Smoke test failed twice (subtitle selected + highlighted, but not visible on the picture). Root cause, confirmed by curling Plex's `/video/:/transcode/universal/decision` directly (Mac→Dell LAN, admin token): with `subtitleStreamID=<id>&subtitles=burn`, Plex's decision returns ONLY the video (transcode) + audio (copy) streams — **the subtitle stream is absent entirely** (identical for `directStream` 0/1/omitted). So our minimal `X-Plex-Client-Profile-Extra` (declares only a video transcode target) makes Plex DROP the subtitle rather than burn it. Plex's own web client sends a fuller client profile that declares subtitle handling; replicating that is genuine reverse-engineering. And burn = full video re-encode → brutal cold-start on the CPU-only transcode (30s+ of black observed).
+
+**Decision (Tyler, 2026-07-19): DEFER subtitles.** Shelve 17.9 + 17.9.1 (git stash). Phase 17 ships with **Speed + Quality + Audio** (all verified). Revisit subtitles after **HW transcode on the Arc A380** is enabled — that fixes both the slow cold-start and (with a proper transcode profile) most likely the drop. The shelved code is structurally correct (mirrors the audio flow); it needs the profile fix + HW transcode, not a rewrite. The shelved set also includes the `subtitleStreamID` backend param plumbing (route/client/buildHlsUrl) — re-apply when revisiting.
+
+## Phase 17 status at close
+Shipped + committed: 17.1 stream metadata, 17.2 transcode params, 17.3 custom control bar, 17.4 speed, 17.5 quality (backend), 17.6 quality (UI + restart), 17.3.1 dismiss fix, 17.7 audio (backend), 17.8 audio (UI + combined restart). Deferred: subtitles (17.9), Auto Play (17.10, optional). Native `<video controls>` fully replaced by a custom Plex-style control bar + gear menu with working Speed, Quality (bitrate/res, in-place restart-with-resume), and Audio-track selection.
