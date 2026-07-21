@@ -11,6 +11,7 @@ import {
   type MediaType,
   type StudioOption,
 } from "../api/discover";
+import { Dropdown } from "../components/Dropdown";
 import { MediaCard } from "../components/MediaCard";
 
 type LoadStatus = "loading" | "ready" | "error";
@@ -250,49 +251,53 @@ export function DiscoverPage() {
             <>
               <label className="discover-genre-filter">
                 <span>Genre</span>
-                <select
-                  value={selectedGenreId ?? ""}
-                  disabled={genresLoading}
-                  onChange={(event) =>
-                    setSelectedGenreId(
-                      event.target.value === ""
-                        ? null
-                        : Number(event.target.value),
-                    )
+                <Dropdown
+                  label="Genre"
+                  value={
+                    selectedGenreId != null ? String(selectedGenreId) : ""
                   }
-                >
-                  <option value="">
-                    {genresLoading ? "Loading genres…" : "All genres"}
-                  </option>
-                  {genres.map((genre) => (
-                    <option key={genre.id} value={genre.id}>
-                      {genre.name}
-                    </option>
-                  ))}
-                </select>
+                  options={
+                    genresLoading
+                      ? [{ value: "", label: "Loading genres…" }]
+                      : [
+                          { value: "", label: "All genres" },
+                          ...genres.map((genre) => ({
+                            value: String(genre.id),
+                            label: genre.name,
+                          })),
+                        ]
+                  }
+                  disabled={genresLoading}
+                  onChange={(v) =>
+                    setSelectedGenreId(v === "" ? null : Number(v))
+                  }
+                />
               </label>
 
               <label className="discover-genre-filter">
                 <span>{mediaType === "movie" ? "Studio" : "Network"}</span>
-                <select
-                  value={selectedSourceId ?? ""}
-                  onChange={(event) =>
-                    setSelectedSourceId(
-                      event.target.value === ""
-                        ? null
-                        : Number(event.target.value),
-                    )
+                <Dropdown
+                  label={mediaType === "movie" ? "Studio" : "Network"}
+                  value={
+                    selectedSourceId != null ? String(selectedSourceId) : ""
                   }
-                >
-                  <option value="">
-                    {mediaType === "movie" ? "All studios" : "All networks"}
-                  </option>
-                  {sourceOptions.map((source) => (
-                    <option key={source.id} value={source.id}>
-                      {source.name}
-                    </option>
-                  ))}
-                </select>
+                  options={[
+                    {
+                      value: "",
+                      label:
+                        mediaType === "movie"
+                          ? "All studios"
+                          : "All networks",
+                    },
+                    ...sourceOptions.map((source) => ({
+                      value: String(source.id),
+                      label: source.name,
+                    })),
+                  ]}
+                  onChange={(v) =>
+                    setSelectedSourceId(v === "" ? null : Number(v))
+                  }
+                />
               </label>
             </>
           ) : null}

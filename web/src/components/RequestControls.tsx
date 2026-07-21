@@ -4,6 +4,7 @@ import type {
   RequestSortKey,
   RequestStatusFilter,
 } from "../lib/requestControls";
+import { Dropdown } from "./Dropdown";
 
 type RequestControlsProps = {
   value: RequestControlsState;
@@ -42,62 +43,38 @@ export function RequestControls({ value, onChange }: RequestControlsProps) {
     <div className="request-filters">
       <label className="request-filter">
         <span>Media</span>
-        <select
-          aria-label="Filter by media type"
+        <Dropdown
+          label="Media"
           value={value.media}
-          onChange={(event) =>
-            onChange({
-              ...value,
-              media: event.target.value as RequestMediaFilter,
-            })
+          options={MEDIA_OPTIONS}
+          onChange={(v) =>
+            onChange({ ...value, media: v as RequestMediaFilter })
           }
-        >
-          {MEDIA_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        />
       </label>
 
       <label className="request-filter">
         <span>Status</span>
-        <select
-          aria-label="Filter by status"
+        <Dropdown
+          label="Status"
           value={value.status}
-          onChange={(event) =>
-            onChange({
-              ...value,
-              status: event.target.value as RequestStatusFilter,
-            })
+          options={STATUS_OPTIONS}
+          onChange={(v) =>
+            onChange({ ...value, status: v as RequestStatusFilter })
           }
-        >
-          {STATUS_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        />
       </label>
 
       <label className="request-filter">
         <span>Sort</span>
-        <select
-          aria-label="Sort by"
+        <Dropdown
+          label="Sort"
           value={value.sort}
-          onChange={(event) =>
-            onChange({
-              ...value,
-              sort: event.target.value as RequestSortKey,
-            })
+          options={SORT_OPTIONS}
+          onChange={(v) =>
+            onChange({ ...value, sort: v as RequestSortKey })
           }
-        >
-          {SORT_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        />
       </label>
 
       <button

@@ -1582,17 +1582,6 @@ a:hover {
   font-size: 0.85rem;
 }
 
-.discover-genre-filter select {
-  min-width: 12rem;
-  padding: 0.5rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  color: var(--text);
-  font: inherit;
-  transition: border-color var(--transition);
-}
-
 .discover-results h2 {
   font-family: "Fraunces", "Iowan Old Style", Georgia, serif;
   font-weight: 600;
@@ -1616,6 +1605,7 @@ a:hover {
   flex-wrap: wrap;
   gap: 1rem;
   margin-top: 1rem;
+  margin-bottom: 1.75rem;
 }
 
 .library-control {
@@ -1656,6 +1646,15 @@ a:hover {
 
 .dropdown-trigger:hover {
   background: color-mix(in srgb, var(--surface-2) 85%, var(--text));
+}
+
+.dropdown-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.dropdown-trigger:disabled:hover {
+  background: var(--surface-2);
 }
 
 .dropdown-trigger-label {
@@ -2256,18 +2255,6 @@ a:hover {
   font-weight: 600;
 }
 
-.request-profile-picker select {
-  min-width: 12rem;
-  padding: 0.5rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  color: var(--text);
-  font: inherit;
-  font-weight: 400;
-  transition: border-color var(--transition);
-}
-
 .request-season-pick {
   margin: 0;
   padding: 0;
@@ -2339,7 +2326,6 @@ a:hover {
   font-weight: 600;
 }
 
-.issue-report-form select,
 .issue-report-form textarea {
   width: 100%;
   font: inherit;
@@ -2352,7 +2338,6 @@ a:hover {
   transition: border-color var(--transition);
 }
 
-.issue-report-form select::placeholder,
 .issue-report-form textarea::placeholder {
   color: var(--text-muted);
 }
@@ -2588,21 +2573,6 @@ a:hover {
   flex-direction: column;
   gap: 0.25rem;
   font-size: 0.85rem;
-}
-
-.request-filter select {
-  min-width: 9rem;
-  padding: 0.5rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  color: var(--text);
-  font: inherit;
-  transition: border-color var(--transition);
-}
-
-.request-filter select:hover {
-  border-color: color-mix(in srgb, var(--border) 40%, var(--text));
 }
 
 .request-filter-dir {

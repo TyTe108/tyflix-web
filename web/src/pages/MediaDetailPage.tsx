@@ -24,6 +24,7 @@ import {
   createIssue,
   type IssueType,
 } from "../api/issues";
+import { Dropdown } from "../components/Dropdown";
 import {
   createRequest,
   fetchRequestProfiles,
@@ -454,18 +455,18 @@ function ReportIssueControls({ detail }: { detail: MediaDetail }) {
         >
           <label>
             <span>Issue type</span>
-            <select
+            <Dropdown
+              label="Issue type"
               value={issueType}
-              onChange={(event) =>
-                setIssueType(event.target.value as IssueType)
-              }
+              options={[
+                { value: "video", label: "Video" },
+                { value: "audio", label: "Audio" },
+                { value: "subtitles", label: "Subtitles" },
+                { value: "other", label: "Other" },
+              ]}
+              onChange={(v) => setIssueType(v as IssueType)}
               disabled={issueState.kind === "submitting"}
-            >
-              <option value="video">Video</option>
-              <option value="audio">Audio</option>
-              <option value="subtitles">Subtitles</option>
-              <option value="other">Other</option>
-            </select>
+            />
           </label>
           <label>
             <span>What’s wrong?</span>
@@ -596,19 +597,18 @@ function RequestControls({ detail }: { detail: MediaDetail }) {
     requestProfiles && requestProfiles.profiles.length > 0 ? (
       <label className="request-profile-picker">
         <span>Quality profile</span>
-        <select
-          value={selectedProfileId ?? ""}
+        <Dropdown
+          label="Quality profile"
+          value={String(
+            selectedProfileId ?? requestProfiles.profiles[0]?.id ?? "",
+          )}
+          options={requestProfiles.profiles.map((profile) => ({
+            value: String(profile.id),
+            label: profile.name,
+          }))}
+          onChange={(v) => setSelectedProfileId(Number(v))}
           disabled={submitting}
-          onChange={(event) =>
-            setSelectedProfileId(Number(event.currentTarget.value))
-          }
-        >
-          {requestProfiles.profiles.map((profile) => (
-            <option key={profile.id} value={profile.id}>
-              {profile.name}
-            </option>
-          ))}
-        </select>
+        />
       </label>
     ) : null;
 

@@ -11,6 +11,7 @@ type DropdownProps = {
   options: DropdownOption[];
   onChange: (value: string) => void;
   id?: string;
+  disabled?: boolean;
 };
 
 export function Dropdown({
@@ -19,6 +20,7 @@ export function Dropdown({
   options,
   onChange,
   id,
+  disabled = false,
 }: DropdownProps) {
   const generatedId = useId();
   const triggerId = id ?? generatedId;
@@ -46,6 +48,12 @@ export function Dropdown({
     },
     [onChange],
   );
+
+  useEffect(() => {
+    if (disabled) {
+      setOpen(false);
+    }
+  }, [disabled]);
 
   useEffect(() => {
     if (open) {
@@ -79,6 +87,10 @@ export function Dropdown({
   }, [highlightedIndex, open]);
 
   function handleTriggerKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    if (disabled) {
+      return;
+    }
+
     if (!open) {
       if (
         event.key === "ArrowDown" ||
@@ -129,7 +141,13 @@ export function Dropdown({
         aria-expanded={open}
         aria-controls={open ? listboxId : undefined}
         aria-label={label}
-        onClick={() => setOpen((isOpen) => !isOpen)}
+        aria-disabled={disabled}
+        disabled={disabled}
+        onClick={() => {
+          if (!disabled) {
+            setOpen((isOpen) => !isOpen);
+          }
+        }}
         onKeyDown={handleTriggerKeyDown}
       >
         <span className="dropdown-trigger-label">{selectedLabel}</span>
@@ -151,7 +169,7 @@ export function Dropdown({
         </svg>
       </button>
 
-      {open ? (
+      {open && !disabled ? (
         <ul
           id={listboxId}
           role="listbox"
