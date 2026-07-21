@@ -153,4 +153,14 @@ which one is live, so it composes the URL; `/next` stays a pure metadata call.
   the next at end; Auto Play off → stays put at end; last episode → no navigation
   and no error (`nextEpisode: null`). Also verified green pre-smoke: server
   172/172 tests (incl. the `/next` suite), `web` `tsc -b` clean.
-- _21.2–21.4: fill in as each is smoke-tested before commit._
+- **21.2** (verified 2026-07-20, backend-only): 174/174 server tests, web `tsc`
+  clean, live E2E `playbackMeta(2517).creditsOffsetMs === 3347052`. Committed
+  `8c933ca`.
+- **21.3** (verified 2026-07-20): 174/174 tests, `tsc` clean, live E2E
+  `nextEpisode(2517).thumb` = real per-episode path. Committed `f5b182c`.
+- **21.4a** (smoke-tested + passed 2026-07-20): card shows in the last 30s over
+  an episode with the next-ep thumbnail + countdown; Play now advances; Dismiss
+  hides (advance still fires at end — deferred to 21.4b); movies show no card.
+  Fix 21.4a.1 stabilized the thumb fallback (memoized array + content-keyed
+  reset). Committed.
+- _21.4b: fill in when smoke-tested._

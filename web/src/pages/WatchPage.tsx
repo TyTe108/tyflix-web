@@ -129,8 +129,10 @@ export function WatchPage() {
   });
   const autoPlayRef = useRef(autoPlay);
   const nextEpisodeRef = useRef(nextEpisode);
+  const upNextDismissedRef = useRef(upNextDismissed);
   autoPlayRef.current = autoPlay;
   nextEpisodeRef.current = nextEpisode;
+  upNextDismissedRef.current = upNextDismissed;
 
   useEffect(() => {
     let load: (() => Promise<WatchDescriptor>) | null = null;
@@ -256,6 +258,9 @@ export function WatchPage() {
 
     const onEnded = () => {
       if (!autoPlayRef.current) {
+        return;
+      }
+      if (upNextDismissedRef.current) {
         return;
       }
       const next = nextEpisodeRef.current;
@@ -401,13 +406,21 @@ export function WatchPage() {
   };
 
   const remainingSec = playbackClock.duration - playbackClock.currentTime;
+  const creditsOffsetMs = descriptor?.creditsOffsetMs ?? null;
+  const atCredits =
+    typeof creditsOffsetMs === "number" &&
+    Number.isFinite(creditsOffsetMs) &&
+    playbackClock.currentTime * 1000 >= creditsOffsetMs;
+  // Credits marker (when present) OR the last-30s floor/fallback.
+  const inUpNextWindow =
+    atCredits || remainingSec <= UP_NEXT_WINDOW_SEC;
   const showUpNext =
     isEpisode &&
     autoPlay &&
     nextEpisode !== null &&
     playbackClock.duration > 0 &&
     remainingSec > 0 &&
-    remainingSec <= UP_NEXT_WINDOW_SEC &&
+    inUpNextWindow &&
     !upNextDismissed;
 
   // Stable across timeupdate re-renders so UpNextCard's local→remote image
@@ -435,7 +448,11 @@ export function WatchPage() {
         episodeNumber={nextEpisode.episodeNumber}
         title={nextEpisode.title}
         thumbUrls={thumbUrls}
-        secondsRemaining={Math.ceil(remainingSec)}
+        secondsRemaining={
+          remainingSec <= UP_NEXT_WINDOW_SEC
+            ? Math.ceil(remainingSec)
+            : null
+        }
         onPlayNow={() => {
           navigate(`/watch/episode/${nextEpisode.ratingKey}`);
         }}

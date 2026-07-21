@@ -5,7 +5,7 @@ export type UpNextCardProps = {
   episodeNumber: number;
   title: string;
   thumbUrls: string[];
-  secondsRemaining: number;
+  secondsRemaining: number | null;
   onPlayNow: () => void;
   onDismiss: () => void;
 };
@@ -49,9 +49,11 @@ export function UpNextCard({
       <p className="watch-upnext-meta">
         S{seasonNumber}E{episodeNumber} · {title}
       </p>
-      <p className="watch-upnext-countdown">
-        Starting in {secondsRemaining}s
-      </p>
+      {typeof secondsRemaining === "number" ? (
+        <p className="watch-upnext-countdown">
+          Starting in {secondsRemaining}s
+        </p>
+      ) : null}
       <div className="watch-upnext-actions">
         <button type="button" className="btn" onClick={onPlayNow}>
           Play now
