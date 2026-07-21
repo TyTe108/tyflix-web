@@ -4,7 +4,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   fetchCredits,
   fetchMovie,
@@ -69,10 +69,42 @@ function parseId(raw: string | undefined): number | null {
   return Number(raw);
 }
 
+const backIcon = (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M10 3 5 8l5 5" />
+  </svg>
+);
+
 export function MediaDetailPage() {
   const params = useParams<{ type: string; id: string }>();
   const mediaType = parseType(params.type);
   const id = parseId(params.id);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const canGoBack = location.key !== "default";
+  const backControl = canGoBack ? (
+    <button
+      type="button"
+      className="back-link"
+      onClick={() => navigate(-1)}
+    >
+      {backIcon}
+      Back
+    </button>
+  ) : (
+    <Link className="back-link" to="/">
+      {backIcon}
+      Back
+    </Link>
+  );
 
   const [detail, setDetail] = useState<MediaDetail | null>(null);
   const [status, setStatus] = useState<LoadStatus>("loading");
@@ -124,9 +156,7 @@ export function MediaDetailPage() {
 
   return (
     <main className="page page-wide">
-      <header className="row">
-        <Link to="/discover">← Back to Discover</Link>
-      </header>
+      <header className="row">{backControl}</header>
 
       {status === "loading" ? (
         <p className="muted">Loading…</p>
@@ -140,7 +170,7 @@ export function MediaDetailPage() {
               Retry
             </button>
           ) : (
-            <Link to="/discover">Back to Discover</Link>
+            backControl
           )}
         </div>
       ) : null}
