@@ -12,6 +12,7 @@ import {
   type LibrarySortKey,
 } from "../api/library";
 import { LibraryCard } from "../components/LibraryCard";
+import { Dropdown } from "../components/Dropdown";
 import { PaginationControls } from "../components/PaginationControls";
 
 type LoadStatus = "loading" | "ready" | "error";
@@ -249,32 +250,33 @@ export function LibraryPage() {
       <div className="library-controls" aria-label="Library filters">
         <label className="library-control">
           <span>Sort</span>
-          <select
+          <Dropdown
+            label="Sort"
             value={sort}
-            onChange={(event) =>
-              onSortChange(event.target.value as LibrarySortKey)
-            }
-          >
-            <option value="title">Title</option>
-            <option value="added">Recently Added</option>
-            <option value="year">Year</option>
-            <option value="rating">Rating</option>
-          </select>
+            options={[
+              { value: "title", label: "Title" },
+              { value: "added", label: "Recently Added" },
+              { value: "year", label: "Year" },
+              { value: "rating", label: "Rating" },
+            ]}
+            onChange={(nextSort) => onSortChange(nextSort as LibrarySortKey)}
+          />
         </label>
 
         <label className="library-control">
           <span>Genre</span>
-          <select
+          <Dropdown
+            label="Genre"
             value={genreId ?? ""}
-            onChange={(event) => onGenreChange(event.target.value)}
-          >
-            <option value="">All genres</option>
-            {genres.map((genre) => (
-              <option key={genre.id} value={genre.id}>
-                {genre.title}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: "", label: "All genres" },
+              ...genres.map((genre) => ({
+                value: genre.id,
+                label: genre.title,
+              })),
+            ]}
+            onChange={onGenreChange}
+          />
         </label>
 
         <label className="library-control library-control--checkbox">
