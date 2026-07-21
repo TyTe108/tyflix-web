@@ -660,6 +660,8 @@ describe("plexServer.sectionItems", () => {
     assert.equal(parsed.searchParams.get("includeGuids"), "1");
     assert.equal(parsed.searchParams.get("X-Plex-Container-Start"), "50");
     assert.equal(parsed.searchParams.get("X-Plex-Container-Size"), "25");
+    assert.equal(parsed.searchParams.get("genre"), null);
+    assert.equal(parsed.searchParams.get("unwatched"), null);
 
     assert.equal(result.totalSize, 120);
     assert.deepEqual(result.items, [
@@ -709,6 +711,72 @@ describe("plexServer.sectionItems", () => {
       size: 50,
     });
     assert.equal(result.totalSize, 3);
+  });
+
+  it("adds genre and unwatched to the Plex query when provided", async () => {
+    let requestedUrl: string | null = null;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      requestedUrl =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      return jsonResponse(200, {
+        MediaContainer: { totalSize: 0, Metadata: [] },
+      });
+    }) as typeof fetch;
+
+    await client().sectionItems({
+      sectionKey: "1",
+      sort: "title",
+      start: 0,
+      size: 50,
+      genre: "1131",
+      unwatched: true,
+    });
+
+    assert.ok(requestedUrl);
+    const parsed = new URL(requestedUrl);
+    assert.equal(parsed.searchParams.get("genre"), "1131");
+    assert.equal(parsed.searchParams.get("unwatched"), "1");
+    assert.equal(parsed.searchParams.get("sort"), "titleSort:asc");
+    assert.equal(parsed.searchParams.get("includeGuids"), "1");
+    assert.equal(parsed.searchParams.get("X-Plex-Container-Start"), "0");
+    assert.equal(parsed.searchParams.get("X-Plex-Container-Size"), "50");
+  });
+});
+
+describe("plexServer.sectionGenres", () => {
+  it("parses Directory[] into { id, title }, skipping malformed rows", async () => {
+    let requestedUrl: string | null = null;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      requestedUrl =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      return jsonResponse(200, {
+        MediaContainer: {
+          Directory: [
+            { key: 1131, title: "Action" },
+            { key: "18", title: "Drama" },
+            { title: "No Key" },
+            { key: 999, type: "genre" },
+            { key: 100, title: 123 },
+          ],
+        },
+      });
+    }) as typeof fetch;
+
+    const genres = await client().sectionGenres("1");
+
+    assert.equal(requestedUrl, `${BASE_URL}/library/sections/1/genre`);
+    assert.deepEqual(genres, [
+      { id: "1131", title: "Action" },
+      { id: "18", title: "Drama" },
+    ]);
   });
 });
 

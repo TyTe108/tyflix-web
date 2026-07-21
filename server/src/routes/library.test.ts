@@ -67,6 +67,8 @@ describe("library routes", () => {
       sort: string;
       start: number;
       size: number;
+      genre?: string;
+      unwatched?: boolean;
     }> = [];
     const app = createApp({
       async sections() {
@@ -77,6 +79,8 @@ describe("library routes", () => {
         sort: LibrarySortKey;
         start: number;
         size: number;
+        genre?: string;
+        unwatched?: boolean;
       }) {
         calls.push(options);
         return {
@@ -121,7 +125,131 @@ describe("library routes", () => {
       start: 10,
       size: 20,
       sort: "year",
+      genre: null,
+      unwatched: false,
     });
+  });
+
+  it("GET /sections/:key/items passes genre and unwatched through to sectionItems", async () => {
+    const calls: Array<{
+      sectionKey: string;
+      sort: string;
+      start: number;
+      size: number;
+      genre?: string;
+      unwatched?: boolean;
+    }> = [];
+    const app = createApp({
+      async sections() {
+        return [];
+      },
+      async sectionItems(options: {
+        sectionKey: string;
+        sort: LibrarySortKey;
+        start: number;
+        size: number;
+        genre?: string;
+        unwatched?: boolean;
+      }) {
+        calls.push(options);
+        return { items: [], totalSize: 0 };
+      },
+    } as unknown as PlexServerClient);
+
+    const response = await fetchLocal(
+      app,
+      "/api/library/sections/1/items?genre=1131&unwatched=true",
+      sessionCookie(),
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(calls, [
+      {
+        sectionKey: "1",
+        sort: "title",
+        start: 0,
+        size: 50,
+        genre: "1131",
+        unwatched: true,
+      },
+    ]);
+    assert.deepEqual(await response.json(), {
+      items: [],
+      totalSize: 0,
+      start: 0,
+      size: 50,
+      sort: "title",
+      genre: "1131",
+      unwatched: true,
+    });
+  });
+
+  it("GET /sections/:key/items rejects invalid genre and unwatched with 400", async () => {
+    const app = createApp({
+      async sections() {
+        return [];
+      },
+      async sectionItems() {
+        throw new Error("should not be called");
+      },
+    } as unknown as PlexServerClient);
+    const cookie = sessionCookie();
+
+    const badGenre = await fetchLocal(
+      app,
+      "/api/library/sections/1/items?genre=action",
+      cookie,
+    );
+    assert.equal(badGenre.status, 400);
+    assert.deepEqual(await badGenre.json(), { error: "invalid genre" });
+
+    const badUnwatched = await fetchLocal(
+      app,
+      "/api/library/sections/1/items?unwatched=maybe",
+      cookie,
+    );
+    assert.equal(badUnwatched.status, 400);
+    assert.deepEqual(await badUnwatched.json(), { error: "invalid unwatched" });
+  });
+
+  it("GET /sections/:key/genres returns the genre list", async () => {
+    const app = createApp({
+      async sectionGenres(sectionKey: string) {
+        assert.equal(sectionKey, "1");
+        return [
+          { id: "1131", title: "Action" },
+          { id: "18", title: "Drama" },
+        ];
+      },
+    } as unknown as PlexServerClient);
+
+    const response = await fetchLocal(
+      app,
+      "/api/library/sections/1/genres",
+      sessionCookie(),
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      genres: [
+        { id: "1131", title: "Action" },
+        { id: "18", title: "Drama" },
+      ],
+    });
+  });
+
+  it("GET /sections/:key/genres rejects a non-numeric section key with 400", async () => {
+    const app = createApp({
+      async sectionGenres() {
+        throw new Error("should not be called");
+      },
+    } as unknown as PlexServerClient);
+
+    const response = await fetchLocal(
+      app,
+      "/api/library/sections/abc/genres",
+      sessionCookie(),
+    );
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: "invalid section key" });
   });
 
   it("GET /sections/:key/items uses defaults for optional query params", async () => {
@@ -161,6 +289,8 @@ describe("library routes", () => {
       start: 0,
       size: 50,
       sort: "title",
+      genre: null,
+      unwatched: false,
     });
   });
 

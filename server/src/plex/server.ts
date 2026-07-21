@@ -460,14 +460,24 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     sort: LibrarySortKey;
     start: number;
     size: number;
+    genre?: string;
+    unwatched?: boolean;
   }): Promise<{ items: LibraryItem[]; totalSize: number }> {
-    const { sectionKey, sort, start, size } = options;
-    const body = await getJson(`/library/sections/${sectionKey}/all`, {
+    const { sectionKey, sort, start, size, genre, unwatched } = options;
+    const query: Record<string, string> = {
       sort: mapLibrarySort(sort),
       includeGuids: "1",
       "X-Plex-Container-Start": String(start),
       "X-Plex-Container-Size": String(size),
-    });
+    };
+    if (genre !== undefined) {
+      query.genre = genre;
+    }
+    if (unwatched) {
+      query.unwatched = "1";
+    }
+
+    const body = await getJson(`/library/sections/${sectionKey}/all`, query);
 
     const container = mediaContainer(body);
     const rows = asArray(container?.Metadata);
@@ -508,6 +518,31 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
           : items.length;
 
     return { items, totalSize };
+  }
+
+  async function sectionGenres(
+    sectionKey: string,
+  ): Promise<{ id: string; title: string }[]> {
+    const body = await getJson(`/library/sections/${sectionKey}/genre`);
+    const rows = asArray(mediaContainer(body)?.Directory);
+    const result: { id: string; title: string }[] = [];
+
+    for (const row of rows) {
+      if (typeof row !== "object" || row === null) {
+        continue;
+      }
+      const key = (row as { key?: unknown }).key;
+      const title = (row as { title?: unknown }).title;
+      if (key === undefined || key === null) {
+        continue;
+      }
+      if (typeof title !== "string") {
+        continue;
+      }
+      result.push({ id: String(key), title });
+    }
+
+    return result;
   }
 
   async function fetchImage(path: string): Promise<{
@@ -593,6 +628,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     playbackMeta,
     sections,
     sectionItems,
+    sectionGenres,
     fetchImage,
     selectSubtitle,
   };

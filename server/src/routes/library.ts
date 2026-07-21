@@ -84,12 +84,26 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
       return;
     }
 
+    const genreResult = parseOptionalNumericQuery(req.query.genre);
+    if (genreResult === null) {
+      res.status(400).json({ error: "invalid genre" });
+      return;
+    }
+
+    const unwatchedResult = parseUnwatchedQuery(req.query.unwatched);
+    if (unwatchedResult === null) {
+      res.status(400).json({ error: "invalid unwatched" });
+      return;
+    }
+
     try {
       const result = await plexServer.sectionItems({
         sectionKey,
         sort,
         start: start ?? 0,
         size: size ?? 50,
+        ...(genreResult !== undefined ? { genre: genreResult } : {}),
+        ...(unwatchedResult ? { unwatched: true } : {}),
       });
       res.json({
         items: result.items,
@@ -97,7 +111,24 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
         start: start ?? 0,
         size: size ?? 50,
         sort,
+        genre: genreResult ?? null,
+        unwatched: unwatchedResult,
       });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
+  router.get("/sections/:key/genres", async (req, res) => {
+    const sectionKey = req.params.key;
+    if (!/^\d+$/.test(sectionKey)) {
+      res.status(400).json({ error: "invalid section key" });
+      return;
+    }
+
+    try {
+      const genres = await plexServer.sectionGenres(sectionKey);
+      res.json({ genres });
     } catch (err) {
       respondUpstreamError(res, err);
     }
@@ -128,6 +159,29 @@ function parseBoundedIntQuery(
     return null;
   }
   return value;
+}
+
+function parseOptionalNumericQuery(raw: unknown): string | null | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (typeof raw !== "string" || !/^\d+$/.test(raw)) {
+    return null;
+  }
+  return raw;
+}
+
+function parseUnwatchedQuery(raw: unknown): boolean | null {
+  if (raw === undefined) {
+    return false;
+  }
+  if (typeof raw !== "string") {
+    return null;
+  }
+  if (raw === "1" || raw === "true") {
+    return true;
+  }
+  return null;
 }
 
 function respondUpstreamError(
