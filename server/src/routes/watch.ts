@@ -193,7 +193,7 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
 
     try {
       const next = await plexServer.nextEpisode(ratingKey);
-      res.json({ nextRatingKey: next === null ? null : next.ratingKey });
+      res.json({ nextEpisode: next });
     } catch (err) {
       respondUpstreamError(res, err);
     }

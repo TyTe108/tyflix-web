@@ -5,6 +5,7 @@ import {
   fetchEpisodeWatch,
   fetchMovieWatch,
   fetchNextEpisode,
+  type NextEpisode,
   type WatchDescriptor,
   type WatchTuning,
 } from "../api/watch";
@@ -92,11 +93,11 @@ export function WatchPage() {
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const [autoPlay, setAutoPlay] = useState(readStoredAutoPlay);
-  const [nextRatingKey, setNextRatingKey] = useState<string | null>(null);
+  const [nextEpisode, setNextEpisode] = useState<NextEpisode | null>(null);
   const autoPlayRef = useRef(autoPlay);
-  const nextRatingKeyRef = useRef(nextRatingKey);
+  const nextEpisodeRef = useRef(nextEpisode);
   autoPlayRef.current = autoPlay;
-  nextRatingKeyRef.current = nextRatingKey;
+  nextEpisodeRef.current = nextEpisode;
 
   useEffect(() => {
     let load: (() => Promise<WatchDescriptor>) | null = null;
@@ -147,15 +148,15 @@ export function WatchPage() {
   // Soft-fail: a null/failed result just disables advance for this episode.
   useEffect(() => {
     if (!isEpisode || ratingKey === null) {
-      setNextRatingKey(null);
+      setNextEpisode(null);
       return;
     }
 
     let cancelled = false;
-    setNextRatingKey(null);
+    setNextEpisode(null);
     void fetchNextEpisode(ratingKey).then((next) => {
       if (!cancelled) {
-        setNextRatingKey(next);
+        setNextEpisode(next);
       }
     });
 
@@ -165,7 +166,7 @@ export function WatchPage() {
   }, [isEpisode, ratingKey]);
 
   // Auto-advance on ended. Refs keep the listener current without rebinding
-  // on every autoPlay / nextRatingKey change.
+  // on every autoPlay / nextEpisode change.
   useEffect(() => {
     if (descriptor === null) {
       return;
@@ -179,11 +180,11 @@ export function WatchPage() {
       if (!autoPlayRef.current) {
         return;
       }
-      const next = nextRatingKeyRef.current;
+      const next = nextEpisodeRef.current;
       if (next === null) {
         return;
       }
-      navigate(`/watch/episode/${next}`);
+      navigate(`/watch/episode/${next.ratingKey}`);
     };
 
     video.addEventListener("ended", onEnded);

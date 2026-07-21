@@ -71,6 +71,13 @@ export type Episode = {
   title: string;
 };
 
+export type NextEpisode = {
+  ratingKey: string;
+  seasonNumber: number;
+  episodeNumber: number;
+  title: string;
+};
+
 export type EpisodesResponse = {
   showRatingKey: string;
   episodes: Episode[];
@@ -98,20 +105,46 @@ export async function fetchEpisodes(
   };
 }
 
-// Soft-fail: a missing/failed next episode must never break playback.
+// Soft-fail: a missing/failed/malformed next episode must never break playback.
 export async function fetchNextEpisode(
   ratingKey: string,
-): Promise<string | null> {
+): Promise<NextEpisode | null> {
   try {
     const res = await fetch(`/api/watch/episode/${ratingKey}/next`);
     if (!res.ok) {
       return null;
     }
-    const body = (await res.json()) as { nextRatingKey?: unknown };
-    return typeof body.nextRatingKey === "string" ? body.nextRatingKey : null;
+    const body = (await res.json()) as { nextEpisode?: unknown };
+    return parseNextEpisode(body.nextEpisode);
   } catch {
     return null;
   }
+}
+
+function parseNextEpisode(value: unknown): NextEpisode | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const row = value as {
+    ratingKey?: unknown;
+    seasonNumber?: unknown;
+    episodeNumber?: unknown;
+    title?: unknown;
+  };
+  if (
+    typeof row.ratingKey !== "string" ||
+    typeof row.seasonNumber !== "number" ||
+    typeof row.episodeNumber !== "number" ||
+    typeof row.title !== "string"
+  ) {
+    return null;
+  }
+  return {
+    ratingKey: row.ratingKey,
+    seasonNumber: row.seasonNumber,
+    episodeNumber: row.episodeNumber,
+    title: row.title,
+  };
 }
 
 async function fetchWatch(

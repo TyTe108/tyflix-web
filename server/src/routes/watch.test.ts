@@ -451,8 +451,14 @@ describe("GET /api/watch/episode/:ratingKey/next", () => {
     });
   });
 
-  it("returns { nextRatingKey } for the following episode", async () => {
+  it("returns { nextEpisode } for the following episode", async () => {
     let nextArg: string | null = null;
+    const nextEpisode = {
+      ratingKey: "203",
+      seasonNumber: 1,
+      episodeNumber: 3,
+      title: "Finale",
+    };
     const deps = baseDeps();
     deps.plexServer = {
       async episodes() {
@@ -460,12 +466,7 @@ describe("GET /api/watch/episode/:ratingKey/next", () => {
       },
       async nextEpisode(episodeRatingKey: string) {
         nextArg = episodeRatingKey;
-        return {
-          ratingKey: "203",
-          seasonNumber: 1,
-          episodeNumber: 3,
-          title: "Finale",
-        };
+        return nextEpisode;
       },
       async playbackMeta() {
         return { durationMs: null, audio: [], subtitle: [] };
@@ -480,11 +481,11 @@ describe("GET /api/watch/episode/:ratingKey/next", () => {
     );
 
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { nextRatingKey: "203" });
+    assert.deepEqual(await response.json(), { nextEpisode });
     assert.equal(nextArg, "202");
   });
 
-  it("returns { nextRatingKey: null } when there is no next episode", async () => {
+  it("returns { nextEpisode: null } when there is no next episode", async () => {
     const deps = baseDeps();
     deps.plexServer = {
       async episodes() {
@@ -506,7 +507,7 @@ describe("GET /api/watch/episode/:ratingKey/next", () => {
     );
 
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { nextRatingKey: null });
+    assert.deepEqual(await response.json(), { nextEpisode: null });
   });
 });
 
