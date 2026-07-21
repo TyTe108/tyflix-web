@@ -257,6 +257,7 @@ describe("plexServer.playbackMeta", () => {
                 {
                   Part: [
                     {
+                      id: 55501,
                       Stream: [
                         {
                           id: 100,
@@ -345,6 +346,7 @@ describe("plexServer.playbackMeta", () => {
     );
     assert.equal(meta.durationMs, 5_400_000);
     assert.equal(meta.creditsOffsetMs, null);
+    assert.equal(meta.partId, "55501");
     assert.deepEqual(meta.audio, [
       {
         id: "101",
@@ -388,6 +390,7 @@ describe("plexServer.playbackMeta", () => {
     const meta = await client().playbackMeta("12345");
     assert.equal(meta.durationMs, 1_000);
     assert.equal(meta.creditsOffsetMs, null);
+    assert.equal(meta.partId, null);
     assert.deepEqual(meta.audio, []);
     assert.deepEqual(meta.subtitle, []);
   });

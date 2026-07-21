@@ -43,6 +43,7 @@ describe("buildHlsUrl", () => {
     assert.equal(parsed.searchParams.get("mediaIndex"), "0");
     assert.equal(parsed.searchParams.get("partIndex"), "0");
     assert.equal(parsed.searchParams.get("fastSeek"), "1");
+    assert.equal(parsed.searchParams.get("subtitles"), "burn");
     assert.equal(parsed.searchParams.get("X-Plex-Platform"), "Chrome");
 
     const profileExtra =
@@ -84,6 +85,8 @@ describe("buildHlsUrl", () => {
     assert.equal(parsed.searchParams.get("audioStreamID"), null);
     assert.equal(parsed.searchParams.get("subtitleStreamID"), null);
     assert.equal(parsed.searchParams.get("offset"), null);
+    // Burn-ready is fixed, not optional — always present even with no tuning.
+    assert.equal(parsed.searchParams.get("subtitles"), "burn");
   });
 
   it("emits maxVideoBitrate when provided", () => {
@@ -164,6 +167,7 @@ describe("buildHlsDecisionUrl", () => {
     const parsed = new URL(url);
     assert.equal(parsed.searchParams.get("protocol"), "hls");
     assert.equal(parsed.searchParams.get("directPlay"), "0");
+    assert.equal(parsed.searchParams.get("subtitles"), "burn");
     assert.equal(parsed.searchParams.get("path"), "/library/metadata/12345");
     assert.equal(parsed.searchParams.get("X-Plex-Token"), "transient-a-b-c");
   });

@@ -57,6 +57,8 @@ function buildTranscodeUrl(
   // Explicit target codecs reinforce the profile-extra transcode target.
   search.set("videoCodec", "h264");
   search.set("audioCodec", "aac");
+  // Always burn-ready: with no subtitle selected on the part this is a no-op.
+  search.set("subtitles", "burn");
   search.set("X-Plex-Platform", "Chrome");
   search.set("X-Plex-Client-Identifier", params.clientId);
   search.set("X-Plex-Session-Identifier", params.sessionId);

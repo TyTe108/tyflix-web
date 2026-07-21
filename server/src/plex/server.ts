@@ -60,6 +60,7 @@ export type SubtitleStream = {
 export type PlaybackMeta = {
   durationMs: number | null;
   creditsOffsetMs: number | null;
+  partId: string | null;
   audio: AudioStream[];
   subtitle: SubtitleStream[];
 };
@@ -334,6 +335,14 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
       typeof medium === "object" && medium !== null
         ? asArray((medium as { Part?: unknown }).Part)[0]
         : undefined;
+    const partIdRaw =
+      typeof part === "object" && part !== null
+        ? (part as { id?: unknown }).id
+        : undefined;
+    const partId =
+      partIdRaw !== undefined && partIdRaw !== null
+        ? String(partIdRaw)
+        : null;
     const streams =
       typeof part === "object" && part !== null
         ? asArray((part as { Stream?: unknown }).Stream)
@@ -387,7 +396,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
       }
     }
 
-    return { durationMs, creditsOffsetMs, audio, subtitle };
+    return { durationMs, creditsOffsetMs, partId, audio, subtitle };
   }
 
   return { accounts, history, item, episodes, nextEpisode, playbackMeta };

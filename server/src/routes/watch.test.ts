@@ -77,6 +77,7 @@ function baseDeps(): WatchRouterDeps {
         return {
           durationMs: null,
           creditsOffsetMs: null,
+          partId: "9001",
           audio: [],
           subtitle: [],
         };
@@ -182,6 +183,7 @@ describe("GET /api/watch/movie/:tmdbId", () => {
       streams: { audio: unknown[]; subtitle: unknown[] };
       durationMs: number | null;
       creditsOffsetMs: number | null;
+      partId: string | null;
     };
 
     assert.equal(body.mediaType, "movie");
@@ -192,6 +194,7 @@ describe("GET /api/watch/movie/:tmdbId", () => {
     assert.deepEqual(body.streams, { audio: [], subtitle: [] });
     assert.equal(body.durationMs, null);
     assert.equal(body.creditsOffsetMs, null);
+    assert.equal(body.partId, "9001");
 
     // sessionId is present and both HLS URLs are ready-to-play start.m3u8 URLs
     // carrying the ratingKey.
@@ -596,6 +599,7 @@ describe("GET /api/watch/episode/:ratingKey", () => {
       streams: { audio: unknown[]; subtitle: unknown[] };
       durationMs: number | null;
       creditsOffsetMs: number | null;
+      partId: string | null;
     };
 
     assert.equal(body.mediaType, "episode");
@@ -605,6 +609,7 @@ describe("GET /api/watch/episode/:ratingKey", () => {
     assert.deepEqual(body.streams, { audio: [], subtitle: [] });
     assert.equal(body.durationMs, null);
     assert.equal(body.creditsOffsetMs, null);
+    assert.equal(body.partId, "9001");
 
     assert.equal(typeof body.sessionId, "string");
     assert.ok(body.sessionId.length > 0);

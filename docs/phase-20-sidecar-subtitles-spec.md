@@ -76,3 +76,55 @@ Used the uploaded Plex OpenAPI (`docs/openapi.json`, 1.3MB — documents `/trans
 2. Build the part-select + `subtitles=auto` + `/subtitles` fetch into tyflix's real client flow and iterate against `/decision` (tyflix's own client identity + hls.js) until Plex agrees to sidecar.
 
 **Assessment:** direction (sidecar, styleable) is confirmed real; the exact recipe is genuinely finicky R&D and the standalone spike didn't crack it.
+
+---
+
+## PIVOT (2026-07-20): burn-in confirmed working — SUPERSEDES the sidecar plan above
+
+Live evidence (Plex web captured via Claude-in-Chrome on app.plex.tv + direct
+`/video/:/transcode/universal/decision` probes on our own flow) flips the plan.
+
+**Finding 1 — Plex web BURNS (does not sidecar) for transcoded video.** Plex web's
+own transcode of Les Mis (4K HEVC) used `protocol=dash&subtitles=burn`, and there
+was NO `/transcode/universal/subtitles` request in the full 105-request capture.
+The earlier "sidecar / `subtitles=auto`, styleable, no burn" premise was a misread.
+For any source whose video is transcoded — i.e. ALL of tyflix (we force H.264) —
+Plex burns.
+
+**Finding 2 — the confirmed recipe (our exact HLS + forced-H.264 path):**
+1. SELECT the sub on the part, server-side: `PUT /library/parts/{partId}?subtitleStreamID={id}`
+   (200; `=0` turns off). partId = the metadata's `Media[0].Part[0].id`.
+2. BURN it in the transcode: `start.m3u8?…&subtitles=burn`.
+Verified via `/decision`: PUT + `subtitles=burn` → the sub is `decision=burn,
+burn=1, selected=true` (burned into `segments-av`). PUT but NO `subtitles=burn` →
+`decision=transcode` (not burned). NO PUT (URL `subtitleStreamID` only) → the sub
+isn't selected at all. So BOTH the PUT and `subtitles=burn` are required; the URL
+`subtitleStreamID` param is NOT the selector — exactly why 17.9 (URL param, no
+PUT) "didn't work."
+
+**Shelved 17.9 stash:** its `subtitles=burn` line + Subtitle-group UI +
+`formatSubtitleLabel` are reusable, but it is MISSING the part-selection PUT (it
+relied on the URL `subtitleStreamID`, which doesn't select) and predates the Phase
+19/21 PlayerControls/WatchPage changes — so adapt it, don't `stash apply`.
+
+**Trade-off accepted:** burned subs are baked into the video → not client-styleable
+(the old 17.8 size/color goal is dropped for burn). Zero client rendering needed.
+ALL subtitle tracks are selectable (image PGS subs burn too, not just text).
+
+### New decomposition (burn)
+
+- **20.1 (backend) — selection + burn.** (a) expose `partId` on the play descriptor
+  (from `playbackMeta`'s `Media[0].Part[0].id`); (b) an auth-gated route to select
+  the sub for the current user (resolve partId → `PUT /library/parts/{partId}?subtitleStreamID={id|0}`
+  with the USER's Plex token); (c) `buildHlsUrl` always emits `subtitles=burn`
+  (harmless with nothing selected). Unit-tested + live-verified via `/decision`.
+- **20.2 (frontend) — Subtitle UI.** A **Subtitles** group in the settings gear (Off
+  + one per `descriptor.streams.subtitle`, reusing the stash's `formatSubtitleLabel`).
+  Selecting → call the 20.1 route → combined-tuning in-place restart (same as
+  Quality/Audio). Live-verify a burned sub appears in-browser.
+
+### To confirm during 20.1
+- That the part-PUT with the user's token is honored by the transcode session (which
+  uses the user's transient — same account, so expected). If not, fall back to the
+  owner token (documented side effect: mutates the owner's per-item selection).
+- Whether `subtitles=burn` is safe to emit always (appears so) vs only when selected.
