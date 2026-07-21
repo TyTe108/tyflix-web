@@ -128,3 +128,25 @@ ALL subtitle tracks are selectable (image PGS subs burn too, not just text).
   uses the user's transient — same account, so expected). If not, fall back to the
   owner token (documented side effect: mutates the owner's per-item selection).
 - Whether `subtitles=burn` is safe to emit always (appears so) vs only when selected.
+
+---
+
+## SHIPPED + verified (2026-07-20)
+
+Burn-in subtitles shipped: **20.1** (partId on the descriptor + every transcode `subtitles=burn`-ready; commit
+`8134c7a`), **20.2** (`plexServer.selectSubtitle` + auth-gated `PUT /api/watch/subtitle/:ratingKey`, user-token
+part PUT; `e5118f3`), **20.3** (Subtitles gear group + PUT-then-restart; `98d2470`). 183 server tests; web `tsc`
+clean.
+
+**Backend verified live** via `/decision` against the real code: `selectSubtitle` + a minted **transient** +
+`buildHlsUrl` (`subtitles=burn`) → the selected sub returns `decision=burn, burn=1` (the test sub was a PGS
+image track — image subs burn too). Confirms a transient honors the user's part-selection.
+
+**Frontend verified live on prod** (Chrome, Severance S1E1): the Subtitles group showed Off + 3 English tracks;
+selecting English fired `PUT /api/watch/subtitle/2517` (200) + a restart, and the sub rendered **burned into the
+video** at 1:12 ("Now, I know you're sleepy,"); selecting Off fired the PUT (`subtitleStreamID=0`) + restart and
+the same frame showed **no subtitle**; playback position was preserved across both restarts.
+
+**Deferred:** reflect a pre-existing server-side subtitle selection in the UI on load (selector defaults to Off);
+soft-fail a failed subtitle PUT without dropping to the error screen; styleable subs (would require the unproven
+sidecar path — not pursued).

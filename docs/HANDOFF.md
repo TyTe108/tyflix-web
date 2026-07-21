@@ -3,7 +3,7 @@
 > Living doc. Its job is to let a fresh conversation pick up this project cold.
 > Keep it current; delete guidance notes as you go.
 >
-> **Last updated after:** Phase 21 (2026-07-20; **in-browser playback + "Up Next" SHIPPED** — see §8). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. **Deployed 2026-07-17 at `tyflix.tylerte.dev`** (Phase 4). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server). **Since 16.4 — playback + polish (§8):** in-player settings (17: Speed/Quality/Audio), connection resilience (18), auto-play next episode (19), and the **"Up Next" overlay** (21) all shipped; Phase 20 (sidecar subtitles) is spec'd but parked.
+> **Last updated after:** Phase 21 (2026-07-20; **in-browser playback + "Up Next" SHIPPED** — see §8). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. **Deployed 2026-07-17 at `tyflix.tylerte.dev`** (Phase 4). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server). **Since 16.4 — playback + polish (§8):** in-player settings (17: Speed/Quality/Audio), connection resilience (18), auto-play next episode (19), and the **"Up Next" overlay** (21) all shipped; Phase 20 (burn-in subtitles) shipped too (pivoted from the sidecar plan).
 > **Working name:** "Tyflix Web" / repo `tyflix-web` — rename freely.
 
 ---
@@ -737,10 +737,17 @@ Log (newest at bottom):
   Play** toggle in the gear (default ON, `localStorage` `tyflix.autoPlay`); WatchPage prefetches the next
   episode and, on the video `ended` event, navigates to it when the toggle is on. Spec:
   `docs/phase-19-autoplay-spec.md`.
-- **Phase 20 — Sidecar subtitles. SPEC'D, PARKED (not built).** Plex-web-style text subtitles need the sidecar
-  flow: transcode with `subtitles=auto` (no burn) + a separate `GET /video/:/transcode/universal/subtitles`
-  WebVTT fetch rendered client-side. Burn-in doesn't work with our minimal client profile (Plex drops the sub
-  stream). Deliberate future session. Spec: `docs/phase-20-sidecar-subtitles-spec.md`.
+- **✅ Phase 20 — Burn-in subtitles. SHIPPED 2026-07-20.** PIVOTED from the sidecar plan: a live capture showed
+  Plex web itself **burns** for transcoded video (DASH + `subtitles=burn`, no sidecar), and burn works on our
+  path. Recipe (confirmed via `/decision`): select the sub server-side — `PUT
+  /library/parts/{partId}?subtitleStreamID={id}` (`0`=off) — AND transcode with `subtitles=burn`; the URL
+  `subtitleStreamID` param is NOT the selector (why 17.9 "didn't work"). **20.1** exposed `partId` + made every
+  transcode `subtitles=burn`-ready; **20.2** added an auth-gated `PUT /api/watch/subtitle/:ratingKey` (resolves
+  partId → PUTs the part with the USER's token); **20.3** a Subtitles group in the gear (Off + tracks) that
+  selects then restarts the stream (subtitle is NOT a tuning param; reuses the combined-tuning restart).
+  **Verified live on prod** (Severance S1E1): selecting English burned the sub into the video, Off removed it,
+  position preserved. Trade-off: burned subs aren't client-styleable (accepted); image (PGS) subs burn too.
+  Spec: `docs/phase-20-sidecar-subtitles-spec.md` (now the burn decision log).
 - **✅ Phase 21 — "Up Next" overlay. SHIPPED 2026-07-20.** Turns Phase 19's silent advance into a Plex-style
   in-player card (TV only, behind the Auto Play toggle). **21.1** `/next` returns the full next-episode object
   `{ratingKey, seasonNumber, episodeNumber, title, thumb}`. **21.2** `playbackMeta` adds `creditsOffsetMs`
@@ -819,8 +826,8 @@ tests.**
 - `docs/phase-18-connection-resilience-spec.md` — Phase 18 fast LAN→remote failover (3s manifest-only local
   timeout). Current.
 - `docs/phase-19-autoplay-spec.md` — Phase 19 auto-advance to the next episode on `ended`. Current.
-- `docs/phase-20-sidecar-subtitles-spec.md` — **PARKED** plan for Plex-web-style sidecar WebVTT subtitles (not
-  built).
+- `docs/phase-20-sidecar-subtitles-spec.md` — **Phase 20 subtitles** decision log: the original sidecar
+  investigation + the **PIVOT to burn-in** (shipped 2026-07-20). Current.
 - `docs/phase-21-upnext-overlay-spec.md` — Phase 21 "Up Next" overlay (credits-marker trigger, client-composed
   thumbnail, Dismiss cancels advance). Current.
 - Reference (external): `Home Media Server/dashboard/app/main.py` — the dashboard analytics/metrics source of
