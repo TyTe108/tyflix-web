@@ -2,9 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   fetchLibraryItems,
+  fetchSectionGenres,
   fetchSections,
+  type LibraryGenre,
   type LibraryItem,
   type LibrarySection,
+  type LibrarySortKey,
 } from "../api/library";
 import { LibraryCard } from "../components/LibraryCard";
 import { PaginationControls } from "../components/PaginationControls";
@@ -28,6 +31,10 @@ export function LibraryPage() {
 
   const [page, setPage] = useState(1);
   const [reloadKey, setReloadKey] = useState(0);
+  const [sort, setSort] = useState<LibrarySortKey>("title");
+  const [genreId, setGenreId] = useState<string | null>(null);
+  const [unwatched, setUnwatched] = useState(false);
+  const [genres, setGenres] = useState<LibraryGenre[]>([]);
 
   const activeType = mediaType === "tv" ? "show" : "movie";
   const activeSection = sections.find((s) => s.type === activeType) ?? null;
@@ -68,6 +75,31 @@ export function LibraryPage() {
       return;
     }
 
+    setGenreId(null);
+
+    let cancelled = false;
+    void fetchSectionGenres(activeSection.key)
+      .then((result) => {
+        if (!cancelled) {
+          setGenres(result);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setGenres([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSection]);
+
+  useEffect(() => {
+    if (!activeSection) {
+      return;
+    }
+
     let cancelled = false;
     setItemsStatus("loading");
     setItemsError(null);
@@ -76,9 +108,11 @@ export function LibraryPage() {
 
     void fetchLibraryItems({
       sectionKey: activeSection.key,
-      sort: "title",
+      sort,
       start,
       size: PAGE_SIZE,
+      genre: genreId ?? undefined,
+      unwatched,
     })
       .then((result) => {
         if (!cancelled) {
@@ -101,13 +135,28 @@ export function LibraryPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeSection, page, reloadKey]);
+  }, [activeSection, page, sort, genreId, unwatched, reloadKey]);
 
   const retry = useCallback(() => {
     setReloadKey((n) => n + 1);
   }, []);
 
   const pageCount = Math.max(1, Math.ceil(totalSize / PAGE_SIZE));
+
+  function onSortChange(nextSort: LibrarySortKey) {
+    setSort(nextSort);
+    setPage(1);
+  }
+
+  function onGenreChange(value: string) {
+    setGenreId(value === "" ? null : value);
+    setPage(1);
+  }
+
+  function onUnwatchedChange(checked: boolean) {
+    setUnwatched(checked);
+    setPage(1);
+  }
 
   if (sectionsStatus === "loading") {
     return (
@@ -161,6 +210,47 @@ export function LibraryPage() {
         >
           TV Shows
         </button>
+      </div>
+
+      <div className="discover-filters" aria-label="Library filters">
+        <label className="discover-genre-filter">
+          <span>Sort</span>
+          <select
+            value={sort}
+            onChange={(event) =>
+              onSortChange(event.target.value as LibrarySortKey)
+            }
+          >
+            <option value="title">Title</option>
+            <option value="added">Recently Added</option>
+            <option value="year">Year</option>
+            <option value="rating">Rating</option>
+          </select>
+        </label>
+
+        <label className="discover-genre-filter">
+          <span>Genre</span>
+          <select
+            value={genreId ?? ""}
+            onChange={(event) => onGenreChange(event.target.value)}
+          >
+            <option value="">All genres</option>
+            {genres.map((genre) => (
+              <option key={genre.id} value={genre.id}>
+                {genre.title}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="discover-genre-filter">
+          <span>Unwatched only</span>
+          <input
+            type="checkbox"
+            checked={unwatched}
+            onChange={(event) => onUnwatchedChange(event.target.checked)}
+          />
+        </label>
       </div>
 
       {itemsStatus === "loading" ? (

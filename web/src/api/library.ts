@@ -20,6 +20,15 @@ export type LibraryItemsResponse = {
   start: number;
   size: number;
   sort: string;
+  genre: string | null;
+  unwatched: boolean;
+};
+
+export type LibrarySortKey = "title" | "added" | "year" | "rating";
+
+export type LibraryGenre = {
+  id: string;
+  title: string;
 };
 
 async function getJson<T>(url: string): Promise<T> {
@@ -42,6 +51,8 @@ export async function fetchLibraryItems(options: {
   sort?: string;
   start?: number;
   size?: number;
+  genre?: string;
+  unwatched?: boolean;
 }): Promise<LibraryItemsResponse> {
   const params = new URLSearchParams();
   params.set("sort", options.sort ?? "title");
@@ -51,9 +62,24 @@ export async function fetchLibraryItems(options: {
   if (options.size !== undefined) {
     params.set("size", String(options.size));
   }
+  if (options.genre !== undefined) {
+    params.set("genre", options.genre);
+  }
+  if (options.unwatched === true) {
+    params.set("unwatched", "1");
+  }
   return getJson<LibraryItemsResponse>(
     `/api/library/sections/${options.sectionKey}/items?${params}`,
   );
+}
+
+export async function fetchSectionGenres(
+  sectionKey: string,
+): Promise<LibraryGenre[]> {
+  const body = await getJson<{ genres: LibraryGenre[] }>(
+    `/api/library/sections/${sectionKey}/genres`,
+  );
+  return body.genres;
 }
 
 export function libraryImageUrl(thumbPath: string): string {
