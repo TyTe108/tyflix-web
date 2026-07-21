@@ -163,4 +163,12 @@ which one is live, so it composes the URL; `/next` stays a pure metadata call.
   hides (advance still fires at end — deferred to 21.4b); movies show no card.
   Fix 21.4a.1 stabilized the thumb fallback (memoized array + content-keyed
   reset). Committed.
-- _21.4b: fill in when smoke-tested._
+- **21.4b** (smoke-tested + committed `88e0bab`; prod-verified via Chrome
+  2026-07-20): card triggers at the **credits marker** — verified live on prod
+  (Severance S1E1) with the card shown at ~87s before the end (i.e. before the
+  last-30s window), the countdown number correctly **suppressed** that early,
+  the label "S1E2 · Half Loop", and the next-ep **thumbnail loaded 320×180**
+  from `/photo/:/transcode` over `plex.direct` (client-composed URL + CSP work
+  on prod). **Dismiss cancels the advance** — after Dismiss, firing `ended`
+  stayed on the episode; a non-dismissed episode advanced 2518→2519 (control).
+  ✅ **Phase 21 COMPLETE.**

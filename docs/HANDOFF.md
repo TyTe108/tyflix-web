@@ -3,7 +3,7 @@
 > Living doc. Its job is to let a fresh conversation pick up this project cold.
 > Keep it current; delete guidance notes as you go.
 >
-> **Last updated after:** Phase 16.4 (2026-07-19; **movie + TV playback SHIPPED** — see §8). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. **Deployed 2026-07-17 at `tyflix.tylerte.dev`** (Phase 4). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server).
+> **Last updated after:** Phase 21 (2026-07-20; **in-browser playback + "Up Next" SHIPPED** — see §8). Architecture PIVOTED to **Seerr-backed** during Phase 5 (own-store SQLite/Radarr/Sonarr pipeline built 5.1–5.7, then **retired** 5.8–5.10; requests flow through Seerr's API). Since then, shipped the full parity backlog on that architecture: **6** media-status badges, **7** Plex Watchlist, **8** issue reporting, **9** TMDB enrichment, **10** recommendations + popular/genre browse, **11** cast/person/collections/studio-network/upcoming, **12** request-quota display + quality-profile selection — all verified live + committed (103 server tests). Discovery now mirrors Seerr's full surface; **~90% of Seerr's user-facing UI** is done. Then **Phase 13 — UI modernization**: a sleek **dark theme** (design tokens), a persistent **left-sidebar app shell**, **tabbed Admin**, and **poster-forward request cards** — the app now reads like Seerr/Plex rather than the old flat light editorial look. See §3, the §8 log, and §10 status. **Deployed 2026-07-17 at `tyflix.tylerte.dev`** (Phase 4). Remaining Seerr features are delegated by design (notifications/settings/*arr-config/user-management) or N/A (4K — no 4K server). **Since 16.4 — playback + polish (§8):** in-player settings (17: Speed/Quality/Audio), connection resilience (18), auto-play next episode (19), and the **"Up Next" overlay** (21) all shipped; Phase 20 (sidecar subtitles) is spec'd but parked.
 > **Working name:** "Tyflix Web" / repo `tyflix-web` — rename freely.
 
 ---
@@ -715,6 +715,46 @@ Log (newest at bottom):
   when it moves, runs `git reset --hard origin/main` + `docker compose up -d --build` (reset --hard so future
   force-pushes can't wedge it); logs to `tyflix-web-autodeploy.log`. So: commit + **push to `main`** → prod
   auto-deploys within ~5 min. Manual redeploy still works if needed.
+- **Phase 17 — In-player playback settings. SHIPPED 2026-07-19.** Replaced the native `<video controls>` with a
+  custom control bar + gear menu (`web/src/components/PlayerControls.tsx`): transport/seek/volume/fullscreen +
+  auto-hide, plus a settings panel with **Speed** (client `playbackRate`), **Quality** (bitrate/res) and
+  **Audio** track selection. Quality/Audio changes refetch the descriptor with a merged `WatchTuning` and rebuild
+  hls.js **on the same `<video>` element** (never unmount it — PlayerControls binds media listeners to the
+  element instance), resuming at the current position (`pendingResumeRef`). Backend `parsePlayTuning`
+  (`routes/watch.ts`) → `buildHlsUrl` takes optional `{maxVideoBitrate, videoResolution, audioStreamID}` (400 on
+  invalid). Subtitles deferred (Phase 20). HW transcode on the Arc A380 confirmed working + fast (`h264_vaapi`,
+  ~16% CPU). Spec: `docs/phase-17-playback-settings-spec.md`.
+- **Phase 18 — Connection resilience. SHIPPED 2026-07-20 (`f6fbabc`).** The player tried the LAN `plex.direct`
+  first and only failed over to remote on a *fatal* hls.js error, so a remote viewer without Tailscale hung
+  ~30s. Fix (`WatchPage.tsx`): the LOCAL attempt gets a short 3s `manifestLoadPolicy` (0 retries),
+  **manifest-only** — fragment/playlist keep patient defaults, since cold transcodes are slow even on a
+  reachable link — so an unreachable local fails over in ~3s. Dev gotcha: `localhost:5173`'s backend runs on the
+  Mac and needs Tailscale to reach the Dell; prod's backend is co-located so it's fine. Spec:
+  `docs/phase-18-connection-resilience-spec.md`.
+- **Phase 19 — Auto Play (next episode). SHIPPED 2026-07-20.** Backend `GET /api/watch/episode/:ratingKey/next`
+  resolves the next episode via `plexServer.nextEpisode` (episode meta → `grandparentRatingKey` →
+  `episodes(show)` → the entry after the current; null for last/not-found). Frontend: an episode-only **Auto
+  Play** toggle in the gear (default ON, `localStorage` `tyflix.autoPlay`); WatchPage prefetches the next
+  episode and, on the video `ended` event, navigates to it when the toggle is on. Spec:
+  `docs/phase-19-autoplay-spec.md`.
+- **Phase 20 — Sidecar subtitles. SPEC'D, PARKED (not built).** Plex-web-style text subtitles need the sidecar
+  flow: transcode with `subtitles=auto` (no burn) + a separate `GET /video/:/transcode/universal/subtitles`
+  WebVTT fetch rendered client-side. Burn-in doesn't work with our minimal client profile (Plex drops the sub
+  stream). Deliberate future session. Spec: `docs/phase-20-sidecar-subtitles-spec.md`.
+- **✅ Phase 21 — "Up Next" overlay. SHIPPED 2026-07-20.** Turns Phase 19's silent advance into a Plex-style
+  in-player card (TV only, behind the Auto Play toggle). **21.1** `/next` returns the full next-episode object
+  `{ratingKey, seasonNumber, episodeNumber, title, thumb}`. **21.2** `playbackMeta` adds `creditsOffsetMs`
+  (credits `Marker.startTimeOffset`, ms, via `?includeMarkers=1`; prefer `final`, else latest). **21.3**
+  per-episode `thumb` threaded through; CSP `img-src += https://*.plex.direct:32400`. **21.4a/b** the overlay: an
+  `overlay` slot in PlayerControls rendered **inside** `.watch-player-shell` (fullscreen-safe) + a presentational
+  `UpNextCard`; WatchPage shows it once playback reaches `creditsOffsetMs` (with a last-30s floor/fallback),
+  composes the thumbnail URL **client-side** from the descriptor's transient + connection (local→remote `<img>
+  onError` fallback), shows the countdown number only in the last 30s, **Play now** advances immediately, and
+  **Dismiss** cancels the `ended` auto-advance for that episode. The thumbnail URL is built client-side on
+  purpose — `/next` stays a pure metadata call (no token custody). Verified: server 174/174 tests, web `tsc`
+  clean, live E2E (Severance rk2517 → `creditsOffsetMs` 3347052, real `thumb`), smoke-tested on prod. Deferred:
+  auto-skip credits (advance before `ended`), movie/next-in-collection. Spec:
+  `docs/phase-21-upnext-overlay-spec.md`.
 
 ## 9. Deferred / candidate future work
 
@@ -753,6 +793,11 @@ network, behind the `tyflix-dell` Cloudflare tunnel; LAN `<SERVER_LAN_IP>:8788`)
 SESSION_SECRET, SEERR_URL+key, TMDB_API_KEY, DASHBOARD_URL (`RADARR_*`/`SONARR_*`/`DB_PATH` are stale/ignored —
 safe to delete).
 
+**Playback + polish (Phases 15–21, all shipped + on prod):** in-browser movie + TV playback (direct
+`plex.direct` + per-user transient + forced-H.264 HLS via hls.js); an in-player control bar with Speed/Quality/
+Audio (17); fast LAN→remote failover (18); and auto-play with the **"Up Next"** overlay (19 + 21). **174 server
+tests.**
+
 ## 11. Working patterns established
 
 - Claude plans + reviews; Cursor implements; Tyler runs/commits. Review is on **real file
@@ -768,6 +813,15 @@ safe to delete).
   built (5.1–5.7) then retired in the 2026-07-15 Seerr-backed pivot. Kept for decision history; do NOT build
   from it — the live architecture is §3 + the Phase 5 log above.
 - `docs/phase-15-streaming-spec.md` — **Phase 15 (playback) design + decision log**: direct-play via Plex +
-  transient token. Current; implementation in progress (15.1 done).
+  transient token. Playback SHIPPED (Phases 15–16, movies + TV).
+- `docs/phase-17-playback-settings-spec.md` — Phase 17 in-player Speed/Quality/Audio + the combined-tuning
+  in-place hls.js restart. Current.
+- `docs/phase-18-connection-resilience-spec.md` — Phase 18 fast LAN→remote failover (3s manifest-only local
+  timeout). Current.
+- `docs/phase-19-autoplay-spec.md` — Phase 19 auto-advance to the next episode on `ended`. Current.
+- `docs/phase-20-sidecar-subtitles-spec.md` — **PARKED** plan for Plex-web-style sidecar WebVTT subtitles (not
+  built).
+- `docs/phase-21-upnext-overlay-spec.md` — Phase 21 "Up Next" overlay (credits-marker trigger, client-composed
+  thumbnail, Dismiss cancels advance). Current.
 - Reference (external): `Home Media Server/dashboard/app/main.py` — the dashboard analytics/metrics source of
   truth (proxied by Phase 3).
