@@ -122,6 +122,99 @@ describe("plexServer.episodes", () => {
   });
 });
 
+describe("plexServer.nextEpisode", () => {
+  const leaves = {
+    MediaContainer: {
+      Metadata: [
+        {
+          ratingKey: 201,
+          parentIndex: 1,
+          index: 1,
+          title: "Pilot",
+        },
+        {
+          ratingKey: 202,
+          parentIndex: 1,
+          index: 2,
+          title: "Second",
+        },
+        {
+          ratingKey: 203,
+          parentIndex: 1,
+          index: 3,
+          title: "Finale",
+        },
+      ],
+    },
+  };
+
+  it("returns the following episode for a middle episode", async () => {
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      if (url === `${BASE_URL}/library/metadata/202`) {
+        return jsonResponse(200, {
+          MediaContainer: {
+            Metadata: [{ grandparentRatingKey: 9000 }],
+          },
+        });
+      }
+      if (url === `${BASE_URL}/library/metadata/9000/allLeaves`) {
+        return jsonResponse(200, leaves);
+      }
+      return jsonResponse(404, {});
+    }) as typeof fetch;
+
+    const next = await client().nextEpisode("202");
+
+    assert.deepEqual(next, {
+      ratingKey: "203",
+      seasonNumber: 1,
+      episodeNumber: 3,
+      title: "Finale",
+    });
+  });
+
+  it("returns null for the last episode", async () => {
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      if (url === `${BASE_URL}/library/metadata/203`) {
+        return jsonResponse(200, {
+          MediaContainer: {
+            Metadata: [{ grandparentRatingKey: 9000 }],
+          },
+        });
+      }
+      if (url === `${BASE_URL}/library/metadata/9000/allLeaves`) {
+        return jsonResponse(200, leaves);
+      }
+      return jsonResponse(404, {});
+    }) as typeof fetch;
+
+    assert.equal(await client().nextEpisode("203"), null);
+  });
+
+  it("returns null when grandparentRatingKey is absent", async () => {
+    globalThis.fetch = (async () =>
+      jsonResponse(200, {
+        MediaContainer: {
+          Metadata: [{ title: "Orphan Episode" }],
+        },
+      })) as typeof fetch;
+
+    assert.equal(await client().nextEpisode("202"), null);
+  });
+});
+
 describe("plexServer.playbackMeta", () => {
   it("parses duration and streams from mediaIndex=0/partIndex=0 only", async () => {
     let requestedUrl: string | null = null;

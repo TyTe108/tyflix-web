@@ -70,6 +70,9 @@ function baseDeps(): WatchRouterDeps {
       async episodes() {
         return [];
       },
+      async nextEpisode() {
+        return null;
+      },
       async playbackMeta() {
         return { durationMs: null, audio: [], subtitle: [] };
       },
@@ -430,6 +433,80 @@ describe("GET /api/watch/tv/:tmdbId/episodes", () => {
     );
 
     assert.equal(response.status, 502);
+  });
+});
+
+describe("GET /api/watch/episode/:ratingKey/next", () => {
+  it("rejects a non-numeric ratingKey with 400", async () => {
+    const app = createApp(baseDeps());
+    const response = await fetchLocal(
+      app,
+      "/api/watch/episode/abc/next",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      error: "ratingKey must be numeric",
+    });
+  });
+
+  it("returns { nextRatingKey } for the following episode", async () => {
+    let nextArg: string | null = null;
+    const deps = baseDeps();
+    deps.plexServer = {
+      async episodes() {
+        return [];
+      },
+      async nextEpisode(episodeRatingKey: string) {
+        nextArg = episodeRatingKey;
+        return {
+          ratingKey: "203",
+          seasonNumber: 1,
+          episodeNumber: 3,
+          title: "Finale",
+        };
+      },
+      async playbackMeta() {
+        return { durationMs: null, audio: [], subtitle: [] };
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/episode/202/next",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { nextRatingKey: "203" });
+    assert.equal(nextArg, "202");
+  });
+
+  it("returns { nextRatingKey: null } when there is no next episode", async () => {
+    const deps = baseDeps();
+    deps.plexServer = {
+      async episodes() {
+        return [];
+      },
+      async nextEpisode() {
+        return null;
+      },
+      async playbackMeta() {
+        return { durationMs: null, audio: [], subtitle: [] };
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/episode/203/next",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { nextRatingKey: null });
   });
 });
 

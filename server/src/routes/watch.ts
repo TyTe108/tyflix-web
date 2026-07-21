@@ -184,6 +184,21 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     }
   });
 
+  router.get("/episode/:ratingKey/next", async (req, res) => {
+    const ratingKey = req.params.ratingKey;
+    if (!/^\d+$/.test(ratingKey)) {
+      res.status(400).json({ error: "ratingKey must be numeric" });
+      return;
+    }
+
+    try {
+      const next = await plexServer.nextEpisode(ratingKey);
+      res.json({ nextRatingKey: next === null ? null : next.ratingKey });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
   // This endpoint takes a RAW Plex episode ratingKey (the browser already has it
   // from GET /tv/:tmdbId/episodes) and is intentionally gated only by the user's
   // own Plex transient: Plex itself enforces what that account may stream, so we

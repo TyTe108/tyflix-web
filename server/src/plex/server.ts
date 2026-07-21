@@ -276,6 +276,35 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     return result;
   }
 
+  async function nextEpisode(
+    episodeRatingKey: string,
+  ): Promise<PlexEpisode | null> {
+    const body = await getJson(`/library/metadata/${episodeRatingKey}`);
+    const meta = firstMetadata(body);
+    if (!meta) {
+      throw new PlexServerUpstreamError(
+        `Plex episode metadata missing for ${episodeRatingKey}`,
+        502,
+      );
+    }
+
+    const grandparent = meta.grandparentRatingKey;
+    if (
+      grandparent === undefined ||
+      grandparent === null ||
+      (typeof grandparent !== "string" && typeof grandparent !== "number")
+    ) {
+      return null;
+    }
+
+    const list = await episodes(String(grandparent));
+    const idx = list.findIndex((ep) => ep.ratingKey === episodeRatingKey);
+    if (idx < 0 || idx >= list.length - 1) {
+      return null;
+    }
+    return list[idx + 1] ?? null;
+  }
+
   async function playbackMeta(ratingKey: string): Promise<PlaybackMeta> {
     const body = await getJson(`/library/metadata/${ratingKey}`);
     const meta = firstMetadata(body);
@@ -354,7 +383,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     return { durationMs, audio, subtitle };
   }
 
-  return { accounts, history, item, episodes, playbackMeta };
+  return { accounts, history, item, episodes, nextEpisode, playbackMeta };
 }
 
 export type PlexServerClient = ReturnType<typeof createPlexServerClient>;
@@ -381,13 +410,23 @@ function asArray(value: unknown): unknown[] {
 
 function firstMetadata(
   body: unknown,
-): { title?: unknown; Media?: unknown; duration?: unknown } | null {
+): {
+  title?: unknown;
+  Media?: unknown;
+  duration?: unknown;
+  grandparentRatingKey?: unknown;
+} | null {
   const rows = asArray(mediaContainer(body)?.Metadata);
   const first = rows[0];
   if (typeof first !== "object" || first === null) {
     return null;
   }
-  return first as { title?: unknown; Media?: unknown; duration?: unknown };
+  return first as {
+    title?: unknown;
+    Media?: unknown;
+    duration?: unknown;
+    grandparentRatingKey?: unknown;
+  };
 }
 
 function sumMediaPartSizes(media: unknown): number {
