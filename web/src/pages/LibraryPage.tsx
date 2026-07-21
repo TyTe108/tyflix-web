@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   fetchLibraryItems,
+  fetchSectionFirstCharacters,
   fetchSectionGenres,
   fetchSections,
+  type LibraryFirstCharacter,
   type LibraryGenre,
   type LibraryItem,
   type LibrarySection,
@@ -35,9 +37,12 @@ export function LibraryPage() {
   const [genreId, setGenreId] = useState<string | null>(null);
   const [unwatched, setUnwatched] = useState(false);
   const [genres, setGenres] = useState<LibraryGenre[]>([]);
+  const [firstChar, setFirstChar] = useState<string | null>(null);
+  const [firstChars, setFirstChars] = useState<LibraryFirstCharacter[]>([]);
 
   const activeType = mediaType === "tv" ? "show" : "movie";
   const activeSection = sections.find((s) => s.type === activeType) ?? null;
+  const showAzRail = sort === "title" && firstChars.length > 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -76,6 +81,7 @@ export function LibraryPage() {
     }
 
     setGenreId(null);
+    setFirstChar(null);
 
     let cancelled = false;
     void fetchSectionGenres(activeSection.key)
@@ -87,6 +93,18 @@ export function LibraryPage() {
       .catch(() => {
         if (!cancelled) {
           setGenres([]);
+        }
+      });
+
+    void fetchSectionFirstCharacters(activeSection.key)
+      .then((result) => {
+        if (!cancelled) {
+          setFirstChars(result);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFirstChars([]);
         }
       });
 
@@ -113,6 +131,8 @@ export function LibraryPage() {
       size: PAGE_SIZE,
       genre: genreId ?? undefined,
       unwatched,
+      firstCharacter:
+        sort === "title" && firstChar !== null ? firstChar : undefined,
     })
       .then((result) => {
         if (!cancelled) {
@@ -135,7 +155,7 @@ export function LibraryPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeSection, page, sort, genreId, unwatched, reloadKey]);
+  }, [activeSection, page, sort, genreId, unwatched, firstChar, reloadKey]);
 
   const retry = useCallback(() => {
     setReloadKey((n) => n + 1);
@@ -145,6 +165,9 @@ export function LibraryPage() {
 
   function onSortChange(nextSort: LibrarySortKey) {
     setSort(nextSort);
+    if (nextSort !== "title") {
+      setFirstChar(null);
+    }
     setPage(1);
   }
 
@@ -155,6 +178,15 @@ export function LibraryPage() {
 
   function onUnwatchedChange(checked: boolean) {
     setUnwatched(checked);
+    setPage(1);
+  }
+
+  function onFirstCharChange(label: string | null) {
+    if (label === null) {
+      setFirstChar(null);
+    } else {
+      setFirstChar((current) => (current === label ? null : label));
+    }
     setPage(1);
   }
 
@@ -272,13 +304,40 @@ export function LibraryPage() {
 
       {itemsStatus === "ready" && items.length > 0 ? (
         <>
-          <ul className="media-grid">
-            {items.map((item) => (
-              <li key={item.ratingKey}>
-                <LibraryCard item={item} />
-              </li>
-            ))}
-          </ul>
+          <div className="library-body">
+            <ul className="media-grid">
+              {items.map((item) => (
+                <li key={item.ratingKey}>
+                  <LibraryCard item={item} />
+                </li>
+              ))}
+            </ul>
+            {showAzRail ? (
+              <nav className="library-az-rail" aria-label="Jump to letter">
+                <button
+                  type="button"
+                  className={firstChar === null ? "active" : undefined}
+                  aria-pressed={firstChar === null}
+                  onClick={() => onFirstCharChange(null)}
+                >
+                  All
+                </button>
+                {firstChars.map((character) => (
+                  <button
+                    key={character.label}
+                    type="button"
+                    className={
+                      firstChar === character.label ? "active" : undefined
+                    }
+                    aria-pressed={firstChar === character.label}
+                    onClick={() => onFirstCharChange(character.label)}
+                  >
+                    {character.label}
+                  </button>
+                ))}
+              </nav>
+            ) : null}
+          </div>
           <PaginationControls
             page={page}
             pageCount={pageCount}

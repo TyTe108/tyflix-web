@@ -1568,6 +1568,49 @@ a:hover {
   gap: 1rem;
 }
 
+.library-body {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.library-body .media-grid {
+  flex: 1;
+  min-width: 0;
+}
+
+.library-az-rail {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 0.15rem;
+  padding: 0.25rem 0;
+}
+
+.library-az-rail button {
+  border: 0;
+  padding: 0.2rem 0.45rem;
+  min-width: 1.75rem;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition), color var(--transition);
+}
+
+.library-az-rail button:hover {
+  background: color-mix(in srgb, var(--surface-2) 70%, var(--text));
+  color: var(--text);
+}
+
+.library-az-rail button.active {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
 .media-card {
   display: flex;
   flex-direction: column;
