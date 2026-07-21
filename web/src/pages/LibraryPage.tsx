@@ -217,35 +217,37 @@ export function LibraryPage() {
     <main className="page page-wide">
       <h1>Library</h1>
 
-      <div className="discover-media-toggle" aria-label="Library type">
-        <button
-          type="button"
-          className={
-            activeType === "movie"
-              ? "discover-filter-button active"
-              : "discover-filter-button"
-          }
-          aria-pressed={activeType === "movie"}
-          onClick={() => navigate("/library/movies")}
-        >
-          Movies
-        </button>
-        <button
-          type="button"
-          className={
-            activeType === "show"
-              ? "discover-filter-button active"
-              : "discover-filter-button"
-          }
-          aria-pressed={activeType === "show"}
-          onClick={() => navigate("/library/tv")}
-        >
-          TV Shows
-        </button>
+      <div className="library-toolbar">
+        <div className="discover-media-toggle" aria-label="Library type">
+          <button
+            type="button"
+            className={
+              activeType === "movie"
+                ? "discover-filter-button active"
+                : "discover-filter-button"
+            }
+            aria-pressed={activeType === "movie"}
+            onClick={() => navigate("/library/movies")}
+          >
+            Movies
+          </button>
+          <button
+            type="button"
+            className={
+              activeType === "show"
+                ? "discover-filter-button active"
+                : "discover-filter-button"
+            }
+            aria-pressed={activeType === "show"}
+            onClick={() => navigate("/library/tv")}
+          >
+            TV Shows
+          </button>
+        </div>
       </div>
 
-      <div className="discover-filters" aria-label="Library filters">
-        <label className="discover-genre-filter">
+      <div className="library-controls" aria-label="Library filters">
+        <label className="library-control">
           <span>Sort</span>
           <select
             value={sort}
@@ -260,7 +262,7 @@ export function LibraryPage() {
           </select>
         </label>
 
-        <label className="discover-genre-filter">
+        <label className="library-control">
           <span>Genre</span>
           <select
             value={genreId ?? ""}
@@ -275,7 +277,7 @@ export function LibraryPage() {
           </select>
         </label>
 
-        <label className="discover-genre-filter">
+        <label className="library-control library-control--checkbox">
           <span>Unwatched only</span>
           <input
             type="checkbox"

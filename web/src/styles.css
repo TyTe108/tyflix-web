@@ -266,6 +266,7 @@ h1 {
   font-weight: 600;
   padding: 0.65rem 1.1rem;
   cursor: pointer;
+  text-decoration: none;
   transition:
     background var(--transition),
     border-color var(--transition),
@@ -1566,6 +1567,37 @@ a:hover {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
   gap: 1rem;
+}
+
+.library-controls {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.library-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+
+.library-control select {
+  min-width: 11rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.library-control--checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .library-body {
