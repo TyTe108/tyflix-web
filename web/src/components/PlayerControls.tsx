@@ -20,6 +20,8 @@ type PlayerControlsProps = {
   durationMs: number | null;
   audioTracks: AudioStream[];
   onStreamSettingsChange: (settings: StreamSettings) => Promise<void>;
+  autoPlay?: boolean;
+  onAutoPlayChange?: (value: boolean) => void;
   children: ReactNode;
 };
 
@@ -96,6 +98,8 @@ export function PlayerControls({
   durationMs,
   audioTracks,
   onStreamSettingsChange,
+  autoPlay,
+  onAutoPlayChange,
   children,
 }: PlayerControlsProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -456,6 +460,20 @@ export function PlayerControls({
               value={activeAudioId ?? ""}
               onChange={selectAudio}
             />
+          ) : null}
+          {autoPlay !== undefined && onAutoPlayChange !== undefined ? (
+            <div className="watch-settings-group">
+              <label className="watch-settings-toggle">
+                <span className="watch-settings-toggle-text">Auto Play</span>
+                <input
+                  type="checkbox"
+                  checked={autoPlay}
+                  onChange={(event) => {
+                    onAutoPlayChange(event.currentTarget.checked);
+                  }}
+                />
+              </label>
+            </div>
           ) : null}
         </div>
 

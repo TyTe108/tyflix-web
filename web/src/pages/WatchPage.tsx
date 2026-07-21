@@ -1,9 +1,10 @@
 import Hls from "hls.js";
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   fetchEpisodeWatch,
   fetchMovieWatch,
+  fetchNextEpisode,
   type WatchDescriptor,
   type WatchTuning,
 } from "../api/watch";
@@ -13,12 +14,34 @@ import {
   type StreamSettings,
 } from "../components/PlayerControls";
 
+const AUTO_PLAY_STORAGE_KEY = "tyflix.autoPlay";
+
 type LoadStatus = "loading" | "ready" | "error";
 
 type PendingResume = {
   position: number;
   wasPlaying: boolean;
 };
+
+function readStoredAutoPlay(): boolean {
+  try {
+    const raw = localStorage.getItem(AUTO_PLAY_STORAGE_KEY);
+    if (raw === null) {
+      return true;
+    }
+    return raw === "true";
+  } catch {
+    return true;
+  }
+}
+
+function writeStoredAutoPlay(value: boolean): void {
+  try {
+    localStorage.setItem(AUTO_PLAY_STORAGE_KEY, String(value));
+  } catch {
+    // private mode / quota — preference stays in-memory only
+  }
+}
 
 function parseTmdbId(raw: string | undefined): number | null {
   if (raw === undefined || !/^\d+$/.test(raw)) {
@@ -52,6 +75,7 @@ function buildWatchTuning(settings: StreamSettings): WatchTuning | undefined {
 }
 
 export function WatchPage() {
+  const navigate = useNavigate();
   const { tmdbId: rawTmdbId, ratingKey: rawRatingKey } = useParams<{
     tmdbId: string;
     ratingKey: string;
@@ -67,6 +91,12 @@ export function WatchPage() {
   const [descriptor, setDescriptor] = useState<WatchDescriptor | null>(null);
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
+  const [autoPlay, setAutoPlay] = useState(readStoredAutoPlay);
+  const [nextRatingKey, setNextRatingKey] = useState<string | null>(null);
+  const autoPlayRef = useRef(autoPlay);
+  const nextRatingKeyRef = useRef(nextRatingKey);
+  autoPlayRef.current = autoPlay;
+  nextRatingKeyRef.current = nextRatingKey;
 
   useEffect(() => {
     let load: (() => Promise<WatchDescriptor>) | null = null;
@@ -112,6 +142,55 @@ export function WatchPage() {
       cancelled = true;
     };
   }, [isEpisode, ratingKey, tmdbId]);
+
+  // Prefetch the next episode so auto-advance can navigate without waiting.
+  // Soft-fail: a null/failed result just disables advance for this episode.
+  useEffect(() => {
+    if (!isEpisode || ratingKey === null) {
+      setNextRatingKey(null);
+      return;
+    }
+
+    let cancelled = false;
+    setNextRatingKey(null);
+    void fetchNextEpisode(ratingKey).then((next) => {
+      if (!cancelled) {
+        setNextRatingKey(next);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isEpisode, ratingKey]);
+
+  // Auto-advance on ended. Refs keep the listener current without rebinding
+  // on every autoPlay / nextRatingKey change.
+  useEffect(() => {
+    if (descriptor === null) {
+      return;
+    }
+    const video = videoRef.current;
+    if (video === null) {
+      return;
+    }
+
+    const onEnded = () => {
+      if (!autoPlayRef.current) {
+        return;
+      }
+      const next = nextRatingKeyRef.current;
+      if (next === null) {
+        return;
+      }
+      navigate(`/watch/episode/${next}`);
+    };
+
+    video.addEventListener("ended", onEnded);
+    return () => {
+      video.removeEventListener("ended", onEnded);
+    };
+  }, [descriptor, navigate]);
 
   // Wire up playback once a descriptor is ready. Tries the local connection
   // first and falls back to the remote one on a fatal hls.js error.
@@ -237,6 +316,11 @@ export function WatchPage() {
     };
   }, [descriptor]);
 
+  const onAutoPlayChange = (value: boolean) => {
+    setAutoPlay(value);
+    writeStoredAutoPlay(value);
+  };
+
   const onStreamSettingsChange = async (
     settings: StreamSettings,
   ): Promise<void> => {
@@ -303,6 +387,8 @@ export function WatchPage() {
           durationMs={descriptor.durationMs}
           audioTracks={descriptor.streams.audio}
           onStreamSettingsChange={onStreamSettingsChange}
+          autoPlay={isEpisode ? autoPlay : undefined}
+          onAutoPlayChange={isEpisode ? onAutoPlayChange : undefined}
         >
           <video
             ref={videoRef}

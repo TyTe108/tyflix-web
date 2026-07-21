@@ -98,6 +98,22 @@ export async function fetchEpisodes(
   };
 }
 
+// Soft-fail: a missing/failed next episode must never break playback.
+export async function fetchNextEpisode(
+  ratingKey: string,
+): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/watch/episode/${ratingKey}/next`);
+    if (!res.ok) {
+      return null;
+    }
+    const body = (await res.json()) as { nextRatingKey?: unknown };
+    return typeof body.nextRatingKey === "string" ? body.nextRatingKey : null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchWatch(
   path: string,
   tuning?: WatchTuning,
