@@ -80,6 +80,8 @@ function baseDeps(): WatchRouterDeps {
           partId: "9001",
           audio: [],
           subtitle: [],
+          title: "The Matrix",
+          subheading: "1999",
         };
       },
     } as unknown as PlexServerClient,
@@ -185,6 +187,8 @@ describe("GET /api/watch/movie/:tmdbId", () => {
       durationMs: number | null;
       creditsOffsetMs: number | null;
       partId: string | null;
+      title: string | null;
+      subheading: string | null;
     };
 
     assert.equal(body.mediaType, "movie");
@@ -196,6 +200,8 @@ describe("GET /api/watch/movie/:tmdbId", () => {
     assert.equal(body.durationMs, null);
     assert.equal(body.creditsOffsetMs, null);
     assert.equal(body.partId, "9001");
+    assert.equal(body.title, "The Matrix");
+    assert.equal(body.subheading, "1999");
 
     // sessionId is present and both HLS URLs are ready-to-play start.m3u8 URLs
     // carrying the ratingKey.
@@ -496,8 +502,11 @@ describe("GET /api/watch/episode/:ratingKey/next", () => {
         return {
           durationMs: null,
           creditsOffsetMs: null,
+          partId: "9001",
           audio: [],
           subtitle: [],
+          title: null,
+          subheading: null,
         };
       },
     } as unknown as PlexServerClient;
@@ -527,8 +536,11 @@ describe("GET /api/watch/episode/:ratingKey/next", () => {
         return {
           durationMs: null,
           creditsOffsetMs: null,
+          partId: "9001",
           audio: [],
           subtitle: [],
+          title: null,
+          subheading: null,
         };
       },
     } as unknown as PlexServerClient;
@@ -844,6 +856,8 @@ describe("PUT /api/watch/subtitle/:ratingKey", () => {
           partId: null,
           audio: [],
           subtitle: [],
+          title: null,
+          subheading: null,
         };
       },
       async selectSubtitle() {
@@ -876,6 +890,8 @@ describe("PUT /api/watch/subtitle/:ratingKey", () => {
           partId: "55501",
           audio: [],
           subtitle: [],
+          title: null,
+          subheading: null,
         };
       },
       async selectSubtitle(
@@ -913,6 +929,8 @@ describe("PUT /api/watch/subtitle/:ratingKey", () => {
           partId: "55501",
           audio: [],
           subtitle: [],
+          title: null,
+          subheading: null,
         };
       },
       async selectSubtitle(

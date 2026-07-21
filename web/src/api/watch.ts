@@ -43,6 +43,8 @@ export type WatchDescriptor = {
   durationMs: number | null;
   creditsOffsetMs: number | null;
   partId: string | null;
+  title: string | null;
+  subheading: string | null;
 };
 
 export type WatchTuning = {

@@ -63,6 +63,8 @@ export type PlaybackMeta = {
   partId: string | null;
   audio: AudioStream[];
   subtitle: SubtitleStream[];
+  title: string | null;
+  subheading: string | null;
 };
 
 export type LibrarySection = {
@@ -425,7 +427,17 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
       }
     }
 
-    return { durationMs, creditsOffsetMs, partId, audio, subtitle };
+    const { title, subheading } = playbackDisplayFromMetadata(meta);
+
+    return {
+      durationMs,
+      creditsOffsetMs,
+      partId,
+      audio,
+      subtitle,
+      title,
+      subheading,
+    };
   }
 
   async function sections(): Promise<LibrarySection[]> {
@@ -695,6 +707,10 @@ function firstMetadata(
   body: unknown,
 ): {
   title?: unknown;
+  year?: unknown;
+  grandparentTitle?: unknown;
+  parentIndex?: unknown;
+  index?: unknown;
   Media?: unknown;
   duration?: unknown;
   grandparentRatingKey?: unknown;
@@ -707,11 +723,57 @@ function firstMetadata(
   }
   return first as {
     title?: unknown;
+    year?: unknown;
+    grandparentTitle?: unknown;
+    parentIndex?: unknown;
+    index?: unknown;
     Media?: unknown;
     duration?: unknown;
     grandparentRatingKey?: unknown;
     Marker?: unknown;
   };
+}
+
+function playbackDisplayFromMetadata(meta: {
+  title?: unknown;
+  year?: unknown;
+  grandparentTitle?: unknown;
+  parentIndex?: unknown;
+  index?: unknown;
+}): { title: string | null; subheading: string | null } {
+  const grandparentTitle =
+    typeof meta.grandparentTitle === "string" && meta.grandparentTitle.length > 0
+      ? meta.grandparentTitle
+      : null;
+
+  if (grandparentTitle !== null) {
+    const episodeTitle =
+      typeof meta.title === "string" && meta.title.length > 0
+        ? meta.title
+        : null;
+    const parentIndex =
+      typeof meta.parentIndex === "number" ? meta.parentIndex : null;
+    const index = typeof meta.index === "number" ? meta.index : null;
+
+    if (parentIndex !== null && index !== null) {
+      let subheading = `S${parentIndex}E${index}`;
+      if (episodeTitle !== null) {
+        subheading += ` · ${episodeTitle}`;
+      }
+      return { title: grandparentTitle, subheading };
+    }
+
+    return {
+      title: grandparentTitle,
+      subheading: episodeTitle,
+    };
+  }
+
+  const title =
+    typeof meta.title === "string" && meta.title.length > 0 ? meta.title : null;
+  const subheading =
+    typeof meta.year === "number" ? String(meta.year) : null;
+  return { title, subheading };
 }
 
 // Prefer final credits; else the credits marker with the greatest start.

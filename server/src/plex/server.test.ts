@@ -501,6 +501,68 @@ describe("plexServer.playbackMeta", () => {
       },
     );
   });
+
+  it("derives title and subheading for a movie", async () => {
+    globalThis.fetch = (async () =>
+      jsonResponse(200, {
+        MediaContainer: {
+          Metadata: [
+            {
+              title: "The Matrix",
+              year: 1999,
+              duration: 8_160_000,
+              Media: [],
+            },
+          ],
+        },
+      })) as typeof fetch;
+
+    const meta = await client().playbackMeta("12345");
+    assert.equal(meta.title, "The Matrix");
+    assert.equal(meta.subheading, "1999");
+  });
+
+  it("derives title and subheading for an episode", async () => {
+    globalThis.fetch = (async () =>
+      jsonResponse(200, {
+        MediaContainer: {
+          Metadata: [
+            {
+              title: "Pilot",
+              grandparentTitle: "Breaking Bad",
+              parentIndex: 1,
+              index: 1,
+              duration: 3_600_000,
+              Media: [],
+            },
+          ],
+        },
+      })) as typeof fetch;
+
+    const meta = await client().playbackMeta("12345");
+    assert.equal(meta.title, "Breaking Bad");
+    assert.equal(meta.subheading, "S1E1 · Pilot");
+  });
+
+  it("falls back to the episode title when season and episode are missing", async () => {
+    globalThis.fetch = (async () =>
+      jsonResponse(200, {
+        MediaContainer: {
+          Metadata: [
+            {
+              title: "Special",
+              grandparentTitle: "Anthology Show",
+              duration: 3_600_000,
+              Media: [],
+            },
+          ],
+        },
+      })) as typeof fetch;
+
+    const meta = await client().playbackMeta("12345");
+    assert.equal(meta.title, "Anthology Show");
+    assert.equal(meta.subheading, "Special");
+  });
 });
 
 describe("plexServer.selectSubtitle", () => {

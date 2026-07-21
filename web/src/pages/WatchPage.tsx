@@ -541,8 +541,18 @@ export function WatchPage() {
 
   return (
     <main className="page page-wide">
-      <header className="row">
-        <Link to="/">← Back</Link>
+      <header className="watch-header">
+        <Link to="/" className="watch-back-link">
+          ← Back
+        </Link>
+        {status === "ready" && descriptor !== null && descriptor.title ? (
+          <div className="watch-header-titles">
+            <h1 className="watch-title">{descriptor.title}</h1>
+            {descriptor.subheading ? (
+              <p className="watch-subheading">{descriptor.subheading}</p>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
       {status === "loading" ? (
@@ -559,23 +569,25 @@ export function WatchPage() {
       ) : null}
 
       {status === "ready" && descriptor !== null ? (
-        <PlayerControls
-          videoRef={videoRef}
-          durationMs={descriptor.durationMs}
-          audioTracks={descriptor.streams.audio}
-          subtitleTracks={descriptor.streams.subtitle}
-          onStreamSettingsChange={onStreamSettingsChange}
-          autoPlay={isEpisode ? autoPlay : undefined}
-          onAutoPlayChange={isEpisode ? onAutoPlayChange : undefined}
-          overlay={upNextOverlay}
-        >
-          <video
-            ref={videoRef}
-            className="watch-player"
-            autoPlay
-            playsInline
-          />
-        </PlayerControls>
+        <div className="watch-player-frame">
+          <PlayerControls
+            videoRef={videoRef}
+            durationMs={descriptor.durationMs}
+            audioTracks={descriptor.streams.audio}
+            subtitleTracks={descriptor.streams.subtitle}
+            onStreamSettingsChange={onStreamSettingsChange}
+            autoPlay={isEpisode ? autoPlay : undefined}
+            onAutoPlayChange={isEpisode ? onAutoPlayChange : undefined}
+            overlay={upNextOverlay}
+          >
+            <video
+              ref={videoRef}
+              className="watch-player"
+              autoPlay
+              playsInline
+            />
+          </PlayerControls>
+        </div>
       ) : null}
     </main>
   );

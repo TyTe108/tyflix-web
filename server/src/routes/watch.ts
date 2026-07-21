@@ -38,6 +38,8 @@ type PlayDescriptor = {
   durationMs: number | null;
   creditsOffsetMs: number | null;
   partId: string | null;
+  title: string | null;
+  subheading: string | null;
 };
 
 type PlayTuning = {
@@ -108,6 +110,8 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
       durationMs: meta.durationMs,
       creditsOffsetMs: meta.creditsOffsetMs,
       partId: meta.partId,
+      title: meta.title,
+      subheading: meta.subheading,
     };
   }
 
