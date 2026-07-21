@@ -55,3 +55,24 @@ sidecar → burn fallback**, unstyleable, accepted.
   are quick, unlike the earlier CPU-cold-start freezes I wrongly blamed).
 - Shelved 17.9 code (`git stash`) still has the Subtitle group UI + `subtitleStreamID`
   plumbing — partly reusable for 20.3.
+
+## 20.1 spike results (2026-07-20) — partial; sidecar recipe still not reproduced
+
+Used the uploaded Plex OpenAPI (`docs/openapi.json`, 1.3MB — documents `/transcode/universal/{decision,start,subtitles}`, `/library/streams/{id}.{ext}`, `/library/parts/{id}`).
+
+**Confirmed:**
+- **Subtitle selection** = `PUT /library/parts/{partId}?subtitleStreamID={id}` → 200 (`subtitleStreamID=0` deselects). partId from `/library/metadata/{rk}` → `Media[0].Part[0].id` (Les Mis 6094 → part 10352, English CC stream 55063).
+
+**Ruled out:**
+- `GET /library/streams/{streamId}.{ext}` (.vtt/.srt) → **501** for our EMBEDDED subs. That endpoint serves only EXTERNAL sidecar *files*; embedded subs must be extracted via the transcode pipeline. (Confirms no session-less shortcut for this library.)
+
+**Still blocked — the sidecar `/video/:/transcode/universal/subtitles`:** Plex must DECIDE to emit a sidecar within a valid session, and reproducing that from a standalone curl fails:
+- HLS + our minimal h264 profile + `subtitles=auto` (part pre-selected) → `/subtitles` **404** (Plex produced no sidecar).
+- DASH, even with Plex web's *captured* `X-Plex-Client-Profile-Extra` + `X-Plex-Product=Plex Web` → `start.mpd` **400**.
+- Root cause: Plex web sends a full client context (its registered Plex-Web client-id + `X-Plex-Device/Model/Features/Playback-Id/-Session-Id` headers) that a from-scratch curl doesn't replicate, so Plex 400s the decision or won't sidecar.
+
+**Two real ways forward (both non-trivial):**
+1. Capture Plex web's FULL request *including the X-Plex-\* HEADERS* (browser devtools, not just the URL) → exact recipe → translate to tyflix.
+2. Build the part-select + `subtitles=auto` + `/subtitles` fetch into tyflix's real client flow and iterate against `/decision` (tyflix's own client identity + hls.js) until Plex agrees to sidecar.
+
+**Assessment:** direction (sidecar, styleable) is confirmed real; the exact recipe is genuinely finicky R&D and the standalone spike didn't crack it.
