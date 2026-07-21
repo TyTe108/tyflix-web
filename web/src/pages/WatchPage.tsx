@@ -5,6 +5,7 @@ import {
   fetchEpisodeWatch,
   fetchMovieWatch,
   fetchNextEpisode,
+  selectSubtitle,
   type NextEpisode,
   type WatchConnections,
   type WatchDescriptor,
@@ -117,6 +118,10 @@ export function WatchPage() {
   const tmdbId = parseTmdbId(rawTmdbId);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pendingResumeRef = useRef<PendingResume | null>(null);
+  // Last subtitleStreamId successfully applied via PUT. Avoids redundant
+  // selects when only quality/audio change. Defaults to Off (null); we do not
+  // reflect a pre-existing server-side selection on load.
+  const appliedSubtitleIdRef = useRef<string | null>(null);
   const [descriptor, setDescriptor] = useState<WatchDescriptor | null>(null);
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -156,6 +161,7 @@ export function WatchPage() {
     setError(null);
     setDescriptor(null);
     pendingResumeRef.current = null;
+    appliedSubtitleIdRef.current = null;
 
     void load()
       .then((result) => {
@@ -466,7 +472,7 @@ export function WatchPage() {
     settings: StreamSettings,
   ): Promise<void> => {
     const video = videoRef.current;
-    if (video === null) {
+    if (video === null || descriptor === null) {
       // No-op for the player; reject so the settings highlights stay put.
       throw new Error("Player not ready");
     }
@@ -476,8 +482,18 @@ export function WatchPage() {
       wasPlaying: !video.paused,
     };
 
-    const tuning = buildWatchTuning(settings);
     try {
+      // Burn-in is a part-level PUT, not a transcode URL param. Select (or
+      // clear) before restarting so the new session picks up the choice.
+      if (settings.subtitleStreamId !== appliedSubtitleIdRef.current) {
+        await selectSubtitle(
+          descriptor.ratingKey,
+          settings.subtitleStreamId ?? "0",
+        );
+        appliedSubtitleIdRef.current = settings.subtitleStreamId;
+      }
+
+      const tuning = buildWatchTuning(settings);
       let result: WatchDescriptor;
       if (isEpisode) {
         if (ratingKey === null) {
@@ -527,6 +543,7 @@ export function WatchPage() {
           videoRef={videoRef}
           durationMs={descriptor.durationMs}
           audioTracks={descriptor.streams.audio}
+          subtitleTracks={descriptor.streams.subtitle}
           onStreamSettingsChange={onStreamSettingsChange}
           autoPlay={isEpisode ? autoPlay : undefined}
           onAutoPlayChange={isEpisode ? onAutoPlayChange : undefined}

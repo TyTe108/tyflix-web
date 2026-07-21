@@ -6,19 +6,21 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import type { AudioStream } from "../api/watch";
+import type { AudioStream, SubtitleStream } from "../api/watch";
 
 export type QualityId = "original" | "1080p" | "720p" | "480p";
 
 export type StreamSettings = {
   quality: QualityId;
   audioStreamId: string | null;
+  subtitleStreamId: string | null;
 };
 
 type PlayerControlsProps = {
   videoRef: RefObject<HTMLVideoElement | null>;
   durationMs: number | null;
   audioTracks: AudioStream[];
+  subtitleTracks: SubtitleStream[];
   onStreamSettingsChange: (settings: StreamSettings) => Promise<void>;
   autoPlay?: boolean;
   onAutoPlayChange?: (value: boolean) => void;
@@ -98,6 +100,7 @@ export function PlayerControls({
   videoRef,
   durationMs,
   audioTracks,
+  subtitleTracks,
   onStreamSettingsChange,
   autoPlay,
   onAutoPlayChange,
@@ -125,6 +128,10 @@ export function PlayerControls({
   const [selectedQuality, setSelectedQuality] = useState<QualityId>("original");
   // null = use Plex default (highlight the default/first track in the UI).
   const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
+  // null = Off. We do not reflect a pre-existing server-side selection on load.
+  const [selectedSubtitleId, setSelectedSubtitleId] = useState<string | null>(
+    null,
+  );
 
   settingsOpenRef.current = settingsOpen;
   playbackRateRef.current = playbackRate;
@@ -351,7 +358,11 @@ export function PlayerControls({
       return;
     }
     applyStreamSettings(
-      { quality: next, audioStreamId: selectedAudioId },
+      {
+        quality: next,
+        audioStreamId: selectedAudioId,
+        subtitleStreamId: selectedSubtitleId,
+      },
       () => {
         setSelectedQuality(next);
       },
@@ -363,9 +374,30 @@ export function PlayerControls({
       return;
     }
     applyStreamSettings(
-      { quality: selectedQuality, audioStreamId: next },
+      {
+        quality: selectedQuality,
+        audioStreamId: next,
+        subtitleStreamId: selectedSubtitleId,
+      },
       () => {
         setSelectedAudioId(next);
+      },
+    );
+  };
+
+  const selectSubtitle = (next: string) => {
+    const nextId = next === "" ? null : next;
+    if (nextId === selectedSubtitleId) {
+      return;
+    }
+    applyStreamSettings(
+      {
+        quality: selectedQuality,
+        audioStreamId: selectedAudioId,
+        subtitleStreamId: nextId,
+      },
+      () => {
+        setSelectedSubtitleId(nextId);
       },
     );
   };
@@ -374,6 +406,14 @@ export function PlayerControls({
     value: track.id,
     label: formatAudioLabel(track),
   }));
+
+  const subtitleOptions = [
+    { value: "", label: "Off" },
+    ...subtitleTracks.map((track) => ({
+      value: track.id,
+      label: formatSubtitleLabel(track),
+    })),
+  ];
 
   const toggleFullscreen = () => {
     const shell = shellRef.current;
@@ -463,6 +503,14 @@ export function PlayerControls({
               options={audioOptions}
               value={activeAudioId ?? ""}
               onChange={selectAudio}
+            />
+          ) : null}
+          {subtitleTracks.length > 0 ? (
+            <SettingsOptionGroup
+              label="Subtitles"
+              options={subtitleOptions}
+              value={selectedSubtitleId ?? ""}
+              onChange={selectSubtitle}
             />
           ) : null}
           {autoPlay !== undefined && onAutoPlayChange !== undefined ? (
@@ -605,6 +653,19 @@ function formatAudioLabel(stream: AudioStream): string {
   const tech = [codec, channels].filter(Boolean).join(" ");
   const head = title !== null ? `${language} · ${title}` : language;
   return tech.length > 0 ? `${head} (${tech})` : head;
+}
+
+function formatSubtitleLabel(stream: SubtitleStream): string {
+  const title =
+    typeof stream.title === "string" && stream.title.trim() !== ""
+      ? stream.title.trim()
+      : null;
+  const language =
+    typeof stream.language === "string" && stream.language.trim() !== ""
+      ? stream.language.trim()
+      : null;
+  const head = title ?? language ?? "Unknown";
+  return stream.forced ? `${head} (forced)` : head;
 }
 
 function formatTime(seconds: number): string {

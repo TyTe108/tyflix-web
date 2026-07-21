@@ -66,6 +66,23 @@ export async function fetchEpisodeWatch(
   return fetchWatch(`/api/watch/episode/${ratingKey}`, tuning);
 }
 
+// Selects (or clears with "0") the burned-in subtitle for the current user on
+// a media item. The caller must then restart the stream so Plex re-decides.
+export async function selectSubtitle(
+  ratingKey: string,
+  subtitleStreamID: string,
+): Promise<void> {
+  const res = await fetch(`/api/watch/subtitle/${ratingKey}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subtitleStreamID }),
+  });
+  if (!res.ok) {
+    const message = await readErrorMessage(res);
+    throw new Error(message ?? `Failed to select subtitle (${res.status})`);
+  }
+}
+
 export type Episode = {
   ratingKey: string;
   seasonNumber: number;
