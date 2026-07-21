@@ -1,11 +1,12 @@
 import Hls from "hls.js";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   fetchEpisodeWatch,
   fetchMovieWatch,
   fetchNextEpisode,
   type NextEpisode,
+  type WatchConnections,
   type WatchDescriptor,
   type WatchTuning,
 } from "../api/watch";
@@ -14,14 +15,21 @@ import {
   type QualityId,
   type StreamSettings,
 } from "../components/PlayerControls";
+import { UpNextCard } from "../components/UpNextCard";
 
 const AUTO_PLAY_STORAGE_KEY = "tyflix.autoPlay";
+const UP_NEXT_WINDOW_SEC = 30;
 
 type LoadStatus = "loading" | "ready" | "error";
 
 type PendingResume = {
   position: number;
   wasPlaying: boolean;
+};
+
+type PlaybackClock = {
+  currentTime: number;
+  duration: number;
 };
 
 function readStoredAutoPlay(): boolean {
@@ -75,6 +83,26 @@ function buildWatchTuning(settings: StreamSettings): WatchTuning | undefined {
   return Object.keys(tuning).length > 0 ? tuning : undefined;
 }
 
+function buildThumbUrls(
+  thumb: string | null,
+  connections: WatchConnections,
+  token: string,
+): string[] {
+  if (thumb === null) {
+    return [];
+  }
+  const bases: string[] = [];
+  if (connections.local !== null) {
+    bases.push(connections.local);
+  }
+  bases.push(connections.remote);
+
+  return bases.map((conn) => {
+    const base = conn.endsWith("/") ? conn.slice(0, -1) : conn;
+    return `${base}/photo/:/transcode?url=${encodeURIComponent(thumb)}&width=320&height=180&X-Plex-Token=${token}`;
+  });
+}
+
 export function WatchPage() {
   const navigate = useNavigate();
   const { tmdbId: rawTmdbId, ratingKey: rawRatingKey } = useParams<{
@@ -94,6 +122,11 @@ export function WatchPage() {
   const [error, setError] = useState<string | null>(null);
   const [autoPlay, setAutoPlay] = useState(readStoredAutoPlay);
   const [nextEpisode, setNextEpisode] = useState<NextEpisode | null>(null);
+  const [upNextDismissed, setUpNextDismissed] = useState(false);
+  const [playbackClock, setPlaybackClock] = useState<PlaybackClock>({
+    currentTime: 0,
+    duration: 0,
+  });
   const autoPlayRef = useRef(autoPlay);
   const nextEpisodeRef = useRef(nextEpisode);
   autoPlayRef.current = autoPlay;
@@ -164,6 +197,51 @@ export function WatchPage() {
       cancelled = true;
     };
   }, [isEpisode, ratingKey]);
+
+  // Dismiss is per-episode; a new ratingKey brings the card back.
+  useEffect(() => {
+    setUpNextDismissed(false);
+    setPlaybackClock({ currentTime: 0, duration: 0 });
+  }, [ratingKey]);
+
+  // Drive the Up Next window from the video clock (no separate interval).
+  useEffect(() => {
+    if (descriptor === null) {
+      return;
+    }
+    const video = videoRef.current;
+    if (video === null) {
+      return;
+    }
+
+    const fallbackDuration =
+      typeof descriptor.durationMs === "number" &&
+      Number.isFinite(descriptor.durationMs) &&
+      descriptor.durationMs > 0
+        ? descriptor.durationMs / 1000
+        : 0;
+
+    const sync = () => {
+      const duration =
+        Number.isFinite(video.duration) && video.duration > 0
+          ? video.duration
+          : fallbackDuration;
+      setPlaybackClock({
+        currentTime: video.currentTime,
+        duration,
+      });
+    };
+
+    sync();
+    video.addEventListener("timeupdate", sync);
+    video.addEventListener("durationchange", sync);
+    video.addEventListener("loadedmetadata", sync);
+    return () => {
+      video.removeEventListener("timeupdate", sync);
+      video.removeEventListener("durationchange", sync);
+      video.removeEventListener("loadedmetadata", sync);
+    };
+  }, [descriptor]);
 
   // Auto-advance on ended. Refs keep the listener current without rebinding
   // on every autoPlay / nextEpisode change.
@@ -322,6 +400,51 @@ export function WatchPage() {
     writeStoredAutoPlay(value);
   };
 
+  const remainingSec = playbackClock.duration - playbackClock.currentTime;
+  const showUpNext =
+    isEpisode &&
+    autoPlay &&
+    nextEpisode !== null &&
+    playbackClock.duration > 0 &&
+    remainingSec > 0 &&
+    remainingSec <= UP_NEXT_WINDOW_SEC &&
+    !upNextDismissed;
+
+  // Stable across timeupdate re-renders so UpNextCard's local→remote image
+  // fallback is not reset every tick.
+  const thumbUrls = useMemo(
+    () =>
+      nextEpisode === null || descriptor === null
+        ? []
+        : buildThumbUrls(
+            nextEpisode.thumb,
+            descriptor.connections,
+            descriptor.transient,
+          ),
+    [
+      nextEpisode?.thumb,
+      descriptor?.connections,
+      descriptor?.transient,
+    ],
+  );
+
+  const upNextOverlay =
+    showUpNext && nextEpisode !== null && descriptor !== null ? (
+      <UpNextCard
+        seasonNumber={nextEpisode.seasonNumber}
+        episodeNumber={nextEpisode.episodeNumber}
+        title={nextEpisode.title}
+        thumbUrls={thumbUrls}
+        secondsRemaining={Math.ceil(remainingSec)}
+        onPlayNow={() => {
+          navigate(`/watch/episode/${nextEpisode.ratingKey}`);
+        }}
+        onDismiss={() => {
+          setUpNextDismissed(true);
+        }}
+      />
+    ) : null;
+
   const onStreamSettingsChange = async (
     settings: StreamSettings,
   ): Promise<void> => {
@@ -390,6 +513,7 @@ export function WatchPage() {
           onStreamSettingsChange={onStreamSettingsChange}
           autoPlay={isEpisode ? autoPlay : undefined}
           onAutoPlayChange={isEpisode ? onAutoPlayChange : undefined}
+          overlay={upNextOverlay}
         >
           <video
             ref={videoRef}

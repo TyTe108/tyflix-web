@@ -22,6 +22,7 @@ type PlayerControlsProps = {
   onStreamSettingsChange: (settings: StreamSettings) => Promise<void>;
   autoPlay?: boolean;
   onAutoPlayChange?: (value: boolean) => void;
+  overlay?: ReactNode;
   children: ReactNode;
 };
 
@@ -100,6 +101,7 @@ export function PlayerControls({
   onStreamSettingsChange,
   autoPlay,
   onAutoPlayChange,
+  overlay,
   children,
 }: PlayerControlsProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -427,6 +429,8 @@ export function PlayerControls({
       >
         {children}
       </div>
+
+      {overlay}
 
       <div
         className={
