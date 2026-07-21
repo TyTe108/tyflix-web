@@ -88,6 +88,7 @@ function baseDeps(): WatchRouterDeps {
 
 function createApp(deps: WatchRouterDeps): express.Express {
   const app = express();
+  app.use(express.json());
   app.use("/api/watch", requireAuth(SECRET), createWatchRouter(deps));
   return app;
 }
@@ -684,10 +685,178 @@ describe("GET /api/watch/episode/:ratingKey", () => {
   });
 });
 
+describe("PUT /api/watch/subtitle/:ratingKey", () => {
+  it("rejects a non-numeric ratingKey with 400", async () => {
+    const app = createApp(baseDeps());
+    const response = await fetchLocal(
+      app,
+      "/api/watch/subtitle/abc",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      { method: "PUT", body: { subtitleStreamID: "102" } },
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      error: "ratingKey must be numeric",
+    });
+  });
+
+  it("rejects a missing/empty/non-numeric subtitleStreamID with 400", async () => {
+    const app = createApp(baseDeps());
+    const cookie = sessionCookie({ plexToken: USER_TOKEN });
+
+    const missing = await fetchLocal(app, "/api/watch/subtitle/12345", cookie, {
+      method: "PUT",
+      body: {},
+    });
+    assert.equal(missing.status, 400);
+    assert.deepEqual(await missing.json(), {
+      error: "subtitleStreamID must be numeric",
+    });
+
+    const empty = await fetchLocal(app, "/api/watch/subtitle/12345", cookie, {
+      method: "PUT",
+      body: { subtitleStreamID: "" },
+    });
+    assert.equal(empty.status, 400);
+    assert.deepEqual(await empty.json(), {
+      error: "subtitleStreamID must be numeric",
+    });
+
+    const nonNumeric = await fetchLocal(
+      app,
+      "/api/watch/subtitle/12345",
+      cookie,
+      { method: "PUT", body: { subtitleStreamID: "abc" } },
+    );
+    assert.equal(nonNumeric.status, 400);
+    assert.deepEqual(await nonNumeric.json(), {
+      error: "subtitleStreamID must be numeric",
+    });
+  });
+
+  it("returns 409 when the session carries no Plex token", async () => {
+    const app = createApp(baseDeps());
+    const response = await fetchLocal(
+      app,
+      "/api/watch/subtitle/12345",
+      sessionCookie(),
+      { method: "PUT", body: { subtitleStreamID: "102" } },
+    );
+
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), { error: "re-login required" });
+  });
+
+  it("returns 404 when playbackMeta has no partId", async () => {
+    const deps = baseDeps();
+    deps.plexServer = {
+      async playbackMeta() {
+        return {
+          durationMs: null,
+          creditsOffsetMs: null,
+          partId: null,
+          audio: [],
+          subtitle: [],
+        };
+      },
+      async selectSubtitle() {
+        throw new Error("selectSubtitle should not be called");
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/subtitle/12345",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      { method: "PUT", body: { subtitleStreamID: "102" } },
+    );
+
+    assert.equal(response.status, 404);
+    assert.deepEqual(await response.json(), { error: "not playable" });
+  });
+
+  it("selects the subtitle via the user token on the happy path", async () => {
+    let selectArgs:
+      | [string, string, string]
+      | null = null;
+    const deps = baseDeps();
+    deps.plexServer = {
+      async playbackMeta() {
+        return {
+          durationMs: null,
+          creditsOffsetMs: null,
+          partId: "55501",
+          audio: [],
+          subtitle: [],
+        };
+      },
+      async selectSubtitle(
+        partId: string,
+        subtitleStreamID: string,
+        userToken: string,
+      ) {
+        selectArgs = [partId, subtitleStreamID, userToken];
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/subtitle/12345",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      { method: "PUT", body: { subtitleStreamID: "102" } },
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.deepEqual(selectArgs, ["55501", "102", USER_TOKEN]);
+  });
+
+  it("accepts subtitleStreamID 0 to clear the selection", async () => {
+    let selectArgs:
+      | [string, string, string]
+      | null = null;
+    const deps = baseDeps();
+    deps.plexServer = {
+      async playbackMeta() {
+        return {
+          durationMs: null,
+          creditsOffsetMs: null,
+          partId: "55501",
+          audio: [],
+          subtitle: [],
+        };
+      },
+      async selectSubtitle(
+        partId: string,
+        subtitleStreamID: string,
+        userToken: string,
+      ) {
+        selectArgs = [partId, subtitleStreamID, userToken];
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/subtitle/12345",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      { method: "PUT", body: { subtitleStreamID: "0" } },
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.deepEqual(selectArgs, ["55501", "0", USER_TOKEN]);
+  });
+});
+
 async function fetchLocal(
   app: express.Express,
   path: string,
   cookie: string,
+  options: { method?: string; body?: unknown } = {},
 ): Promise<Response> {
   const server = app.listen(0);
   try {
@@ -695,8 +864,15 @@ async function fetchLocal(
     if (address === null || typeof address === "string") {
       throw new Error("failed to bind test server");
     }
+    const headers: Record<string, string> = { Cookie: cookie };
+    if (options.body !== undefined) {
+      headers["Content-Type"] = "application/json";
+    }
     return await fetch(`http://127.0.0.1:${address.port}${path}`, {
-      headers: { Cookie: cookie },
+      method: options.method ?? "GET",
+      headers,
+      body:
+        options.body !== undefined ? JSON.stringify(options.body) : undefined,
     });
   } finally {
     await new Promise<void>((resolve, reject) => {

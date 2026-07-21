@@ -502,3 +502,70 @@ describe("plexServer.playbackMeta", () => {
     );
   });
 });
+
+describe("plexServer.selectSubtitle", () => {
+  it("PUTs the part-selection URL with the user token", async () => {
+    let requestedUrl: string | null = null;
+    let requestedMethod: string | null = null;
+    let requestedToken: string | null = null;
+    globalThis.fetch = (async (
+      input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
+      requestedUrl =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      requestedMethod = init?.method ?? "GET";
+      const headers = new Headers(init?.headers);
+      requestedToken = headers.get("X-Plex-Token");
+      return jsonResponse(200, {});
+    }) as typeof fetch;
+
+    await client().selectSubtitle("55501", "102", "user-token-abc");
+
+    assert.equal(
+      requestedUrl,
+      `${BASE_URL}/library/parts/55501?subtitleStreamID=102`,
+    );
+    assert.equal(requestedMethod, "PUT");
+    assert.equal(requestedToken, "user-token-abc");
+  });
+
+  it("accepts subtitleStreamID 0 to clear the selection", async () => {
+    let requestedUrl: string | null = null;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      requestedUrl =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      return jsonResponse(200, {});
+    }) as typeof fetch;
+
+    await client().selectSubtitle("55501", "0", "user-token-abc");
+
+    assert.equal(
+      requestedUrl,
+      `${BASE_URL}/library/parts/55501?subtitleStreamID=0`,
+    );
+  });
+
+  it("throws PlexServerUpstreamError on a non-OK response", async () => {
+    globalThis.fetch = (async () =>
+      jsonResponse(500, { error: "boom" })) as typeof fetch;
+
+    await assert.rejects(
+      client().selectSubtitle("55501", "102", "user-token-abc"),
+      (err: unknown) => {
+        assert.ok(err instanceof PlexServerUpstreamError);
+        assert.equal(err.status, 500);
+        assert.match(err.message, /\/library\/parts\/55501/);
+        return true;
+      },
+    );
+  });
+});

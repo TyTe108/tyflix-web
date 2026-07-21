@@ -399,7 +399,50 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     return { durationMs, creditsOffsetMs, partId, audio, subtitle };
   }
 
-  return { accounts, history, item, episodes, nextEpisode, playbackMeta };
+  // Selects (or clears with subtitleStreamID "0") the burned-in subtitle for
+  // the calling user on a media part. Uses the USER's token — selection is
+  // per-account on the Plex server, not the owner token.
+  async function selectSubtitle(
+    partId: string,
+    subtitleStreamID: string,
+    userToken: string,
+  ): Promise<void> {
+    const path = `/library/parts/${partId}`;
+    const url = new URL(`${baseUrl}${path}`);
+    url.searchParams.set("subtitleStreamID", subtitleStreamID);
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "PUT",
+        headers: {
+          "X-Plex-Token": userToken,
+          Accept: "application/json",
+        },
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Plex server request failed";
+      throw new PlexServerUpstreamError(message, 502);
+    }
+
+    if (!res.ok) {
+      throw new PlexServerUpstreamError(
+        `Plex server ${path} failed (${res.status})`,
+        res.status,
+      );
+    }
+  }
+
+  return {
+    accounts,
+    history,
+    item,
+    episodes,
+    nextEpisode,
+    playbackMeta,
+    selectSubtitle,
+  };
 }
 
 export type PlexServerClient = ReturnType<typeof createPlexServerClient>;

@@ -203,6 +203,59 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     }
   });
 
+  // Selects (or clears) the burned-in subtitle for the current user on a media
+  // item. The browser already has the ratingKey from a play descriptor; the
+  // part id is resolved server-side so the client never has to guess it.
+  router.put("/subtitle/:ratingKey", async (req, res) => {
+    const ratingKey = req.params.ratingKey;
+    if (!/^\d+$/.test(ratingKey)) {
+      res.status(400).json({ error: "ratingKey must be numeric" });
+      return;
+    }
+
+    const subtitleStreamID = readSubtitleStreamID(req.body);
+    if (subtitleStreamID === null) {
+      res.status(400).json({ error: "subtitleStreamID must be numeric" });
+      return;
+    }
+
+    const session = res.locals.session as SessionPayload | undefined;
+    if (!session) {
+      res.status(401).json({ error: "not authenticated" });
+      return;
+    }
+
+    let userToken: string | null;
+    try {
+      // readPlexToken throws on a tampered/corrupt blob; surface that as 502.
+      userToken = readPlexToken(session, sessionSecret);
+    } catch (err) {
+      respondUpstreamError(res, err);
+      return;
+    }
+    if (userToken === null) {
+      res.status(409).json({ error: "re-login required" });
+      return;
+    }
+
+    try {
+      const meta = await plexServer.playbackMeta(ratingKey);
+      if (meta.partId === null) {
+        res.status(404).json({ error: "not playable" });
+        return;
+      }
+
+      await plexServer.selectSubtitle(
+        meta.partId,
+        subtitleStreamID,
+        userToken,
+      );
+      res.json({ ok: true });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
   // This endpoint takes a RAW Plex episode ratingKey (the browser already has it
   // from GET /tv/:tmdbId/episodes) and is intentionally gated only by the user's
   // own Plex transient: Plex itself enforces what that account may stream, so we
@@ -253,6 +306,18 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
   });
 
   return router;
+}
+
+// "0" is valid (clear selection). Non-string / non-numeric → null.
+function readSubtitleStreamID(body: unknown): string | null {
+  if (typeof body !== "object" || body === null) {
+    return null;
+  }
+  const raw = (body as { subtitleStreamID?: unknown }).subtitleStreamID;
+  if (typeof raw !== "string" || !/^\d+$/.test(raw)) {
+    return null;
+  }
+  return raw;
 }
 
 function parsePlayTuning(
