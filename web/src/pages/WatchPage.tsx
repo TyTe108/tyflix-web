@@ -175,8 +175,35 @@ export function WatchPage() {
       video.pause();
     }
 
-    const attach = (source: string) => {
-      hls = new Hls({ enableWorker: false });
+    // Fast-fail only the LOCAL master-manifest probe (~3s, no retries) so an
+    // unreachable LAN plex.direct falls over to remote quickly. Fragment and
+    // media-playlist timeouts stay at hls.js defaults — cold Plex transcodes
+    // can take several seconds even on a reachable local link. Remote (and
+    // primary-when-local-is-null) keeps patient default timeouts.
+    const attach = (source: string, fastFail: boolean) => {
+      hls = new Hls({
+        enableWorker: false,
+        ...(fastFail
+          ? {
+              manifestLoadPolicy: {
+                default: {
+                  maxTimeToFirstByteMs: 3000,
+                  maxLoadTimeMs: 3000,
+                  timeoutRetry: {
+                    maxNumRetry: 0,
+                    retryDelayMs: 0,
+                    maxRetryDelayMs: 0,
+                  },
+                  errorRetry: {
+                    maxNumRetry: 0,
+                    retryDelayMs: 0,
+                    maxRetryDelayMs: 0,
+                  },
+                },
+              },
+            }
+          : {}),
+      });
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         applyPendingResume();
       });
@@ -189,7 +216,7 @@ export function WatchPage() {
         if (!usedRemote && remoteUrl !== source) {
           usedRemote = true;
           hls?.destroy();
-          attach(remoteUrl);
+          attach(remoteUrl, false);
           return;
         }
         hls?.destroy();
@@ -202,7 +229,7 @@ export function WatchPage() {
       hls.attachMedia(video);
     };
 
-    attach(primaryUrl);
+    attach(primaryUrl, primaryUrl === localUrl);
 
     return () => {
       hls?.destroy();
