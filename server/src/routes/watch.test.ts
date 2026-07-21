@@ -685,6 +685,92 @@ describe("GET /api/watch/episode/:ratingKey", () => {
   });
 });
 
+describe("GET /api/watch/item/:ratingKey", () => {
+  it("rejects a non-numeric ratingKey with 400", async () => {
+    const app = createApp(baseDeps());
+    const response = await fetchLocal(
+      app,
+      "/api/watch/item/abc",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      error: "ratingKey must be numeric",
+    });
+  });
+
+  it("returns 409 when the session carries no Plex token", async () => {
+    const app = createApp(baseDeps());
+    const response = await fetchLocal(
+      app,
+      "/api/watch/item/99999",
+      sessionCookie(),
+    );
+
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), { error: "re-login required" });
+  });
+
+  it("returns the play descriptor with mediaType movie on the happy path", async () => {
+    let mintedWith: string | null = null;
+    const deps = baseDeps();
+    deps.transientMinter = {
+      async mint(userToken: string) {
+        mintedWith = userToken;
+        return TRANSIENT;
+      },
+    } as TransientTokenMinter;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/item/99999",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      mediaType: string;
+      ratingKey: string;
+      connections: typeof CONNECTIONS;
+      transient: string;
+      hls: { local: string | null; remote: string };
+      sessionId: string;
+      streams: { audio: unknown[]; subtitle: unknown[] };
+      durationMs: number | null;
+      creditsOffsetMs: number | null;
+      partId: string | null;
+    };
+
+    assert.equal(body.mediaType, "movie");
+    assert.equal(body.ratingKey, "99999");
+    assert.deepEqual(body.connections, CONNECTIONS);
+    assert.equal(body.transient, TRANSIENT);
+    assert.deepEqual(body.streams, { audio: [], subtitle: [] });
+    assert.equal(body.partId, "9001");
+
+    assert.equal(typeof body.sessionId, "string");
+    assert.ok(body.sessionId.length > 0);
+
+    assert.ok(
+      body.hls.remote.startsWith(`${CONNECTIONS.remote}/video/:/transcode/`),
+    );
+    assert.ok(body.hls.remote.includes("start.m3u8"));
+    assert.ok(body.hls.remote.includes("99999"));
+    assert.ok(body.hls.remote.includes(body.sessionId));
+
+    assert.notEqual(body.hls.local, null);
+    const localUrl = body.hls.local as string;
+    assert.ok(localUrl.startsWith(`${CONNECTIONS.local}/video/:/transcode/`));
+    assert.ok(localUrl.includes("start.m3u8"));
+    assert.ok(localUrl.includes("99999"));
+    assert.ok(localUrl.includes(body.sessionId));
+
+    assert.equal(mintedWith, USER_TOKEN);
+  });
+});
+
 describe("PUT /api/watch/subtitle/:ratingKey", () => {
   it("rejects a non-numeric ratingKey with 400", async () => {
     const app = createApp(baseDeps());

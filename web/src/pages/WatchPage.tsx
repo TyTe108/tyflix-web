@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   fetchEpisodeWatch,
+  fetchItemWatch,
   fetchMovieWatch,
   fetchNextEpisode,
   selectSubtitle,
@@ -106,15 +107,24 @@ function buildThumbUrls(
 
 export function WatchPage() {
   const navigate = useNavigate();
-  const { tmdbId: rawTmdbId, ratingKey: rawRatingKey } = useParams<{
+  const {
+    tmdbId: rawTmdbId,
+    ratingKey: rawRatingKey,
+    itemRatingKey: rawItemRatingKey,
+  } = useParams<{
     tmdbId: string;
     ratingKey: string;
+    itemRatingKey: string;
   }>();
   // The /watch/episode/:ratingKey route always supplies ratingKey; the
+  // /watch/item/:itemRatingKey route supplies itemRatingKey; the
   // /watch/movie/:tmdbId route supplies tmdbId. Pick the source accordingly.
   const isEpisode = rawRatingKey !== undefined;
   const ratingKey =
     isEpisode && /^\d+$/.test(rawRatingKey) ? rawRatingKey : null;
+  const isItem = !isEpisode && rawItemRatingKey !== undefined;
+  const itemRatingKey =
+    isItem && /^\d+$/.test(rawItemRatingKey) ? rawItemRatingKey : null;
   const tmdbId = parseTmdbId(rawTmdbId);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pendingResumeRef = useRef<PendingResume | null>(null);
@@ -144,6 +154,10 @@ export function WatchPage() {
     if (isEpisode) {
       if (ratingKey !== null) {
         load = () => fetchEpisodeWatch(ratingKey);
+      }
+    } else if (isItem) {
+      if (itemRatingKey !== null) {
+        load = () => fetchItemWatch(itemRatingKey);
       }
     } else if (tmdbId !== null) {
       load = () => fetchMovieWatch(tmdbId);
@@ -183,7 +197,7 @@ export function WatchPage() {
     return () => {
       cancelled = true;
     };
-  }, [isEpisode, ratingKey, tmdbId]);
+  }, [isEpisode, isItem, ratingKey, itemRatingKey, tmdbId]);
 
   // Prefetch the next episode so auto-advance can navigate without waiting.
   // Soft-fail: a null/failed result just disables advance for this episode.
@@ -207,10 +221,11 @@ export function WatchPage() {
   }, [isEpisode, ratingKey]);
 
   // Dismiss is per-episode; a new ratingKey brings the card back.
+  // Also reset when navigating between item plays.
   useEffect(() => {
     setUpNextDismissed(false);
     setPlaybackClock({ currentTime: 0, duration: 0 });
-  }, [ratingKey]);
+  }, [ratingKey, itemRatingKey]);
 
   // Drive the Up Next window from the video clock (no separate interval).
   useEffect(() => {
@@ -500,6 +515,11 @@ export function WatchPage() {
           throw new Error("Invalid episode");
         }
         result = await fetchEpisodeWatch(ratingKey, tuning);
+      } else if (isItem) {
+        if (itemRatingKey === null) {
+          throw new Error("Invalid title");
+        }
+        result = await fetchItemWatch(itemRatingKey, tuning);
       } else {
         if (tmdbId === null) {
           throw new Error("Invalid title");

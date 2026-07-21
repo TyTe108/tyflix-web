@@ -36,5 +36,13 @@ export function LibraryCard({ item }: { item: LibraryItem }) {
     );
   }
 
+  if (item.type !== "show") {
+    return (
+      <Link to={`/watch/item/${item.ratingKey}`} className="media-card">
+        {card}
+      </Link>
+    );
+  }
+
   return <div className="media-card">{card}</div>;
 }

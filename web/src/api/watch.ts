@@ -66,6 +66,13 @@ export async function fetchEpisodeWatch(
   return fetchWatch(`/api/watch/episode/${ratingKey}`, tuning);
 }
 
+export async function fetchItemWatch(
+  ratingKey: string,
+  tuning?: WatchTuning,
+): Promise<WatchDescriptor> {
+  return fetchWatch(`/api/watch/item/${ratingKey}`, tuning);
+}
+
 // Selects (or clears with "0") the burned-in subtitle for the current user on
 // a media item. The caller must then restart the stream so Plex re-decides.
 export async function selectSubtitle(

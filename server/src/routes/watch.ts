@@ -305,6 +305,52 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     }
   });
 
+  // Plays any Plex item by raw ratingKey — used for library movies that have no
+  // tmdbId (so the tmdb-keyed /movie/:tmdbId route can't resolve them). Gated
+  // only by the user's own Plex transient, like /episode/:ratingKey.
+  router.get("/item/:ratingKey", async (req, res) => {
+    const ratingKey = req.params.ratingKey;
+    if (!/^\d+$/.test(ratingKey)) {
+      res.status(400).json({ error: "ratingKey must be numeric" });
+      return;
+    }
+
+    const tuningResult = parsePlayTuning(req.query);
+    if (!tuningResult.ok) {
+      res.status(400).json({ error: tuningResult.error });
+      return;
+    }
+
+    const session = res.locals.session as SessionPayload | undefined;
+    if (!session) {
+      res.status(401).json({ error: "not authenticated" });
+      return;
+    }
+
+    let userToken: string | null;
+    try {
+      userToken = readPlexToken(session, sessionSecret);
+    } catch (err) {
+      respondUpstreamError(res, err);
+      return;
+    }
+    if (userToken === null) {
+      res.status(409).json({ error: "re-login required" });
+      return;
+    }
+
+    try {
+      const descriptor = await buildPlayDescriptor(
+        ratingKey,
+        userToken,
+        tuningResult.value,
+      );
+      res.json({ mediaType: "movie", ...descriptor });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
   return router;
 }
 
