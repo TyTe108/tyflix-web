@@ -510,6 +510,45 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     return { items, totalSize };
   }
 
+  async function fetchImage(path: string): Promise<{
+    ok: boolean;
+    status: number;
+    contentType: string | null;
+    body: Buffer;
+  }> {
+    const url = `${baseUrl}${path}`;
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "GET",
+        headers: {
+          "X-Plex-Token": token,
+        },
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Plex server request failed";
+      throw new PlexServerUpstreamError(message, 502);
+    }
+
+    if (res.ok) {
+      return {
+        ok: true,
+        status: res.status,
+        contentType: res.headers.get("content-type"),
+        body: Buffer.from(await res.arrayBuffer()),
+      };
+    }
+
+    return {
+      ok: false,
+      status: res.status,
+      contentType: res.headers.get("content-type"),
+      body: Buffer.alloc(0),
+    };
+  }
+
   // Selects (or clears with subtitleStreamID "0") the burned-in subtitle for
   // the calling user on a media part. Uses the USER's token — selection is
   // per-account on the Plex server, not the owner token.
@@ -554,6 +593,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     playbackMeta,
     sections,
     sectionItems,
+    fetchImage,
     selectSubtitle,
   };
 }

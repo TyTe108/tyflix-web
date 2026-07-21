@@ -12,6 +12,9 @@ const LIBRARY_SORT_KEYS = new Set<LibrarySortKey>([
   "rating",
 ]);
 
+const LIBRARY_IMAGE_PATH_RE =
+  /^\/library\/metadata\/\d+\/(thumb|art)\/\d+$/;
+
 export type LibraryRouterDeps = {
   plexServer: PlexServerClient;
 };
@@ -19,6 +22,31 @@ export type LibraryRouterDeps = {
 export function createLibraryRouter(deps: LibraryRouterDeps): Router {
   const { plexServer } = deps;
   const router = Router();
+
+  router.get("/image", async (req, res) => {
+    const path = req.query.path;
+    if (typeof path !== "string") {
+      res.status(400).json({ error: "path is required" });
+      return;
+    }
+    if (!LIBRARY_IMAGE_PATH_RE.test(path)) {
+      res.status(400).json({ error: "invalid image path" });
+      return;
+    }
+
+    try {
+      const result = await plexServer.fetchImage(path);
+      if (!result.ok) {
+        res.status(502).json({ error: "image fetch failed" });
+        return;
+      }
+      res.set("Content-Type", result.contentType ?? "image/jpeg");
+      res.set("Cache-Control", "public, max-age=86400");
+      res.send(result.body);
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
 
   router.get("/sections", async (_req, res) => {
     try {

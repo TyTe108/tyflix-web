@@ -231,6 +231,94 @@ describe("library routes", () => {
     assert.equal(response.status, 502);
     assert.deepEqual(await response.json(), { error: "Plex blew up" });
   });
+
+  it("GET /image proxies a whitelisted thumb path", async () => {
+    const imageBytes = Buffer.from([0xff, 0xd8, 0xff, 0xdb]);
+    let fetchedPath: string | null = null;
+    const app = createApp({
+      async fetchImage(path: string) {
+        fetchedPath = path;
+        return {
+          ok: true,
+          status: 200,
+          contentType: "image/jpeg",
+          body: imageBytes,
+        };
+      },
+    } as unknown as PlexServerClient);
+
+    const thumbPath = "/library/metadata/3613/thumb/1780131692";
+    const response = await fetchLocal(
+      app,
+      `/api/library/image?path=${encodeURIComponent(thumbPath)}`,
+      sessionCookie(),
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "image/jpeg");
+    assert.equal(
+      response.headers.get("cache-control"),
+      "public, max-age=86400",
+    );
+    assert.equal(fetchedPath, thumbPath);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), imageBytes);
+  });
+
+  it("GET /image rejects missing and non-whitelisted paths without calling fetchImage", async () => {
+    let fetchCalls = 0;
+    const app = createApp({
+      async fetchImage() {
+        fetchCalls += 1;
+        throw new Error("fetchImage should not be called");
+      },
+    } as unknown as PlexServerClient);
+    const cookie = sessionCookie();
+
+    const missing = await fetchLocal(app, "/api/library/image", cookie);
+    assert.equal(missing.status, 400);
+    assert.deepEqual(await missing.json(), { error: "path is required" });
+
+    const badPaths = [
+      "/library/sections/1/all",
+      "/etc/passwd",
+      "https://evil.example/thumb",
+      "/library/metadata/1/thumb/2?foo=bar",
+      "/library/metadata/1/thumb/2/../../../etc/passwd",
+      "//evil.example/library/metadata/1/thumb/2",
+    ];
+    for (const badPath of badPaths) {
+      const response = await fetchLocal(
+        app,
+        `/api/library/image?path=${encodeURIComponent(badPath)}`,
+        cookie,
+      );
+      assert.equal(response.status, 400, `expected 400 for ${badPath}`);
+      assert.deepEqual(await response.json(), { error: "invalid image path" });
+    }
+
+    assert.equal(fetchCalls, 0);
+  });
+
+  it("GET /image returns 502 when upstream image fetch is not ok", async () => {
+    const app = createApp({
+      async fetchImage() {
+        return {
+          ok: false,
+          status: 404,
+          contentType: null,
+          body: Buffer.alloc(0),
+        };
+      },
+    } as unknown as PlexServerClient);
+
+    const response = await fetchLocal(
+      app,
+      "/api/library/image?path=%2Flibrary%2Fmetadata%2F3613%2Fthumb%2F1780131692",
+      sessionCookie(),
+    );
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), { error: "image fetch failed" });
+  });
 });
 
 async function fetchLocal(

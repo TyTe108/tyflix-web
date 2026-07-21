@@ -711,3 +711,81 @@ describe("plexServer.sectionItems", () => {
     assert.equal(result.totalSize, 3);
   });
 });
+
+describe("plexServer.fetchImage", () => {
+  const IMAGE_PATH = "/library/metadata/3613/thumb/1780131692";
+  const IMAGE_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xdb]);
+
+  function imageResponse(
+    status: number,
+    body: Uint8Array,
+    contentType = "image/jpeg",
+  ): Response {
+    return new Response(body, {
+      status,
+      headers: { "Content-Type": contentType },
+    });
+  }
+
+  it("fetches with the owner token and returns ok/status/contentType/body", async () => {
+    let requestedUrl: string | null = null;
+    let requestedToken: string | null = null;
+    globalThis.fetch = (async (
+      input: Parameters<typeof fetch>[0],
+      init?: RequestInit,
+    ) => {
+      requestedUrl =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      const headers = init?.headers;
+      if (headers instanceof Headers) {
+        requestedToken = headers.get("X-Plex-Token");
+      } else if (Array.isArray(headers)) {
+        const entry = headers.find(([key]) => key === "X-Plex-Token");
+        requestedToken = entry ? entry[1] : null;
+      } else if (headers && typeof headers === "object") {
+        requestedToken = (headers as Record<string, string>)["X-Plex-Token"];
+      }
+      return imageResponse(200, IMAGE_BYTES);
+    }) as typeof fetch;
+
+    const result = await client().fetchImage(IMAGE_PATH);
+
+    assert.equal(requestedUrl, `${BASE_URL}${IMAGE_PATH}`);
+    assert.equal(requestedToken, TOKEN);
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 200);
+    assert.equal(result.contentType, "image/jpeg");
+    assert.deepEqual(result.body, Buffer.from(IMAGE_BYTES));
+  });
+
+  it("returns ok:false with an empty body on a non-OK upstream response", async () => {
+    globalThis.fetch = (async () =>
+      imageResponse(404, new Uint8Array())) as typeof fetch;
+
+    const result = await client().fetchImage(IMAGE_PATH);
+
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 404);
+    assert.equal(result.body.length, 0);
+  });
+
+  it("throws PlexServerUpstreamError on network failure", async () => {
+    globalThis.fetch = (async () => {
+      throw new Error("connection refused");
+    }) as typeof fetch;
+
+    await assert.rejects(
+      client().fetchImage(IMAGE_PATH),
+      (err: unknown) => {
+        assert.ok(err instanceof PlexServerUpstreamError);
+        assert.equal(err.status, 502);
+        assert.match(err.message, /connection refused/);
+        return true;
+      },
+    );
+  });
+});
