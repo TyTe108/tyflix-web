@@ -58,6 +58,7 @@ export type SubtitleStream = {
 
 export type PlaybackMeta = {
   durationMs: number | null;
+  creditsOffsetMs: number | null;
   audio: AudioStream[];
   subtitle: SubtitleStream[];
 };
@@ -306,7 +307,9 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
   }
 
   async function playbackMeta(ratingKey: string): Promise<PlaybackMeta> {
-    const body = await getJson(`/library/metadata/${ratingKey}`);
+    const body = await getJson(`/library/metadata/${ratingKey}`, {
+      includeMarkers: "1",
+    });
     const meta = firstMetadata(body);
     if (!meta) {
       throw new PlexServerUpstreamError(
@@ -317,6 +320,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
 
     const durationMs =
       typeof meta.duration === "number" ? meta.duration : null;
+    const creditsOffsetMs = creditsOffsetFromMarkers(meta.Marker);
     const audio: AudioStream[] = [];
     const subtitle: SubtitleStream[] = [];
 
@@ -380,7 +384,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
       }
     }
 
-    return { durationMs, audio, subtitle };
+    return { durationMs, creditsOffsetMs, audio, subtitle };
   }
 
   return { accounts, history, item, episodes, nextEpisode, playbackMeta };
@@ -415,6 +419,7 @@ function firstMetadata(
   Media?: unknown;
   duration?: unknown;
   grandparentRatingKey?: unknown;
+  Marker?: unknown;
 } | null {
   const rows = asArray(mediaContainer(body)?.Metadata);
   const first = rows[0];
@@ -426,7 +431,47 @@ function firstMetadata(
     Media?: unknown;
     duration?: unknown;
     grandparentRatingKey?: unknown;
+    Marker?: unknown;
   };
+}
+
+// Prefer final credits; else the credits marker with the greatest start.
+// Missing/malformed markers soft-fail to null — never throw.
+function creditsOffsetFromMarkers(markers: unknown): number | null {
+  let finalOffset: number | null = null;
+  let latestOffset: number | null = null;
+
+  for (const row of asArray(markers)) {
+    if (typeof row !== "object" || row === null) {
+      continue;
+    }
+    const marker = row as {
+      type?: unknown;
+      startTimeOffset?: unknown;
+      final?: unknown;
+    };
+    if (marker.type !== "credits") {
+      continue;
+    }
+    const offset = marker.startTimeOffset;
+    if (
+      typeof offset !== "number" ||
+      !Number.isFinite(offset) ||
+      offset < 0
+    ) {
+      continue;
+    }
+    if (latestOffset === null || offset > latestOffset) {
+      latestOffset = offset;
+    }
+    if (plexBool(marker.final)) {
+      if (finalOffset === null || offset > finalOffset) {
+        finalOffset = offset;
+      }
+    }
+  }
+
+  return finalOffset ?? latestOffset;
 }
 
 function sumMediaPartSizes(media: unknown): number {

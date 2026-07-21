@@ -41,6 +41,7 @@ export type WatchDescriptor = {
   sessionId: string;
   streams: { audio: AudioStream[]; subtitle: SubtitleStream[] };
   durationMs: number | null;
+  creditsOffsetMs: number | null;
 };
 
 export type WatchTuning = {

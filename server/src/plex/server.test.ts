@@ -318,9 +318,10 @@ describe("plexServer.playbackMeta", () => {
 
     assert.equal(
       requestedUrl,
-      `${BASE_URL}/library/metadata/12345`,
+      `${BASE_URL}/library/metadata/12345?includeMarkers=1`,
     );
     assert.equal(meta.durationMs, 5_400_000);
+    assert.equal(meta.creditsOffsetMs, null);
     assert.deepEqual(meta.audio, [
       {
         id: "101",
@@ -363,8 +364,102 @@ describe("plexServer.playbackMeta", () => {
 
     const meta = await client().playbackMeta("12345");
     assert.equal(meta.durationMs, 1_000);
+    assert.equal(meta.creditsOffsetMs, null);
     assert.deepEqual(meta.audio, []);
     assert.deepEqual(meta.subtitle, []);
+  });
+
+  it("parses creditsOffsetMs, preferring a final credits marker", async () => {
+    let requestedUrl: string | null = null;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      requestedUrl =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      return jsonResponse(200, {
+        MediaContainer: {
+          Metadata: [
+            {
+              duration: 2_400_000,
+              Marker: [
+                {
+                  type: "intro",
+                  startTimeOffset: 90_000,
+                  endTimeOffset: 120_000,
+                  final: false,
+                  id: 1,
+                },
+                {
+                  type: "credits",
+                  startTimeOffset: 2_100_000,
+                  endTimeOffset: 2_200_000,
+                  final: false,
+                  id: 2,
+                },
+                {
+                  type: "credits",
+                  startTimeOffset: 2_250_000,
+                  endTimeOffset: 2_400_000,
+                  final: true,
+                  id: 3,
+                },
+                // Malformed credits offset — ignored.
+                {
+                  type: "credits",
+                  startTimeOffset: "oops",
+                  endTimeOffset: 2_400_000,
+                  final: true,
+                  id: 4,
+                },
+              ],
+            },
+          ],
+        },
+      });
+    }) as typeof fetch;
+
+    const meta = await client().playbackMeta("12345");
+
+    assert.equal(
+      requestedUrl,
+      `${BASE_URL}/library/metadata/12345?includeMarkers=1`,
+    );
+    assert.equal(meta.creditsOffsetMs, 2_250_000);
+    assert.equal(meta.durationMs, 2_400_000);
+  });
+
+  it("uses the latest credits marker when none is final", async () => {
+    globalThis.fetch = (async () =>
+      jsonResponse(200, {
+        MediaContainer: {
+          Metadata: [
+            {
+              duration: 1_800_000,
+              Marker: [
+                {
+                  type: "credits",
+                  startTimeOffset: 1_500_000,
+                  endTimeOffset: 1_600_000,
+                  final: false,
+                  id: 1,
+                },
+                {
+                  type: "credits",
+                  startTimeOffset: 1_700_000,
+                  endTimeOffset: 1_800_000,
+                  final: 0,
+                  id: 2,
+                },
+              ],
+            },
+          ],
+        },
+      })) as typeof fetch;
+
+    const meta = await client().playbackMeta("12345");
+    assert.equal(meta.creditsOffsetMs, 1_700_000);
   });
 
   it("throws PlexServerUpstreamError when MediaContainer has no metadata", async () => {

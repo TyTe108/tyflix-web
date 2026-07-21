@@ -36,6 +36,7 @@ type PlayDescriptor = {
   sessionId: string;
   streams: { audio: AudioStream[]; subtitle: SubtitleStream[] };
   durationMs: number | null;
+  creditsOffsetMs: number | null;
 };
 
 type PlayTuning = {
@@ -104,6 +105,7 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
       sessionId,
       streams: { audio: meta.audio, subtitle: meta.subtitle },
       durationMs: meta.durationMs,
+      creditsOffsetMs: meta.creditsOffsetMs,
     };
   }
 

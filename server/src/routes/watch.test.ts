@@ -74,7 +74,12 @@ function baseDeps(): WatchRouterDeps {
         return null;
       },
       async playbackMeta() {
-        return { durationMs: null, audio: [], subtitle: [] };
+        return {
+          durationMs: null,
+          creditsOffsetMs: null,
+          audio: [],
+          subtitle: [],
+        };
       },
     } as unknown as PlexServerClient,
   };
@@ -176,6 +181,7 @@ describe("GET /api/watch/movie/:tmdbId", () => {
       sessionId: string;
       streams: { audio: unknown[]; subtitle: unknown[] };
       durationMs: number | null;
+      creditsOffsetMs: number | null;
     };
 
     assert.equal(body.mediaType, "movie");
@@ -185,6 +191,7 @@ describe("GET /api/watch/movie/:tmdbId", () => {
     assert.equal(body.transient, TRANSIENT);
     assert.deepEqual(body.streams, { audio: [], subtitle: [] });
     assert.equal(body.durationMs, null);
+    assert.equal(body.creditsOffsetMs, null);
 
     // sessionId is present and both HLS URLs are ready-to-play start.m3u8 URLs
     // carrying the ratingKey.
@@ -469,7 +476,12 @@ describe("GET /api/watch/episode/:ratingKey/next", () => {
         return nextEpisode;
       },
       async playbackMeta() {
-        return { durationMs: null, audio: [], subtitle: [] };
+        return {
+          durationMs: null,
+          creditsOffsetMs: null,
+          audio: [],
+          subtitle: [],
+        };
       },
     } as unknown as PlexServerClient;
 
@@ -495,7 +507,12 @@ describe("GET /api/watch/episode/:ratingKey/next", () => {
         return null;
       },
       async playbackMeta() {
-        return { durationMs: null, audio: [], subtitle: [] };
+        return {
+          durationMs: null,
+          creditsOffsetMs: null,
+          audio: [],
+          subtitle: [],
+        };
       },
     } as unknown as PlexServerClient;
 
@@ -565,6 +582,7 @@ describe("GET /api/watch/episode/:ratingKey", () => {
       sessionId: string;
       streams: { audio: unknown[]; subtitle: unknown[] };
       durationMs: number | null;
+      creditsOffsetMs: number | null;
     };
 
     assert.equal(body.mediaType, "episode");
@@ -573,6 +591,7 @@ describe("GET /api/watch/episode/:ratingKey", () => {
     assert.equal(body.transient, TRANSIENT);
     assert.deepEqual(body.streams, { audio: [], subtitle: [] });
     assert.equal(body.durationMs, null);
+    assert.equal(body.creditsOffsetMs, null);
 
     assert.equal(typeof body.sessionId, "string");
     assert.ok(body.sessionId.length > 0);

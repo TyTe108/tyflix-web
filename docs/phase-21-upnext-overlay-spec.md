@@ -68,11 +68,19 @@ flag, reset when the ratingKey changes.
 ### Card contents / thumbnail
 
 **Chosen (Tyler picked "include the thumbnail"):** show the next episode's
-**still image**, built as a Plex
-`/photo/:/transcode?url=<episode thumb>&width=&height=&X-Plex-Token=<transient>`
-URL on a reachable `plex.direct` connection (the same transient + connection the
-player already uses), loaded directly from Plex by the browser. Requires a CSP
-`img-src` allowance for `https://*.plex.direct:32400`.
+**still image** (per-episode `thumb`, verified present on episode leaves, e.g.
+`/library/metadata/2518/thumb/…`). The **frontend composes** the image URL —
+`{connection}/photo/:/transcode?url=<episode thumb>&…&X-Plex-Token=<transient>`
+— from the **current descriptor's** `transient` + working `plex.direct`
+connection (both already in hand for playback) plus the next episode's raw
+`thumb` path from `/next`. Requires a CSP `img-src` allowance for
+`https://*.plex.direct:32400`.
+
+**Considered:** have `/next` build the full `thumbUrl` server-side.
+**Rejected:** `/next` has no token custody today and can't know whether the
+browser is on the local or remote connection (it'd have to mint a transient and
+return two URLs). The frontend already holds the transient + both connections +
+which one is live, so it composes the URL; `/next` stays a pure metadata call.
 
 ## Decomposition (each = one Cursor prompt / one commit-sized change)
 
@@ -87,12 +95,19 @@ player already uses), loaded directly from Plex by the browser. Requires a CSP
   `creditsOffsetMs: number | null` to `playbackMeta` by fetching
   `/library/metadata/:ratingKey?includeMarkers=1` and parsing the `credits`
   `Marker.startTimeOffset`; thread through `PlayDescriptor` → `WatchDescriptor`.
-  Fail-soft to null. Live-verify the `includeMarkers` response shape against the
-  running server before trusting it (project discipline).
-- **21.3 (backend) — next-episode thumbnail.** `episodes()` parses the leaf
-  `thumb`; `PlexEpisode` gains `thumb`; `/next` builds a `/photo/:/transcode`
-  `thumbUrl` (connection + transient) and returns it; CSP `img-src +=
-  https://*.plex.direct:32400`.
+  Fail-soft to null. **Verified live 2026-07-20** (Severance S1E1, ratingKey
+  2517): `GET /library/metadata/2517?includeMarkers=1` returns
+  `Marker: [{ type:"credits", startTimeOffset, endTimeOffset, final }]` — one
+  credits marker, `final:true`, start 3347052ms of 3436724ms (≈ last 89s). So
+  this server does generate credits markers and the marker-first trigger is
+  valid. Caveat for 21.4: ~90s of credits → cap the *visible* countdown (show
+  the card at the marker, but don't render a literal 89s counter).
+- **21.3 (backend + CSP + FE type) — next-episode thumb path.** `episodes()`
+  parses the leaf `thumb` (per-episode still, verified present); `PlexEpisode`
+  and the FE `NextEpisode` + `parseNextEpisode` carry `thumb: string | null`;
+  CSP `img-src += https://*.plex.direct:32400`. `/next` returns the raw `thumb`
+  inside its existing `nextEpisode` object — it does NOT build the image URL or
+  mint a transient (see the thumbnail decision above).
 - **21.4 (frontend) — the overlay.** New `<UpNextCard>` presentational
   component + an `overlay` slot in `PlayerControls` rendered **inside**
   `.watch-player-shell` (so it survives fullscreen, which is requested on the
@@ -115,8 +130,8 @@ player already uses), loaded directly from Plex by the browser. Requires a CSP
 
 | File | Increment | Change |
 |---|---|---|
-| server/src/routes/watch.ts | 21.1, 21.3 | widen `/next` response; build `thumbUrl` |
-| web/src/api/watch.ts | 21.1, 21.2 | next-episode object; `creditsOffsetMs` type |
+| server/src/routes/watch.ts | 21.1 | widen `/next` response |
+| web/src/api/watch.ts | 21.1, 21.2, 21.3 | next-episode object; `creditsOffsetMs`; `thumb` |
 | server/src/plex/server.ts | 21.2, 21.3 | markers in `playbackMeta`; `thumb` in `episodes` |
 | server/src/index.ts | 21.3 | CSP `img-src` `*.plex.direct` |
 | web/src/components/PlayerControls.tsx | 21.4 | `overlay` slot inside the shell |
@@ -125,4 +140,8 @@ player already uses), loaded directly from Plex by the browser. Requires a CSP
 
 ## Smoke test coverage at close
 
-_(fill in per increment as each is smoke-tested before commit)_
+- **21.1** (smoke-tested + passed 2026-07-20): Auto Play on → episode advances to
+  the next at end; Auto Play off → stays put at end; last episode → no navigation
+  and no error (`nextEpisode: null`). Also verified green pre-smoke: server
+  172/172 tests (incl. the `/next` suite), `web` `tsc -b` clean.
+- _21.2–21.4: fill in as each is smoke-tested before commit._
