@@ -44,18 +44,21 @@ describe("plexServer.episodes", () => {
               parentIndex: 1,
               index: 2,
               title: "Second",
+              // No thumb — must still parse, with thumb: null.
             },
             {
               ratingKey: 301,
               parentIndex: 2,
               index: 1,
               title: "Season Two Opener",
+              thumb: "/library/metadata/301/thumb/99",
             },
             {
               ratingKey: 201,
               parentIndex: 1,
               index: 1,
               title: "Pilot",
+              thumb: "/library/metadata/201/thumb/1781154351",
             },
             // Malformed: missing ratingKey — dropped.
             { parentIndex: 1, index: 3, title: "No Key" },
@@ -85,13 +88,26 @@ describe("plexServer.episodes", () => {
       `${BASE_URL}/library/metadata/9000/allLeaves`,
     );
     assert.deepEqual(episodes, [
-      { ratingKey: "201", seasonNumber: 1, episodeNumber: 1, title: "Pilot" },
-      { ratingKey: "202", seasonNumber: 1, episodeNumber: 2, title: "Second" },
+      {
+        ratingKey: "201",
+        seasonNumber: 1,
+        episodeNumber: 1,
+        title: "Pilot",
+        thumb: "/library/metadata/201/thumb/1781154351",
+      },
+      {
+        ratingKey: "202",
+        seasonNumber: 1,
+        episodeNumber: 2,
+        title: "Second",
+        thumb: null,
+      },
       {
         ratingKey: "301",
         seasonNumber: 2,
         episodeNumber: 1,
         title: "Season Two Opener",
+        thumb: "/library/metadata/301/thumb/99",
       },
     ]);
   });
@@ -107,7 +123,13 @@ describe("plexServer.episodes", () => {
     const episodes = await client().episodes("9000");
 
     assert.deepEqual(episodes, [
-      { ratingKey: "500", seasonNumber: 1, episodeNumber: 1, title: "" },
+      {
+        ratingKey: "500",
+        seasonNumber: 1,
+        episodeNumber: 1,
+        title: "",
+        thumb: null,
+      },
     ]);
   });
 
@@ -176,6 +198,7 @@ describe("plexServer.nextEpisode", () => {
       seasonNumber: 1,
       episodeNumber: 3,
       title: "Finale",
+      thumb: null,
     });
   });
 

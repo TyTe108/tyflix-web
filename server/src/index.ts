@@ -91,7 +91,7 @@ app.use(
         "script-src": ["'self'"],
         "style-src": ["'self'", "'unsafe-inline'", GOOGLE_FONTS_STYLESHEET_ORIGIN],
         "font-src": ["'self'", GOOGLE_FONTS_FILE_ORIGIN],
-        "img-src": ["'self'", "data:", TMDB_IMAGE_ORIGIN],
+        "img-src": ["'self'", "data:", TMDB_IMAGE_ORIGIN, PLEX_DIRECT_ORIGIN],
         "connect-src": ["'self'", PLEX_DIRECT_ORIGIN],
         "media-src": ["'self'", "blob:", PLEX_DIRECT_ORIGIN],
         "object-src": ["'none'"],

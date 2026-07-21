@@ -35,6 +35,7 @@ export type PlexEpisode = {
   seasonNumber: number;
   episodeNumber: number;
   title: string;
+  thumb: string | null;
 };
 
 export type AudioStream = {
@@ -254,6 +255,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
       const season = (row as { parentIndex?: unknown }).parentIndex;
       const episode = (row as { index?: unknown }).index;
       const title = (row as { title?: unknown }).title;
+      const thumb = (row as { thumb?: unknown }).thumb;
       if (
         rk === undefined ||
         rk === null ||
@@ -267,6 +269,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
         seasonNumber: season,
         episodeNumber: episode,
         title: typeof title === "string" ? title : "",
+        thumb: typeof thumb === "string" ? thumb : null,
       });
     }
 

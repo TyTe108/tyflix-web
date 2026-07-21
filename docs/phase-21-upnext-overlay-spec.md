@@ -108,12 +108,20 @@ which one is live, so it composes the URL; `/next` stays a pure metadata call.
   CSP `img-src += https://*.plex.direct:32400`. `/next` returns the raw `thumb`
   inside its existing `nextEpisode` object — it does NOT build the image URL or
   mint a transient (see the thumbnail decision above).
-- **21.4 (frontend) — the overlay.** New `<UpNextCard>` presentational
-  component + an `overlay` slot in `PlayerControls` rendered **inside**
-  `.watch-player-shell` (so it survives fullscreen, which is requested on the
-  shell). WatchPage owns the trigger (creditsOffsetMs → fallback last-30s), the
-  countdown, Play-now (advance now), and Dismiss (cancel advance). Reuses the
-  existing `ended` advance + `tyflix.autoPlay` toggle; TV-only.
+- **21.4a (frontend) — the overlay, time-triggered.** `overlay` slot in
+  `PlayerControls` rendered **inside** `.watch-player-shell` (survives
+  fullscreen); new `<UpNextCard>` (thumb with local→remote fallback, "SxEy ·
+  title", countdown, Play now, Dismiss). WatchPage shows it in the final **30s**
+  (autoPlay on, TV, a next exists, not dismissed), composes the thumb URL(s)
+  from the current descriptor's transient + connections, Play-now navigates now,
+  Dismiss hides. Does **NOT** touch the existing `ended` advance (still fires at
+  end) → low risk, and committable + visible so we can verify
+  thumb/CSP/positioning/fullscreen live.
+- **21.4b (frontend) — marker trigger + real dismiss.** Switch the trigger to
+  `creditsOffsetMs` (fallback last-30s); make **Dismiss cancel the auto-advance**
+  for the episode (guard the `ended` handler with the per-episode dismissed
+  flag); cap the visible countdown (~90s credits → show e.g. ≤20s). Reuses the
+  `tyflix.autoPlay` toggle; TV-only.
 
 ## Not in scope (deferred or rejected)
 
@@ -134,9 +142,10 @@ which one is live, so it composes the URL; `/next` stays a pure metadata call.
 | web/src/api/watch.ts | 21.1, 21.2, 21.3 | next-episode object; `creditsOffsetMs`; `thumb` |
 | server/src/plex/server.ts | 21.2, 21.3 | markers in `playbackMeta`; `thumb` in `episodes` |
 | server/src/index.ts | 21.3 | CSP `img-src` `*.plex.direct` |
-| web/src/components/PlayerControls.tsx | 21.4 | `overlay` slot inside the shell |
-| web/src/components/UpNextCard.tsx (new) | 21.4 | the card UI |
-| web/src/pages/WatchPage.tsx | 21.4 | trigger / countdown / advance / dismiss wiring |
+| web/src/components/PlayerControls.tsx | 21.4a | `overlay` slot inside the shell |
+| web/src/components/UpNextCard.tsx (new) | 21.4a | the card UI (thumb, countdown, buttons) |
+| web/src/styles.css | 21.4a | `.watch-upnext` card styles |
+| web/src/pages/WatchPage.tsx | 21.4a/b | show/thumb/countdown/play-now/dismiss; then marker trigger + dismiss-cancels-advance |
 
 ## Smoke test coverage at close
 

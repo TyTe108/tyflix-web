@@ -381,8 +381,20 @@ describe("GET /api/watch/tv/:tmdbId/episodes", () => {
 
   it("returns the episode list for a resolved show ratingKey", async () => {
     const episodes: PlexEpisode[] = [
-      { ratingKey: "201", seasonNumber: 1, episodeNumber: 1, title: "Pilot" },
-      { ratingKey: "202", seasonNumber: 1, episodeNumber: 2, title: "Second" },
+      {
+        ratingKey: "201",
+        seasonNumber: 1,
+        episodeNumber: 1,
+        title: "Pilot",
+        thumb: null,
+      },
+      {
+        ratingKey: "202",
+        seasonNumber: 1,
+        episodeNumber: 2,
+        title: "Second",
+        thumb: "/library/metadata/202/thumb/1",
+      },
     ];
     let ratingKeyArgs: [string, number] | null = null;
     let episodesArg: string | null = null;
@@ -465,6 +477,7 @@ describe("GET /api/watch/episode/:ratingKey/next", () => {
       seasonNumber: 1,
       episodeNumber: 3,
       title: "Finale",
+      thumb: "/library/metadata/203/thumb/1",
     };
     const deps = baseDeps();
     deps.plexServer = {

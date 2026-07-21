@@ -77,6 +77,7 @@ export type NextEpisode = {
   seasonNumber: number;
   episodeNumber: number;
   title: string;
+  thumb: string | null;
 };
 
 export type EpisodesResponse = {
@@ -131,6 +132,7 @@ function parseNextEpisode(value: unknown): NextEpisode | null {
     seasonNumber?: unknown;
     episodeNumber?: unknown;
     title?: unknown;
+    thumb?: unknown;
   };
   if (
     typeof row.ratingKey !== "string" ||
@@ -145,6 +147,7 @@ function parseNextEpisode(value: unknown): NextEpisode | null {
     seasonNumber: row.seasonNumber,
     episodeNumber: row.episodeNumber,
     title: row.title,
+    thumb: typeof row.thumb === "string" ? row.thumb : null,
   };
 }
 
