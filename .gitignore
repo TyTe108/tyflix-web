@@ -7,3 +7,6 @@ data/
 
 # Local-only ops notes with real IPs/hosts — never commit
 *.local.md
+
+# Design/handoff docs kept private (local-only). README + docs/screenshots stay public.
+docs/*.md
