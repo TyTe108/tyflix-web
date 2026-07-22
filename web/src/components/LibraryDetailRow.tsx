@@ -5,6 +5,7 @@ import {
   libraryItemTarget,
   type LibraryItem,
 } from "../api/library";
+import { WatchProgress } from "./WatchProgress";
 
 export function LibraryDetailRow({ item }: { item: LibraryItem }) {
   const target = libraryItemTarget(item);
@@ -29,12 +30,21 @@ export function LibraryDetailRow({ item }: { item: LibraryItem }) {
   const summary =
     item.summary !== null && item.summary.trim() !== "" ? item.summary : null;
 
-  const poster = posterSrc ? (
-    <img src={posterSrc} alt="" loading="lazy" />
-  ) : (
-    <div className="media-poster-placeholder" aria-hidden="true">
-      No poster
-    </div>
+  const poster = (
+    <>
+      {posterSrc ? (
+        <img src={posterSrc} alt="" loading="lazy" />
+      ) : (
+        <div className="media-poster-placeholder" aria-hidden="true">
+          No poster
+        </div>
+      )}
+      <WatchProgress
+        viewOffset={item.viewOffset}
+        viewCount={item.viewCount}
+        runtime={item.runtime}
+      />
+    </>
   );
 
   return (

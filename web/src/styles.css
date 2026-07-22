@@ -1826,6 +1826,7 @@ a:hover {
 }
 
 .library-detail-poster {
+  position: relative;
   flex-shrink: 0;
   display: block;
   width: 5rem;
@@ -1990,6 +1991,41 @@ a.library-detail-title:hover {
   max-width: calc(100% - 0.9rem);
   text-align: center;
   box-shadow: var(--shadow-1);
+}
+
+.media-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: color-mix(in srgb, var(--text) 18%, transparent);
+  pointer-events: none;
+}
+
+.media-progress-fill {
+  height: 100%;
+  background: var(--warn);
+}
+
+.media-watched-badge {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.45rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border: 1px solid var(--border);
+  color: var(--ok);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: var(--shadow-1);
+  pointer-events: none;
 }
 
 .media-card-body {

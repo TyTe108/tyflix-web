@@ -4,6 +4,7 @@ import {
   libraryItemTarget,
   type LibraryItem,
 } from "../api/library";
+import { WatchProgress } from "./WatchProgress";
 
 export function LibraryCard({ item }: { item: LibraryItem }) {
   const yearLabel = item.year !== null ? String(item.year) : "—";
@@ -21,6 +22,11 @@ export function LibraryCard({ item }: { item: LibraryItem }) {
             No poster
           </div>
         )}
+        <WatchProgress
+          viewOffset={item.viewOffset}
+          viewCount={item.viewCount}
+          runtime={item.runtime}
+        />
       </div>
       <div className="media-card-body">
         <div className="media-card-title-row">
