@@ -1,5 +1,5 @@
 import Hls from "hls.js";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   fetchEpisodeWatch,
@@ -20,6 +20,7 @@ import {
   type QualityId,
   type StreamSettings,
 } from "../components/PlayerControls";
+import { ResumeDialog } from "../components/ResumeDialog";
 import { UpNextCard } from "../components/UpNextCard";
 
 const AUTO_PLAY_STORAGE_KEY = "tyflix.autoPlay";
@@ -38,6 +39,32 @@ type PlaybackClock = {
   currentTime: number;
   duration: number;
 };
+
+type ResumeDialogState = {
+  positionSeconds: number;
+  durationSeconds: number | null;
+};
+
+function shouldOfferResumeDialog(descriptor: WatchDescriptor): boolean {
+  const { viewOffsetMs, durationMs } = descriptor;
+  return (
+    viewOffsetMs !== null &&
+    viewOffsetMs > 0 &&
+    (durationMs === null || viewOffsetMs < 0.95 * durationMs)
+  );
+}
+
+function resumeDialogFromDescriptor(
+  descriptor: WatchDescriptor,
+): ResumeDialogState {
+  return {
+    positionSeconds: (descriptor.viewOffsetMs ?? 0) / 1000,
+    durationSeconds:
+      descriptor.durationMs !== null && descriptor.durationMs > 0
+        ? descriptor.durationMs / 1000
+        : null,
+  };
+}
 
 function readStoredAutoPlay(): boolean {
   try {
@@ -147,14 +174,58 @@ export function WatchPage() {
     currentTime: 0,
     duration: 0,
   });
+  const [resumeDialog, setResumeDialog] = useState<ResumeDialogState | null>(
+    null,
+  );
   const autoPlayRef = useRef(autoPlay);
   const nextEpisodeRef = useRef(nextEpisode);
   const upNextDismissedRef = useRef(upNextDismissed);
   const timelineDurationMsRef = useRef<number | null>(null);
+  const resumeDialogOpenRef = useRef(false);
   autoPlayRef.current = autoPlay;
   nextEpisodeRef.current = nextEpisode;
   upNextDismissedRef.current = upNextDismissed;
   timelineDurationMsRef.current = descriptor?.durationMs ?? null;
+  resumeDialogOpenRef.current = resumeDialog !== null;
+
+  const beginPlaybackAt = useCallback((position: number) => {
+    const video = videoRef.current;
+    if (video === null) {
+      return;
+    }
+
+    const start = () => {
+      try {
+        video.currentTime = position;
+      } catch (err: unknown) {
+        console.error("Resume seek failed", err);
+      }
+      void video.play().catch((err: unknown) => {
+        console.error("Resume play failed", err);
+      });
+    };
+
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      start();
+      return;
+    }
+
+    pendingResumeRef.current = { position, wasPlaying: true };
+  }, []);
+
+  const handleResumeFromSaved = useCallback(() => {
+    if (resumeDialog === null) {
+      return;
+    }
+    const position = resumeDialog.positionSeconds;
+    setResumeDialog(null);
+    beginPlaybackAt(position);
+  }, [resumeDialog, beginPlaybackAt]);
+
+  const handleStartOver = useCallback(() => {
+    setResumeDialog(null);
+    beginPlaybackAt(0);
+  }, [beginPlaybackAt]);
 
   useEffect(() => {
     let load: (() => Promise<WatchDescriptor>) | null = null;
@@ -181,6 +252,7 @@ export function WatchPage() {
     setStatus("loading");
     setError(null);
     setDescriptor(null);
+    setResumeDialog(null);
     pendingResumeRef.current = null;
     appliedSubtitleIdRef.current = null;
 
@@ -190,6 +262,11 @@ export function WatchPage() {
           return;
         }
         setDescriptor(result);
+        setResumeDialog(
+          shouldOfferResumeDialog(result)
+            ? resumeDialogFromDescriptor(result)
+            : null,
+        );
         setStatus("ready");
       })
       .catch((err: unknown) => {
@@ -466,24 +543,35 @@ export function WatchPage() {
 
     const applyPendingResume = () => {
       const pending = pendingResumeRef.current;
-      if (pending === null) {
+      if (pending !== null) {
+        pendingResumeRef.current = null;
+        try {
+          video.currentTime = pending.position;
+        } catch (err: unknown) {
+          console.error("Resume seek failed", err);
+        }
+        if (pending.wasPlaying) {
+          void video.play().catch((err: unknown) => {
+            console.error("Resume play failed", err);
+          });
+        } else {
+          video.pause();
+        }
         return;
       }
-      pendingResumeRef.current = null;
-      video.currentTime = pending.position;
-      if (pending.wasPlaying) {
-        void video.play().catch((err: unknown) => {
-          console.error("Resume play failed", err);
-        });
-      } else {
+      if (resumeDialogOpenRef.current) {
         video.pause();
+        return;
       }
+      void video.play().catch((err: unknown) => {
+        console.error("Autoplay failed", err);
+      });
     };
 
     // Safari (and other native HLS players) can play the manifest directly.
     if (!Hls.isSupported()) {
       if (video.canPlayType("application/vnd.apple.mpegurl") !== "") {
-        if (pendingResumeRef.current !== null) {
+        if (pendingResumeRef.current !== null || resumeDialogOpenRef.current) {
           video.pause();
         }
         const onLoadedMetadata = () => {
@@ -504,8 +592,9 @@ export function WatchPage() {
     let hls: Hls | null = null;
     let usedRemote = primaryUrl === remoteUrl;
 
-    if (pendingResumeRef.current !== null) {
-      // Avoid briefly playing from 0:00 while the new quality manifest loads.
+    if (pendingResumeRef.current !== null || resumeDialogOpenRef.current) {
+      // Avoid briefly playing from 0:00 while the user chooses or a new
+      // quality manifest loads.
       video.pause();
     }
 
@@ -633,6 +722,24 @@ export function WatchPage() {
       />
     ) : null;
 
+  const resumeOverlay =
+    resumeDialog !== null ? (
+      <ResumeDialog
+        positionSeconds={resumeDialog.positionSeconds}
+        durationSeconds={resumeDialog.durationSeconds}
+        onResume={handleResumeFromSaved}
+        onStartOver={handleStartOver}
+        onClose={handleResumeFromSaved}
+      />
+    ) : null;
+
+  const playerOverlay = (
+    <>
+      {resumeOverlay}
+      {upNextOverlay}
+    </>
+  );
+
   const onStreamSettingsChange = async (
     settings: StreamSettings,
   ): Promise<void> => {
@@ -728,12 +835,11 @@ export function WatchPage() {
             onStreamSettingsChange={onStreamSettingsChange}
             autoPlay={isEpisode ? autoPlay : undefined}
             onAutoPlayChange={isEpisode ? onAutoPlayChange : undefined}
-            overlay={upNextOverlay}
+            overlay={playerOverlay}
           >
             <video
               ref={videoRef}
               className="watch-player"
-              autoPlay
               playsInline
             />
           </PlayerControls>

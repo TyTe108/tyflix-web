@@ -613,6 +613,51 @@ a:hover {
   font-size: 0.85rem;
 }
 
+.watch-resume-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  pointer-events: auto;
+}
+
+.watch-resume-dialog {
+  width: min(24rem, 100%);
+  padding: 1.1rem 1.15rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: var(--shadow-2);
+  color: var(--text);
+}
+
+.watch-resume-title {
+  margin: 0 0 1rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.watch-resume-remaining {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.watch-resume-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.watch-resume-actions .btn {
+  width: 100%;
+  justify-content: center;
+}
+
 .watch-player-media {
   display: block;
   width: 100%;
