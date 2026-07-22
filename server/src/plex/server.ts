@@ -65,6 +65,7 @@ export type PlaybackMeta = {
   subtitle: SubtitleStream[];
   title: string | null;
   subheading: string | null;
+  viewOffsetMs: number | null;
 };
 
 export type LibrarySection = {
@@ -396,10 +397,16 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     return list[idx + 1] ?? null;
   }
 
-  async function playbackMeta(ratingKey: string): Promise<PlaybackMeta> {
-    const body = await getJson(`/library/metadata/${ratingKey}`, {
-      includeMarkers: "1",
-    });
+  async function playbackMeta(
+    ratingKey: string,
+    userToken?: string,
+  ): Promise<PlaybackMeta> {
+    const path = `/library/metadata/${ratingKey}`;
+    const query = { includeMarkers: "1" };
+    const body =
+      userToken !== undefined
+        ? await getJsonWithToken(path, userToken, query)
+        : await getJson(path, query);
     const meta = firstMetadata(body);
     if (!meta) {
       throw new PlexServerUpstreamError(
@@ -410,6 +417,8 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
 
     const durationMs =
       typeof meta.duration === "number" ? meta.duration : null;
+    const viewOffsetMs =
+      typeof meta.viewOffset === "number" ? meta.viewOffset : null;
     const creditsOffsetMs = creditsOffsetFromMarkers(meta.Marker);
     const audio: AudioStream[] = [];
     const subtitle: SubtitleStream[] = [];
@@ -492,6 +501,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
       subtitle,
       title,
       subheading,
+      viewOffsetMs,
     };
   }
 
@@ -943,6 +953,7 @@ function firstMetadata(
   index?: unknown;
   Media?: unknown;
   duration?: unknown;
+  viewOffset?: unknown;
   grandparentRatingKey?: unknown;
   Marker?: unknown;
 } | null {
@@ -959,6 +970,7 @@ function firstMetadata(
     index?: unknown;
     Media?: unknown;
     duration?: unknown;
+    viewOffset?: unknown;
     grandparentRatingKey?: unknown;
     Marker?: unknown;
   };

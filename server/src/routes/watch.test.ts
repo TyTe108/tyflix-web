@@ -93,6 +93,7 @@ function baseDeps(): WatchRouterDeps {
           subtitle: [],
           title: "The Matrix",
           subheading: "1999",
+          viewOffsetMs: null,
         };
       },
     } as unknown as PlexServerClient,
@@ -200,6 +201,7 @@ describe("GET /api/watch/movie/:tmdbId", () => {
       partId: string | null;
       title: string | null;
       subheading: string | null;
+      viewOffsetMs: number | null;
     };
 
     assert.equal(body.mediaType, "movie");
@@ -213,6 +215,7 @@ describe("GET /api/watch/movie/:tmdbId", () => {
     assert.equal(body.partId, "9001");
     assert.equal(body.title, "The Matrix");
     assert.equal(body.subheading, "1999");
+    assert.equal(body.viewOffsetMs, null);
 
     // sessionId is present and both HLS URLs are ready-to-play start.m3u8 URLs
     // carrying the ratingKey.
@@ -264,6 +267,38 @@ describe("GET /api/watch/movie/:tmdbId", () => {
 
     assert.equal(response.status, 200);
     assert.equal(mintedWith, SHARED_TOKEN);
+  });
+
+  it("includes viewOffsetMs from playbackMeta using the user's token", async () => {
+    let playbackMetaArgs: [string, string | undefined] | null = null;
+    const deps = baseDeps();
+    deps.plexServer = {
+      async playbackMeta(ratingKey: string, userToken?: string) {
+        playbackMetaArgs = [ratingKey, userToken];
+        return {
+          durationMs: 5_400_000,
+          creditsOffsetMs: null,
+          partId: "9001",
+          audio: [],
+          subtitle: [],
+          title: "The Matrix",
+          subheading: "1999",
+          viewOffsetMs: 1_800_000,
+        };
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/movie/603",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { viewOffsetMs: number | null };
+    assert.deepEqual(playbackMetaArgs, ["12345", USER_TOKEN]);
+    assert.equal(body.viewOffsetMs, 1_800_000);
   });
 
   it("sets hls.local to null when the server advertises no local connection", async () => {

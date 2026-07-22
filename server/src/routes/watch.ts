@@ -42,6 +42,7 @@ type PlayDescriptor = {
   partId: string | null;
   title: string | null;
   subheading: string | null;
+  viewOffsetMs: number | null;
 };
 
 type PlayTuning = {
@@ -83,7 +84,7 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     tuning: PlayTuning = {},
   ): Promise<PlayDescriptor> {
     // Fail before minting if the ratingKey has no metadata document.
-    const meta = await plexServer.playbackMeta(ratingKey);
+    const meta = await plexServer.playbackMeta(ratingKey, userToken);
     const transient = await transientMinter.mint(userToken);
     const connections = await plexConnection.resolveConnections();
 
@@ -125,6 +126,7 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
       partId: meta.partId,
       title: meta.title,
       subheading: meta.subheading,
+      viewOffsetMs: meta.viewOffsetMs,
     };
   }
 

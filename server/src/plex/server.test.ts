@@ -253,6 +253,7 @@ describe("plexServer.playbackMeta", () => {
           Metadata: [
             {
               duration: 5_400_000,
+              viewOffset: 1_800_000,
               Media: [
                 {
                   Part: [
@@ -345,6 +346,7 @@ describe("plexServer.playbackMeta", () => {
       `${BASE_URL}/library/metadata/12345?includeMarkers=1`,
     );
     assert.equal(meta.durationMs, 5_400_000);
+    assert.equal(meta.viewOffsetMs, 1_800_000);
     assert.equal(meta.creditsOffsetMs, null);
     assert.equal(meta.partId, "55501");
     assert.deepEqual(meta.audio, [
@@ -377,6 +379,27 @@ describe("plexServer.playbackMeta", () => {
         textBased: false,
       },
     ]);
+  });
+
+  it("uses the passed user token for the metadata GET", async () => {
+    let requestedToken: string | null = null;
+    globalThis.fetch = (async (
+      _input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
+      const headers = new Headers(init?.headers);
+      requestedToken = headers.get("X-Plex-Token");
+      return jsonResponse(200, {
+        MediaContainer: {
+          Metadata: [{ duration: 1_000, viewOffset: 500, Media: [] }],
+        },
+      });
+    }) as typeof fetch;
+
+    const meta = await client().playbackMeta("12345", "user-token-abc");
+
+    assert.equal(requestedToken, "user-token-abc");
+    assert.equal(meta.viewOffsetMs, 500);
   });
 
   it("returns empty stream lists when Media or Part is missing", async () => {

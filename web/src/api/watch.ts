@@ -45,6 +45,7 @@ export type WatchDescriptor = {
   partId: string | null;
   title: string | null;
   subheading: string | null;
+  viewOffsetMs: number | null;
 };
 
 export type WatchTuning = {
