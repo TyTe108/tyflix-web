@@ -81,6 +81,11 @@ export type LibraryItem = {
   thumb: string | null;
   addedAt: number | null;
   tmdbId: number | null;
+  summary: string | null;
+  rating: number | null;
+  contentRating: string | null;
+  runtime: number | null;
+  genres: string[];
 };
 
 export type LibrarySortKey = "title" | "added" | "year" | "rating";
@@ -517,6 +522,25 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
       const thumbRaw = (row as { thumb?: unknown }).thumb;
       const addedAtRaw = (row as { addedAt?: unknown }).addedAt;
       const guidRaw = (row as { Guid?: unknown }).Guid;
+      const summaryRaw = (row as { summary?: unknown }).summary;
+      const audienceRatingRaw = (row as { audienceRating?: unknown }).audienceRating;
+      const ratingRaw = (row as { rating?: unknown }).rating;
+      const contentRatingRaw = (row as { contentRating?: unknown }).contentRating;
+      const durationRaw = (row as { duration?: unknown }).duration;
+      const genreRaw = (row as { Genre?: unknown }).Genre;
+
+      const genres: string[] = [];
+      if (Array.isArray(genreRaw)) {
+        for (const entry of genreRaw) {
+          if (
+            entry &&
+            typeof entry === "object" &&
+            typeof (entry as { tag?: unknown }).tag === "string"
+          ) {
+            genres.push((entry as { tag: string }).tag);
+          }
+        }
+      }
 
       items.push({
         ratingKey: String(ratingKey),
@@ -526,6 +550,20 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
         thumb: typeof thumbRaw === "string" ? thumbRaw : null,
         addedAt: typeof addedAtRaw === "number" ? addedAtRaw : null,
         tmdbId: tmdbIdFromGuids(guidRaw),
+        summary: typeof summaryRaw === "string" ? summaryRaw : null,
+        rating:
+          typeof audienceRatingRaw === "number"
+            ? audienceRatingRaw
+            : typeof ratingRaw === "number"
+              ? ratingRaw
+              : null,
+        contentRating:
+          typeof contentRatingRaw === "string" ? contentRatingRaw : null,
+        runtime:
+          typeof durationRaw === "number"
+            ? Math.round(durationRaw / 60000)
+            : null,
+        genres,
       });
     }
 

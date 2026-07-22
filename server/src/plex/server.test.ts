@@ -687,6 +687,18 @@ describe("plexServer.sectionItems", () => {
               thumb: "/library/metadata/1001/thumb/1",
               addedAt: 1700000000,
               Guid: [{ id: "tmdb://27205" }, { id: "imdb://tt1375666" }],
+              summary: "A thief who steals corporate secrets.",
+              audienceRating: 8.8,
+              rating: 8.1,
+              contentRating: "PG-13",
+              duration: 8_880_000,
+              Genre: [
+                { tag: "Action" },
+                { tag: "Sci-Fi" },
+                { tag: 123 },
+                null,
+                {},
+              ],
             },
             {
               ratingKey: 2002,
@@ -696,12 +708,16 @@ describe("plexServer.sectionItems", () => {
             },
             // Missing ratingKey — skipped.
             { type: "movie", title: "Ghost" },
-            // Malformed guid rows should not throw.
+            // Malformed guid rows should not throw; critic rating fallback;
+            // missing duration → runtime null; non-array Genre → [].
             {
               ratingKey: 3003,
               type: "movie",
               title: "No TMDB",
               Guid: [{ id: "imdb://tt0111161" }, { id: 123 }],
+              rating: 9.3,
+              contentRating: "R",
+              Genre: "not-an-array",
             },
           ],
         },
@@ -735,6 +751,11 @@ describe("plexServer.sectionItems", () => {
         thumb: "/library/metadata/1001/thumb/1",
         addedAt: 1700000000,
         tmdbId: 27205,
+        summary: "A thief who steals corporate secrets.",
+        rating: 8.8,
+        contentRating: "PG-13",
+        runtime: 148,
+        genres: ["Action", "Sci-Fi"],
       },
       {
         ratingKey: "2002",
@@ -744,6 +765,11 @@ describe("plexServer.sectionItems", () => {
         thumb: null,
         addedAt: null,
         tmdbId: 95396,
+        summary: null,
+        rating: null,
+        contentRating: null,
+        runtime: null,
+        genres: [],
       },
       {
         ratingKey: "3003",
@@ -753,6 +779,11 @@ describe("plexServer.sectionItems", () => {
         thumb: null,
         addedAt: null,
         tmdbId: null,
+        summary: null,
+        rating: 9.3,
+        contentRating: "R",
+        runtime: null,
+        genres: [],
       },
     ]);
   });

@@ -12,6 +12,11 @@ export type LibraryItem = {
   thumb: string | null;
   addedAt: number | null;
   tmdbId: number | null;
+  summary: string | null;
+  rating: number | null;
+  contentRating: string | null;
+  runtime: number | null;
+  genres: string[];
 };
 
 export type LibraryItemsResponse = {
