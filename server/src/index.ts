@@ -8,6 +8,7 @@ import { apiRateLimiter } from "./middleware/rateLimit";
 import { createPlexClient } from "./plex/client";
 import { createPlexConnectionResolver } from "./plex/connection";
 import { createPlexServerClient } from "./plex/server";
+import { createSharedServerAccessResolver } from "./plex/sharedServerAccess";
 import { createTransientTokenMinter } from "./plex/transientToken";
 import { createAdminRouter } from "./routes/admin";
 import { createAuthRouter } from "./routes/auth";
@@ -48,6 +49,12 @@ const plexServer = createPlexServerClient({
 const plexConnection = createPlexConnectionResolver({
   baseUrl: config.plexBaseUrl,
   token: config.plexToken,
+  clientId: config.plexClientId,
+});
+
+const sharedServerAccess = createSharedServerAccessResolver({
+  baseUrl: config.plexBaseUrl,
+  ownerToken: config.plexToken,
   clientId: config.plexClientId,
 });
 
@@ -180,6 +187,7 @@ app.use(
     transientMinter,
     mediaStatus,
     plexServer,
+    sharedServerAccess,
     sessionSecret: config.sessionSecret,
     plexClientId: config.plexClientId,
   }),

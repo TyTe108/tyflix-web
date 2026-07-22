@@ -4,6 +4,7 @@ import {
   PlexConnectionError,
   type PlexConnectionResolver,
 } from "../plex/connection";
+import type { SharedServerAccessResolver } from "../plex/sharedServerAccess";
 import { buildHlsUrl } from "../plex/transcodeUrl";
 import {
   PlexTransientError,
@@ -22,6 +23,7 @@ export type WatchRouterDeps = {
   transientMinter: TransientTokenMinter;
   mediaStatus: MediaStatusProvider;
   plexServer: PlexServerClient;
+  sharedServerAccess: SharedServerAccessResolver;
   sessionSecret: string;
   plexClientId: string;
 };
@@ -55,10 +57,21 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     transientMinter,
     mediaStatus,
     plexServer,
+    sharedServerAccess,
     sessionSecret,
     plexClientId,
   } = deps;
   const router = Router();
+
+  // Shared users need their per-server Plex token against our PMS; the owner
+  // isn't in that list, so fall back to the session's durable token.
+  async function resolvePmsToken(
+    plexId: number,
+    durableToken: string,
+  ): Promise<string> {
+    const shared = await sharedServerAccess.resolveAccessToken(plexId);
+    return shared ?? durableToken;
+  }
 
   // Mints the caller's transient, resolves both connection URLs, and builds one
   // shared transcode session for a Plex ratingKey. Any mint/connection failure
@@ -149,6 +162,8 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     }
 
     try {
+      const pmsToken = await resolvePmsToken(session.plexId, userToken);
+
       // No Plex ratingKey means the title isn't available to stream (the
       // "Little House" case) — not playable.
       const ratingKey = await mediaStatus.getRatingKey("movie", tmdbId);
@@ -159,7 +174,7 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
 
       const descriptor = await buildPlayDescriptor(
         ratingKey,
-        userToken,
+        pmsToken,
         tuningResult.value,
       );
       res.json({ mediaType: "movie", tmdbId, ...descriptor });
@@ -243,6 +258,8 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     }
 
     try {
+      const pmsToken = await resolvePmsToken(session.plexId, userToken);
+
       const meta = await plexServer.playbackMeta(ratingKey);
       if (meta.partId === null) {
         res.status(404).json({ error: "not playable" });
@@ -252,7 +269,7 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
       await plexServer.selectSubtitle(
         meta.partId,
         subtitleStreamID,
-        userToken,
+        pmsToken,
       );
       res.json({ ok: true });
     } catch (err) {
@@ -298,9 +315,11 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     }
 
     try {
+      const pmsToken = await resolvePmsToken(session.plexId, userToken);
+
       const descriptor = await buildPlayDescriptor(
         ratingKey,
-        userToken,
+        pmsToken,
         tuningResult.value,
       );
       res.json({ mediaType: "episode", ...descriptor });
@@ -344,9 +363,11 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     }
 
     try {
+      const pmsToken = await resolvePmsToken(session.plexId, userToken);
+
       const descriptor = await buildPlayDescriptor(
         ratingKey,
-        userToken,
+        pmsToken,
         tuningResult.value,
       );
       res.json({ mediaType: "movie", ...descriptor });

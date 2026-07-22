@@ -4,6 +4,7 @@ import express from "express";
 import { requireAuth } from "../middleware/auth";
 import type { PlexConnectionResolver } from "../plex/connection";
 import type { PlexEpisode, PlexServerClient } from "../plex/server";
+import type { SharedServerAccessResolver } from "../plex/sharedServerAccess";
 import type { TransientTokenMinter } from "../plex/transientToken";
 import type { MediaStatusProvider } from "../seerr/mediaStatusProvider";
 import { issueSession, SESSION_COOKIE_NAME } from "../session";
@@ -11,6 +12,7 @@ import { createWatchRouter, type WatchRouterDeps } from "./watch";
 
 const SECRET = "sixteen-chars!!!";
 const USER_TOKEN = "user-durable-token";
+const SHARED_TOKEN = "shared-server-access-token";
 const TRANSIENT = "transient-24b68e46-3eb5-449e-8295-ff59e9a5e6cb";
 const CLIENT_ID = "client-id-1";
 const CONNECTIONS = {
@@ -66,6 +68,11 @@ function baseDeps(): WatchRouterDeps {
         return CONNECTIONS;
       },
     } as PlexConnectionResolver,
+    sharedServerAccess: {
+      async resolveAccessToken() {
+        return null;
+      },
+    } as SharedServerAccessResolver,
     plexServer: {
       async episodes() {
         return [];
@@ -227,6 +234,32 @@ describe("GET /api/watch/movie/:tmdbId", () => {
     // The recovered durable token is what we mint from.
     assert.equal(mintedWith, USER_TOKEN);
     assert.deepEqual(ratingKeyArgs, ["movie", 603]);
+  });
+
+  it("mints with the shared per-server token when resolveAccessToken finds one", async () => {
+    let mintedWith: string | null = null;
+    const deps = baseDeps();
+    deps.sharedServerAccess = {
+      async resolveAccessToken() {
+        return SHARED_TOKEN;
+      },
+    } as SharedServerAccessResolver;
+    deps.transientMinter = {
+      async mint(userToken: string) {
+        mintedWith = userToken;
+        return TRANSIENT;
+      },
+    } as TransientTokenMinter;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/movie/603",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(mintedWith, SHARED_TOKEN);
   });
 
   it("sets hls.local to null when the server advertises no local connection", async () => {
@@ -914,6 +947,48 @@ describe("PUT /api/watch/subtitle/:ratingKey", () => {
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { ok: true });
     assert.deepEqual(selectArgs, ["55501", "102", USER_TOKEN]);
+  });
+
+  it("selects the subtitle with the shared per-server token when resolveAccessToken finds one", async () => {
+    let selectArgs: [string, string, string] | null = null;
+    const deps = baseDeps();
+    deps.sharedServerAccess = {
+      async resolveAccessToken() {
+        return SHARED_TOKEN;
+      },
+    } as SharedServerAccessResolver;
+    deps.plexServer = {
+      async playbackMeta() {
+        return {
+          durationMs: null,
+          creditsOffsetMs: null,
+          partId: "55501",
+          audio: [],
+          subtitle: [],
+          title: null,
+          subheading: null,
+        };
+      },
+      async selectSubtitle(
+        partId: string,
+        subtitleStreamID: string,
+        userToken: string,
+      ) {
+        selectArgs = [partId, subtitleStreamID, userToken];
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/subtitle/12345",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      { method: "PUT", body: { subtitleStreamID: "102" } },
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.deepEqual(selectArgs, ["55501", "102", SHARED_TOKEN]);
   });
 
   it("accepts subtitleStreamID 0 to clear the selection", async () => {
