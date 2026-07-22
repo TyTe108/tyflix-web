@@ -109,3 +109,14 @@ export async function fetchSectionFirstCharacters(
 export function libraryImageUrl(thumbPath: string): string {
   return `/api/library/image?path=${encodeURIComponent(thumbPath)}`;
 }
+
+export function libraryItemTarget(item: LibraryItem): string | null {
+  if (item.tmdbId !== null) {
+    const mediaType = item.type === "show" ? "tv" : "movie";
+    return `/media/${mediaType}/${item.tmdbId}`;
+  }
+  if (item.type !== "show") {
+    return `/watch/item/${item.ratingKey}`;
+  }
+  return null;
+}

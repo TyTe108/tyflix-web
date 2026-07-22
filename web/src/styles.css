@@ -1638,6 +1638,13 @@ a:hover {
   flex-wrap: wrap;
 }
 
+.library-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
 .library-size {
   display: flex;
   align-items: center;
@@ -1797,6 +1804,88 @@ a:hover {
 .library-body .media-grid {
   flex: 1;
   min-width: 0;
+}
+
+.library-detail-list {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.library-detail-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.library-detail-row:first-child {
+  padding-top: 0;
+}
+
+.library-detail-poster {
+  flex-shrink: 0;
+  display: block;
+  width: 5rem;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-2);
+  text-decoration: none;
+  color: inherit;
+}
+
+.library-detail-poster img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.library-detail-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.library-detail-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.library-detail-title {
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: var(--text);
+  text-decoration: none;
+  transition: color var(--transition);
+}
+
+a.library-detail-title:hover {
+  color: var(--accent);
+}
+
+.library-detail-meta,
+.library-detail-genres {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.library-detail-summary {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+  color: color-mix(in srgb, var(--text) 78%, var(--text-muted));
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }
 
 .library-az-rail {

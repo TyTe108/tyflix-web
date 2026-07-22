@@ -12,16 +12,20 @@ import {
   type LibrarySortKey,
 } from "../api/library";
 import { LibraryCard } from "../components/LibraryCard";
+import { LibraryDetailRow } from "../components/LibraryDetailRow";
 import { Dropdown } from "../components/Dropdown";
 import { PaginationControls } from "../components/PaginationControls";
 
 type LoadStatus = "loading" | "ready" | "error";
+type LibraryView = "grid" | "detail";
 
 const PAGE_SIZE = 48;
 const CARD_SIZE_STORAGE_KEY = "tyflix.librarycardsize";
 const CARD_SIZE_DEFAULT = 8.5;
 const CARD_SIZE_MIN = 6;
 const CARD_SIZE_MAX = 14;
+const VIEW_STORAGE_KEY = "tyflix.libraryview";
+const VIEW_DEFAULT: LibraryView = "grid";
 
 function clampCardSize(value: number): number {
   if (!Number.isFinite(value)) {
@@ -50,6 +54,26 @@ function writeStoredCardSize(value: number): void {
   }
 }
 
+function readStoredView(): LibraryView {
+  try {
+    const raw = localStorage.getItem(VIEW_STORAGE_KEY);
+    if (raw === "grid" || raw === "detail") {
+      return raw;
+    }
+    return VIEW_DEFAULT;
+  } catch {
+    return VIEW_DEFAULT;
+  }
+}
+
+function writeStoredView(value: LibraryView): void {
+  try {
+    localStorage.setItem(VIEW_STORAGE_KEY, value);
+  } catch {
+    // private mode / quota — preference stays in-memory only
+  }
+}
+
 export function LibraryPage() {
   const { mediaType } = useParams<{ mediaType?: string }>();
   const navigate = useNavigate();
@@ -72,11 +96,20 @@ export function LibraryPage() {
   const [firstChar, setFirstChar] = useState<string | null>(null);
   const [firstChars, setFirstChars] = useState<LibraryFirstCharacter[]>([]);
   const [cardSize, setCardSize] = useState(readStoredCardSize);
+  const [view, setView] = useState<LibraryView>(readStoredView);
 
   const onCardSizeChange = useCallback((next: number) => {
     const clamped = clampCardSize(next);
     setCardSize(clamped);
     writeStoredCardSize(clamped);
+  }, []);
+
+  const onViewChange = useCallback((next: string) => {
+    if (next !== "grid" && next !== "detail") {
+      return;
+    }
+    setView(next);
+    writeStoredView(next);
   }, []);
 
   const activeType = mediaType === "tv" ? "show" : "movie";
@@ -284,23 +317,44 @@ export function LibraryPage() {
           </button>
         </div>
 
-        <label className="library-size">
-          <span className="library-size-hint library-size-hint--sm" aria-hidden="true">
-            ▢
-          </span>
-          <input
-            type="range"
-            min={CARD_SIZE_MIN}
-            max={CARD_SIZE_MAX}
-            step={0.5}
-            value={cardSize}
-            aria-label="Poster size"
-            onChange={(event) => onCardSizeChange(Number(event.target.value))}
+        <div className="library-toolbar-actions">
+          <Dropdown
+            label="View"
+            value={view}
+            options={[
+              { value: "grid", label: "Grid View" },
+              { value: "detail", label: "Detail View" },
+            ]}
+            onChange={onViewChange}
           />
-          <span className="library-size-hint library-size-hint--lg" aria-hidden="true">
-            ▢
-          </span>
-        </label>
+          {view === "grid" ? (
+            <label className="library-size">
+              <span
+                className="library-size-hint library-size-hint--sm"
+                aria-hidden="true"
+              >
+                ▢
+              </span>
+              <input
+                type="range"
+                min={CARD_SIZE_MIN}
+                max={CARD_SIZE_MAX}
+                step={0.5}
+                value={cardSize}
+                aria-label="Poster size"
+                onChange={(event) =>
+                  onCardSizeChange(Number(event.target.value))
+                }
+              />
+              <span
+                className="library-size-hint library-size-hint--lg"
+                aria-hidden="true"
+              >
+                ▢
+              </span>
+            </label>
+          ) : null}
+        </div>
       </div>
 
       <div className="library-controls" aria-label="Library filters">
@@ -365,20 +419,28 @@ export function LibraryPage() {
       {itemsStatus === "ready" && items.length > 0 ? (
         <>
           <div className="library-body">
-            <ul
-              className="media-grid"
-              style={
-                {
-                  "--library-card-min": `${cardSize}rem`,
-                } as CSSProperties
-              }
-            >
-              {items.map((item) => (
-                <li key={item.ratingKey}>
-                  <LibraryCard item={item} />
-                </li>
-              ))}
-            </ul>
+            {view === "grid" ? (
+              <ul
+                className="media-grid"
+                style={
+                  {
+                    "--library-card-min": `${cardSize}rem`,
+                  } as CSSProperties
+                }
+              >
+                {items.map((item) => (
+                  <li key={item.ratingKey}>
+                    <LibraryCard item={item} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="library-detail-list">
+                {items.map((item) => (
+                  <LibraryDetailRow key={item.ratingKey} item={item} />
+                ))}
+              </div>
+            )}
             {showAzRail ? (
               <nav className="library-az-rail" aria-label="Jump to letter">
                 <button
