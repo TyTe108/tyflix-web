@@ -1,0 +1,56 @@
+name: Deploy tyflix-web
+
+# Deploy job runs on a GitHub-hosted runner that joins the tailnet just for
+# this job (tailscale/github-action, ephemeral + tagged) and SSHes to the
+# Dell using a dedicated deploy-only key. That key's entry in the Dell's
+# authorized_keys carries a forced `command=` restricted to the exact deploy
+# line below -- sshd runs ONLY that line no matter what the client sends, so
+# even a fully leaked DEPLOY_SSH_KEY secret can't do anything beyond this one
+# deploy. No standing process lives on the Dell for this.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: tyflix-web-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build web (tsc -b && vite build)
+        run: npm run build -w web
+
+      - name: Build + test server (node:test)
+        run: npm test -w server
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Connect to tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Deploy (the Dell's forced command does the actual work)
+        run: |
+          set -euo pipefail
+          umask 077
+          install -m 600 /dev/null deploy_key
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > deploy_key
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+              -i deploy_key tyler@100.88.236.50
