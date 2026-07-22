@@ -92,6 +92,43 @@ export async function selectSubtitle(
   }
 }
 
+export type TimelineState = "playing" | "paused" | "stopped";
+
+export type TimelineBody = {
+  ratingKey: string;
+  state: TimelineState;
+  time: number;
+  duration: number;
+};
+
+// Fire-and-forget: failures are logged but must not interrupt playback.
+export async function reportTimeline(body: TimelineBody): Promise<void> {
+  try {
+    const res = await fetch("/api/watch/timeline", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      console.error(`Timeline report failed (${res.status})`);
+    }
+  } catch (err) {
+    console.error("Timeline report failed", err);
+  }
+}
+
+// Best-effort unload path — Blob typed application/json so express.json() parses it.
+export function reportTimelineBeacon(body: TimelineBody): void {
+  try {
+    const blob = new Blob([JSON.stringify(body)], {
+      type: "application/json",
+    });
+    navigator.sendBeacon("/api/watch/timeline", blob);
+  } catch (err) {
+    console.error("Timeline beacon failed", err);
+  }
+}
+
 export type Episode = {
   ratingKey: string;
   seasonNumber: number;

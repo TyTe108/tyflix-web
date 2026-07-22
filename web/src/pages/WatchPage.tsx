@@ -6,8 +6,11 @@ import {
   fetchItemWatch,
   fetchMovieWatch,
   fetchNextEpisode,
+  reportTimeline,
+  reportTimelineBeacon,
   selectSubtitle,
   type NextEpisode,
+  type TimelineState,
   type WatchConnections,
   type WatchDescriptor,
   type WatchTuning,
@@ -21,6 +24,8 @@ import { UpNextCard } from "../components/UpNextCard";
 
 const AUTO_PLAY_STORAGE_KEY = "tyflix.autoPlay";
 const UP_NEXT_WINDOW_SEC = 30;
+const TIMELINE_HEARTBEAT_MS = 10_000;
+const TIMELINE_SEEK_THROTTLE_MS = 1000;
 
 type LoadStatus = "loading" | "ready" | "error";
 
@@ -145,9 +150,11 @@ export function WatchPage() {
   const autoPlayRef = useRef(autoPlay);
   const nextEpisodeRef = useRef(nextEpisode);
   const upNextDismissedRef = useRef(upNextDismissed);
+  const timelineDurationMsRef = useRef<number | null>(null);
   autoPlayRef.current = autoPlay;
   nextEpisodeRef.current = nextEpisode;
   upNextDismissedRef.current = upNextDismissed;
+  timelineDurationMsRef.current = descriptor?.durationMs ?? null;
 
   useEffect(() => {
     let load: (() => Promise<WatchDescriptor>) | null = null;
@@ -265,6 +272,149 @@ export function WatchPage() {
       video.removeEventListener("loadedmetadata", sync);
     };
   }, [descriptor]);
+
+  // Report playback timeline to Plex (resume position / watched state). Bound to
+  // ratingKey only so quality/audio switches don't restart the heartbeat.
+  useEffect(() => {
+    const ratingKey = descriptor?.ratingKey;
+    if (ratingKey === undefined || ratingKey === "") {
+      return;
+    }
+
+    const video = videoRef.current;
+    if (video === null) {
+      return;
+    }
+
+    let heartbeatId: ReturnType<typeof setInterval> | null = null;
+    let lastSeekReportAt = 0;
+    let finalStoppedSent = false;
+
+    const clearHeartbeat = () => {
+      if (heartbeatId !== null) {
+        clearInterval(heartbeatId);
+        heartbeatId = null;
+      }
+    };
+
+    const resolveDurationMs = (): number => {
+      const fromVideo = Math.round(video.duration * 1000);
+      if (Number.isFinite(fromVideo) && fromVideo > 0) {
+        return fromVideo;
+      }
+      const fallback = timelineDurationMsRef.current;
+      if (
+        typeof fallback === "number" &&
+        Number.isFinite(fallback) &&
+        fallback > 0
+      ) {
+        return Math.round(fallback);
+      }
+      return 0;
+    };
+
+    const resolveTimeMs = (): number =>
+      Math.max(0, Math.round(video.currentTime * 1000));
+
+    const buildPayload = (
+      state: TimelineState,
+    ): {
+      ratingKey: string;
+      state: TimelineState;
+      time: number;
+      duration: number;
+    } | null => {
+      const duration = resolveDurationMs();
+      if (duration <= 0) {
+        return null;
+      }
+      return {
+        ratingKey,
+        state,
+        time: resolveTimeMs(),
+        duration,
+      };
+    };
+
+    const sendTimeline = (state: TimelineState, useBeacon = false): void => {
+      const payload = buildPayload(state);
+      if (payload === null) {
+        return;
+      }
+      if (useBeacon) {
+        reportTimelineBeacon(payload);
+      } else {
+        void reportTimeline(payload);
+      }
+    };
+
+    const sendFinalStopped = (): void => {
+      if (finalStoppedSent) {
+        return;
+      }
+      finalStoppedSent = true;
+      clearHeartbeat();
+      sendTimeline("stopped", true);
+    };
+
+    const startHeartbeat = () => {
+      clearHeartbeat();
+      heartbeatId = setInterval(() => {
+        sendTimeline("playing");
+      }, TIMELINE_HEARTBEAT_MS);
+    };
+
+    const onPlaying = () => {
+      sendTimeline("playing");
+      startHeartbeat();
+    };
+
+    const onPause = () => {
+      clearHeartbeat();
+      sendTimeline("paused");
+    };
+
+    const onSeeked = () => {
+      const now = Date.now();
+      if (now - lastSeekReportAt < TIMELINE_SEEK_THROTTLE_MS) {
+        return;
+      }
+      lastSeekReportAt = now;
+      sendTimeline("playing");
+    };
+
+    const onEnded = () => {
+      clearHeartbeat();
+      sendTimeline("stopped");
+    };
+
+    const onPageHide = () => {
+      sendFinalStopped();
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        sendTimeline("paused", true);
+      }
+    };
+
+    video.addEventListener("playing", onPlaying);
+    video.addEventListener("pause", onPause);
+    video.addEventListener("seeked", onSeeked);
+    video.addEventListener("ended", onEnded);
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      video.removeEventListener("playing", onPlaying);
+      video.removeEventListener("pause", onPause);
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("ended", onEnded);
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      sendFinalStopped();
+    };
+  }, [descriptor?.ratingKey]);
 
   // Auto-advance on ended. Refs keep the listener current without rebinding
   // on every autoPlay / nextEpisode change.
