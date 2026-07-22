@@ -2,22 +2,40 @@ export type WatchProgressProps = {
   viewOffset: number | null;
   viewCount: number | null;
   runtime: number | null;
+  durationMs?: number | null;
 };
+
+function resolveDurationMs(
+  runtime: number | null,
+  durationMs?: number | null,
+): number | null {
+  if (
+    typeof durationMs === "number" &&
+    Number.isFinite(durationMs) &&
+    durationMs > 0
+  ) {
+    return durationMs;
+  }
+  if (runtime !== null && runtime > 0) {
+    return runtime * 60_000;
+  }
+  return null;
+}
 
 export function WatchProgress({
   viewOffset,
   viewCount,
   runtime,
+  durationMs,
 }: WatchProgressProps) {
+  const effectiveDurationMs = resolveDurationMs(runtime, durationMs);
   const isInProgress =
     viewOffset !== null &&
     viewOffset > 0 &&
-    runtime !== null &&
-    runtime > 0;
+    effectiveDurationMs !== null;
 
   if (isInProgress) {
-    const durationMs = runtime * 60_000;
-    const rawPercent = (viewOffset / durationMs) * 100;
+    const rawPercent = (viewOffset / effectiveDurationMs) * 100;
     if (!Number.isFinite(rawPercent)) {
       return null;
     }

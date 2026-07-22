@@ -43,6 +43,7 @@ export function LibraryDetailRow({ item }: { item: LibraryItem }) {
         viewOffset={item.viewOffset}
         viewCount={item.viewCount}
         runtime={item.runtime}
+        durationMs={item.durationMs}
       />
     </>
   );

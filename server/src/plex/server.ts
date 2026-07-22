@@ -86,6 +86,7 @@ export type LibraryItem = {
   rating: number | null;
   contentRating: string | null;
   runtime: number | null;
+  durationMs: number | null;
   genres: string[];
   viewOffset: number | null;
   viewCount: number | null;
@@ -638,6 +639,8 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
           typeof durationRaw === "number"
             ? Math.round(durationRaw / 60000)
             : null,
+        durationMs:
+          typeof durationRaw === "number" ? durationRaw : null,
         genres,
         viewOffset:
           typeof viewOffsetRaw === "number" ? viewOffsetRaw : null,

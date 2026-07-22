@@ -26,6 +26,7 @@ export function LibraryCard({ item }: { item: LibraryItem }) {
           viewOffset={item.viewOffset}
           viewCount={item.viewCount}
           runtime={item.runtime}
+          durationMs={item.durationMs}
         />
       </div>
       <div className="media-card-body">
