@@ -17,6 +17,9 @@ export type LibraryItem = {
   contentRating: string | null;
   runtime: number | null;
   genres: string[];
+  viewOffset: number | null;
+  viewCount: number | null;
+  lastViewedAt: number | null;
 };
 
 export type LibraryItemsResponse = {

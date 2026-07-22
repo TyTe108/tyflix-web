@@ -1,9 +1,12 @@
 import { Router } from "express";
+import { resolvePmsToken } from "../plex/resolvePmsToken";
+import type { SharedServerAccessResolver } from "../plex/sharedServerAccess";
 import {
   PlexServerUpstreamError,
   type LibrarySortKey,
   type PlexServerClient,
 } from "../plex/server";
+import { readPlexToken, type SessionPayload } from "../session";
 
 const LIBRARY_SORT_KEYS = new Set<LibrarySortKey>([
   "title",
@@ -17,10 +20,12 @@ const LIBRARY_IMAGE_PATH_RE =
 
 export type LibraryRouterDeps = {
   plexServer: PlexServerClient;
+  sharedServerAccess: SharedServerAccessResolver;
+  sessionSecret: string;
 };
 
 export function createLibraryRouter(deps: LibraryRouterDeps): Router {
-  const { plexServer } = deps;
+  const { plexServer, sharedServerAccess, sessionSecret } = deps;
   const router = Router();
 
   router.get("/image", async (req, res) => {
@@ -104,6 +109,29 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
       return;
     }
 
+    const session = res.locals.session as SessionPayload | undefined;
+    if (!session) {
+      res.status(401).json({ error: "not authenticated" });
+      return;
+    }
+
+    let durableToken: string | null;
+    try {
+      durableToken = readPlexToken(session, sessionSecret);
+    } catch (err) {
+      respondUpstreamError(res, err);
+      return;
+    }
+
+    let userToken: string | undefined;
+    if (durableToken !== null) {
+      userToken = await resolvePmsToken(
+        sharedServerAccess,
+        session.plexId,
+        durableToken,
+      );
+    }
+
     try {
       const result = await plexServer.sectionItems({
         sectionKey,
@@ -115,9 +143,19 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
         ...(firstCharacterResult !== undefined
           ? { firstCharacter: firstCharacterResult }
           : {}),
+        ...(userToken !== undefined ? { userToken } : {}),
       });
+      const items =
+        userToken === undefined
+          ? result.items.map((item) => ({
+              ...item,
+              viewOffset: null,
+              viewCount: null,
+              lastViewedAt: null,
+            }))
+          : result.items;
       res.json({
-        items: result.items,
+        items,
         totalSize: result.totalSize,
         start: start ?? 0,
         size: size ?? 50,

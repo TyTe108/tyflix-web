@@ -778,6 +778,9 @@ describe("plexServer.sectionItems", () => {
               rating: 8.1,
               contentRating: "PG-13",
               duration: 8_880_000,
+              viewOffset: 1_800_000,
+              viewCount: 2,
+              lastViewedAt: 1_700_001_000,
               Genre: [
                 { tag: "Action" },
                 { tag: "Sci-Fi" },
@@ -842,6 +845,9 @@ describe("plexServer.sectionItems", () => {
         contentRating: "PG-13",
         runtime: 148,
         genres: ["Action", "Sci-Fi"],
+        viewOffset: 1_800_000,
+        viewCount: 2,
+        lastViewedAt: 1_700_001_000,
       },
       {
         ratingKey: "2002",
@@ -856,6 +862,9 @@ describe("plexServer.sectionItems", () => {
         contentRating: null,
         runtime: null,
         genres: [],
+        viewOffset: null,
+        viewCount: null,
+        lastViewedAt: null,
       },
       {
         ratingKey: "3003",
@@ -870,8 +879,35 @@ describe("plexServer.sectionItems", () => {
         contentRating: "R",
         runtime: null,
         genres: [],
+        viewOffset: null,
+        viewCount: null,
+        lastViewedAt: null,
       },
     ]);
+  });
+
+  it("uses the passed user token for the /all request", async () => {
+    let requestedToken: string | null = null;
+    globalThis.fetch = (async (
+      _input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
+      const headers = new Headers(init?.headers);
+      requestedToken = headers.get("X-Plex-Token");
+      return jsonResponse(200, {
+        MediaContainer: { totalSize: 0, Metadata: [] },
+      });
+    }) as typeof fetch;
+
+    await client().sectionItems({
+      sectionKey: "1",
+      sort: "title",
+      start: 0,
+      size: 50,
+      userToken: "shared-user-token",
+    });
+
+    assert.equal(requestedToken, "shared-user-token");
   });
 
   it("falls back to container size then items length for totalSize", async () => {

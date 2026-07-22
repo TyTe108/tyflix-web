@@ -86,6 +86,9 @@ export type LibraryItem = {
   contentRating: string | null;
   runtime: number | null;
   genres: string[];
+  viewOffset: number | null;
+  viewCount: number | null;
+  lastViewedAt: number | null;
 };
 
 export type LibrarySortKey = "title" | "added" | "year" | "rating";
@@ -119,6 +122,43 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
         method: "GET",
         headers: {
           "X-Plex-Token": token,
+          Accept: "application/json",
+        },
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Plex server request failed";
+      throw new PlexServerUpstreamError(message, 502);
+    }
+
+    if (!res.ok) {
+      throw new PlexServerUpstreamError(
+        `Plex server ${path} failed (${res.status})`,
+        res.status,
+      );
+    }
+
+    return res.json();
+  }
+
+  async function getJsonWithToken(
+    path: string,
+    authToken: string,
+    query?: Record<string, string>,
+  ): Promise<unknown> {
+    const url = new URL(`${baseUrl}${path}`);
+    if (query) {
+      for (const [key, value] of Object.entries(query)) {
+        url.searchParams.set(key, value);
+      }
+    }
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "GET",
+        headers: {
+          "X-Plex-Token": authToken,
           Accept: "application/json",
         },
       });
@@ -480,9 +520,18 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     genre?: string;
     unwatched?: boolean;
     firstCharacter?: string;
+    userToken?: string;
   }): Promise<{ items: LibraryItem[]; totalSize: number }> {
-    const { sectionKey, sort, start, size, genre, unwatched, firstCharacter } =
-      options;
+    const {
+      sectionKey,
+      sort,
+      start,
+      size,
+      genre,
+      unwatched,
+      firstCharacter,
+      userToken,
+    } = options;
     const query: Record<string, string> = {
       sort: mapLibrarySort(sort),
       includeGuids: "1",
@@ -501,7 +550,10 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
         ? `/library/sections/${sectionKey}/firstCharacter/${encodeURIComponent(firstCharacter)}`
         : `/library/sections/${sectionKey}/all`;
 
-    const body = await getJson(path, query);
+    const body =
+      userToken !== undefined
+        ? await getJsonWithToken(path, userToken, query)
+        : await getJson(path, query);
 
     const container = mediaContainer(body);
     const rows = asArray(container?.Metadata);
@@ -528,6 +580,9 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
       const contentRatingRaw = (row as { contentRating?: unknown }).contentRating;
       const durationRaw = (row as { duration?: unknown }).duration;
       const genreRaw = (row as { Genre?: unknown }).Genre;
+      const viewOffsetRaw = (row as { viewOffset?: unknown }).viewOffset;
+      const viewCountRaw = (row as { viewCount?: unknown }).viewCount;
+      const lastViewedAtRaw = (row as { lastViewedAt?: unknown }).lastViewedAt;
 
       const genres: string[] = [];
       if (Array.isArray(genreRaw)) {
@@ -564,6 +619,11 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
             ? Math.round(durationRaw / 60000)
             : null,
         genres,
+        viewOffset:
+          typeof viewOffsetRaw === "number" ? viewOffsetRaw : null,
+        viewCount: typeof viewCountRaw === "number" ? viewCountRaw : null,
+        lastViewedAt:
+          typeof lastViewedAtRaw === "number" ? lastViewedAtRaw : null,
       });
     }
 

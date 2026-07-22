@@ -154,7 +154,11 @@ app.use(
 app.use(
   "/api/library",
   requireAuth(config.sessionSecret),
-  createLibraryRouter({ plexServer }),
+  createLibraryRouter({
+    plexServer,
+    sharedServerAccess,
+    sessionSecret: config.sessionSecret,
+  }),
 );
 
 app.use(

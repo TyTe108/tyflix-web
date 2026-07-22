@@ -2,14 +2,17 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import express from "express";
 import { requireAuth } from "../middleware/auth";
+import type { SharedServerAccessResolver } from "../plex/sharedServerAccess";
 import type { LibrarySortKey, PlexServerClient } from "../plex/server";
 import { PlexServerUpstreamError } from "../plex/server";
 import { issueSession, SESSION_COOKIE_NAME } from "../session";
-import { createLibraryRouter } from "./library";
+import { createLibraryRouter, type LibraryRouterDeps } from "./library";
 
 const SECRET = "sixteen-chars!!!";
+const USER_TOKEN = "user-durable-token";
+const SHARED_TOKEN = "shared-server-access-token";
 
-function sessionCookie(): string {
+function sessionCookie(opts: { plexToken?: string } = {}): string {
   const cookies: Array<{ name: string; value: string }> = [];
   const res = {
     cookies,
@@ -26,29 +29,44 @@ function sessionCookie(): string {
       displayName: "Tyler",
       avatar: null,
       permissions: 0,
+      ...(opts.plexToken !== undefined ? { plexToken: opts.plexToken } : {}),
     },
     { secret: SECRET, secure: false },
   );
   return `${SESSION_COOKIE_NAME}=${cookies[0].value}`;
 }
 
-function createApp(plexServer: PlexServerClient): express.Express {
+function baseDeps(plexServer: PlexServerClient): LibraryRouterDeps {
+  return {
+    plexServer,
+    sharedServerAccess: {
+      async resolveAccessToken() {
+        return null;
+      },
+    } as SharedServerAccessResolver,
+    sessionSecret: SECRET,
+  };
+}
+
+function createApp(deps: LibraryRouterDeps): express.Express {
   const app = express();
   app.use(
     "/api/library",
     requireAuth(SECRET),
-    createLibraryRouter({ plexServer }),
+    createLibraryRouter(deps),
   );
   return app;
 }
 
 describe("library routes", () => {
   it("GET /sections returns movie and show sections", async () => {
-    const app = createApp({
-      async sections() {
-        return [{ key: "1", title: "Movies", type: "movie" }];
-      },
-    } as unknown as PlexServerClient);
+    const app = createApp(
+      baseDeps({
+        async sections() {
+          return [{ key: "1", title: "Movies", type: "movie" }];
+        },
+      } as unknown as PlexServerClient),
+    );
 
     const response = await fetchLocal(
       app,
@@ -69,45 +87,63 @@ describe("library routes", () => {
       size: number;
       genre?: string;
       unwatched?: boolean;
+      userToken?: string;
     }> = [];
-    const app = createApp({
-      async sections() {
-        return [];
-      },
-      async sectionItems(options: {
-        sectionKey: string;
-        sort: LibrarySortKey;
-        start: number;
-        size: number;
-        genre?: string;
-        unwatched?: boolean;
-      }) {
-        calls.push(options);
-        return {
-          items: [
-            {
-              ratingKey: "42",
-              type: "movie",
-              title: "Test",
-              year: 2020,
-              thumb: null,
-              addedAt: null,
-              tmdbId: 99,
-            },
-          ],
-          totalSize: 1,
-        };
-      },
-    } as unknown as PlexServerClient);
+    const app = createApp(
+      baseDeps({
+        async sections() {
+          return [];
+        },
+        async sectionItems(options: {
+          sectionKey: string;
+          sort: LibrarySortKey;
+          start: number;
+          size: number;
+          genre?: string;
+          unwatched?: boolean;
+          userToken?: string;
+        }) {
+          calls.push(options);
+          return {
+            items: [
+              {
+                ratingKey: "42",
+                type: "movie",
+                title: "Test",
+                year: 2020,
+                thumb: null,
+                addedAt: null,
+                tmdbId: 99,
+                summary: null,
+                rating: null,
+                contentRating: null,
+                runtime: null,
+                genres: [],
+                viewOffset: null,
+                viewCount: null,
+                lastViewedAt: null,
+              },
+            ],
+            totalSize: 1,
+          };
+        },
+      } as unknown as PlexServerClient),
+    );
 
     const response = await fetchLocal(
       app,
       "/api/library/sections/1/items?sort=year&start=10&size=20",
-      sessionCookie(),
+      sessionCookie({ plexToken: USER_TOKEN }),
     );
     assert.equal(response.status, 200);
     assert.deepEqual(calls, [
-      { sectionKey: "1", sort: "year", start: 10, size: 20 },
+      {
+        sectionKey: "1",
+        sort: "year",
+        start: 10,
+        size: 20,
+        userToken: USER_TOKEN,
+      },
     ]);
     assert.deepEqual(await response.json(), {
       items: [
@@ -119,6 +155,14 @@ describe("library routes", () => {
           thumb: null,
           addedAt: null,
           tmdbId: 99,
+          summary: null,
+          rating: null,
+          contentRating: null,
+          runtime: null,
+          genres: [],
+          viewOffset: null,
+          viewCount: null,
+          lastViewedAt: null,
         },
       ],
       totalSize: 1,
@@ -140,7 +184,7 @@ describe("library routes", () => {
       genre?: string;
       unwatched?: boolean;
     }> = [];
-    const app = createApp({
+    const app = createApp(baseDeps({
       async sections() {
         return [];
       },
@@ -155,7 +199,7 @@ describe("library routes", () => {
         calls.push(options);
         return { items: [], totalSize: 0 };
       },
-    } as unknown as PlexServerClient);
+    } as unknown as PlexServerClient));
 
     const response = await fetchLocal(
       app,
@@ -186,14 +230,14 @@ describe("library routes", () => {
   });
 
   it("GET /sections/:key/items rejects invalid genre and unwatched with 400", async () => {
-    const app = createApp({
+    const app = createApp(baseDeps({
       async sections() {
         return [];
       },
       async sectionItems() {
         throw new Error("should not be called");
       },
-    } as unknown as PlexServerClient);
+    } as unknown as PlexServerClient));
     const cookie = sessionCookie();
 
     const badGenre = await fetchLocal(
@@ -221,7 +265,7 @@ describe("library routes", () => {
       size: number;
       firstCharacter?: string;
     }> = [];
-    const app = createApp({
+    const app = createApp(baseDeps({
       async sections() {
         return [];
       },
@@ -235,7 +279,7 @@ describe("library routes", () => {
         calls.push(options);
         return { items: [], totalSize: 6 };
       },
-    } as unknown as PlexServerClient);
+    } as unknown as PlexServerClient));
 
     const response = await fetchLocal(
       app,
@@ -265,14 +309,14 @@ describe("library routes", () => {
   });
 
   it("GET /sections/:key/items rejects invalid firstCharacter with 400", async () => {
-    const app = createApp({
+    const app = createApp(baseDeps({
       async sections() {
         return [];
       },
       async sectionItems() {
         throw new Error("should not be called");
       },
-    } as unknown as PlexServerClient);
+    } as unknown as PlexServerClient));
     const cookie = sessionCookie();
 
     const badMulti = await fetchLocal(
@@ -293,7 +337,7 @@ describe("library routes", () => {
   });
 
   it("GET /sections/:key/first-characters returns the character index", async () => {
-    const app = createApp({
+    const app = createApp(baseDeps({
       async sectionFirstCharacters(sectionKey: string) {
         assert.equal(sectionKey, "1");
         return [
@@ -302,7 +346,7 @@ describe("library routes", () => {
           { label: "B", count: 6 },
         ];
       },
-    } as unknown as PlexServerClient);
+    } as unknown as PlexServerClient));
 
     const response = await fetchLocal(
       app,
@@ -320,11 +364,11 @@ describe("library routes", () => {
   });
 
   it("GET /sections/:key/first-characters rejects a non-numeric section key with 400", async () => {
-    const app = createApp({
+    const app = createApp(baseDeps({
       async sectionFirstCharacters() {
         throw new Error("should not be called");
       },
-    } as unknown as PlexServerClient);
+    } as unknown as PlexServerClient));
 
     const response = await fetchLocal(
       app,
@@ -336,7 +380,7 @@ describe("library routes", () => {
   });
 
   it("GET /sections/:key/genres returns the genre list", async () => {
-    const app = createApp({
+    const app = createApp(baseDeps({
       async sectionGenres(sectionKey: string) {
         assert.equal(sectionKey, "1");
         return [
@@ -344,7 +388,7 @@ describe("library routes", () => {
           { id: "18", title: "Drama" },
         ];
       },
-    } as unknown as PlexServerClient);
+    } as unknown as PlexServerClient));
 
     const response = await fetchLocal(
       app,
@@ -361,11 +405,11 @@ describe("library routes", () => {
   });
 
   it("GET /sections/:key/genres rejects a non-numeric section key with 400", async () => {
-    const app = createApp({
+    const app = createApp(baseDeps({
       async sectionGenres() {
         throw new Error("should not be called");
       },
-    } as unknown as PlexServerClient);
+    } as unknown as PlexServerClient));
 
     const response = await fetchLocal(
       app,
@@ -383,7 +427,7 @@ describe("library routes", () => {
       start: number;
       size: number;
     }> = [];
-    const app = createApp({
+    const app = createApp(baseDeps({
       async sections() {
         return [];
       },
@@ -396,7 +440,7 @@ describe("library routes", () => {
         calls.push(options);
         return { items: [], totalSize: 0 };
       },
-    } as unknown as PlexServerClient);
+    } as unknown as PlexServerClient));
 
     const response = await fetchLocal(
       app,
@@ -420,14 +464,14 @@ describe("library routes", () => {
   });
 
   it("returns 400 for invalid section key, sort, start, and size", async () => {
-    const app = createApp({
+    const app = createApp(baseDeps({
       async sections() {
         return [];
       },
       async sectionItems() {
         throw new Error("should not be called");
       },
-    } as unknown as PlexServerClient);
+    } as unknown as PlexServerClient));
     const cookie = sessionCookie();
 
     const badKey = await fetchLocal(
@@ -472,11 +516,11 @@ describe("library routes", () => {
   });
 
   it("returns 502 when Plex upstream fails", async () => {
-    const app = createApp({
+    const app = createApp(baseDeps({
       async sections() {
         throw new PlexServerUpstreamError("Plex blew up", 503);
       },
-    } as unknown as PlexServerClient);
+    } as unknown as PlexServerClient));
 
     const response = await fetchLocal(
       app,
@@ -490,7 +534,7 @@ describe("library routes", () => {
   it("GET /image proxies a whitelisted thumb path", async () => {
     const imageBytes = Buffer.from([0xff, 0xd8, 0xff, 0xdb]);
     let fetchedPath: string | null = null;
-    const app = createApp({
+    const app = createApp(baseDeps({
       async fetchImage(path: string) {
         fetchedPath = path;
         return {
@@ -500,7 +544,7 @@ describe("library routes", () => {
           body: imageBytes,
         };
       },
-    } as unknown as PlexServerClient);
+    } as unknown as PlexServerClient));
 
     const thumbPath = "/library/metadata/3613/thumb/1780131692";
     const response = await fetchLocal(
@@ -521,12 +565,12 @@ describe("library routes", () => {
 
   it("GET /image rejects missing and non-whitelisted paths without calling fetchImage", async () => {
     let fetchCalls = 0;
-    const app = createApp({
+    const app = createApp(baseDeps({
       async fetchImage() {
         fetchCalls += 1;
         throw new Error("fetchImage should not be called");
       },
-    } as unknown as PlexServerClient);
+    } as unknown as PlexServerClient));
     const cookie = sessionCookie();
 
     const missing = await fetchLocal(app, "/api/library/image", cookie);
@@ -555,7 +599,7 @@ describe("library routes", () => {
   });
 
   it("GET /image returns 502 when upstream image fetch is not ok", async () => {
-    const app = createApp({
+    const app = createApp(baseDeps({
       async fetchImage() {
         return {
           ok: false,
@@ -564,7 +608,7 @@ describe("library routes", () => {
           body: Buffer.alloc(0),
         };
       },
-    } as unknown as PlexServerClient);
+    } as unknown as PlexServerClient));
 
     const response = await fetchLocal(
       app,
@@ -573,6 +617,111 @@ describe("library routes", () => {
     );
     assert.equal(response.status, 502);
     assert.deepEqual(await response.json(), { error: "image fetch failed" });
+  });
+
+  it("GET /sections/:key/items passes the shared per-server token when resolveAccessToken finds one", async () => {
+    let sectionItemsToken: string | undefined;
+    const app = createApp({
+      plexServer: {
+        async sectionItems(options: {
+          userToken?: string;
+        }) {
+          sectionItemsToken = options.userToken;
+          return { items: [], totalSize: 0 };
+        },
+      } as unknown as PlexServerClient,
+      sharedServerAccess: {
+        async resolveAccessToken() {
+          return SHARED_TOKEN;
+        },
+      } as SharedServerAccessResolver,
+      sessionSecret: SECRET,
+    });
+
+    const response = await fetchLocal(
+      app,
+      "/api/library/sections/1/items",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(sectionItemsToken, SHARED_TOKEN);
+  });
+
+  it("GET /sections/:key/items nulls progress fields when the session has no Plex token", async () => {
+    let sectionItemsToken: string | undefined = "unset";
+    const app = createApp({
+      plexServer: {
+        async sectionItems(options: { userToken?: string }) {
+          sectionItemsToken = options.userToken;
+          return {
+            items: [
+              {
+                ratingKey: "42",
+                type: "movie",
+                title: "Test",
+                year: 2020,
+                thumb: null,
+                addedAt: null,
+                tmdbId: 99,
+                summary: null,
+                rating: null,
+                contentRating: null,
+                runtime: null,
+                genres: [],
+                viewOffset: 900_000,
+                viewCount: 3,
+                lastViewedAt: 1_700_000_000,
+              },
+            ],
+            totalSize: 1,
+          };
+        },
+      } as unknown as PlexServerClient,
+      sharedServerAccess: {
+        async resolveAccessToken() {
+          return null;
+        },
+      } as SharedServerAccessResolver,
+      sessionSecret: SECRET,
+    });
+
+    const response = await fetchLocal(
+      app,
+      "/api/library/sections/1/items",
+      sessionCookie(),
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(sectionItemsToken, undefined);
+    assert.deepEqual(await response.json(), {
+      items: [
+        {
+          ratingKey: "42",
+          type: "movie",
+          title: "Test",
+          year: 2020,
+          thumb: null,
+          addedAt: null,
+          tmdbId: 99,
+          summary: null,
+          rating: null,
+          contentRating: null,
+          runtime: null,
+          genres: [],
+          viewOffset: null,
+          viewCount: null,
+          lastViewedAt: null,
+        },
+      ],
+      totalSize: 1,
+      start: 0,
+      size: 50,
+      sort: "title",
+      genre: null,
+      unwatched: false,
+      firstCharacter: null,
+    });
   });
 });
 
