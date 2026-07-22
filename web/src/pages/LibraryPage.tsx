@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   fetchLibraryItems,
@@ -18,6 +18,37 @@ import { PaginationControls } from "../components/PaginationControls";
 type LoadStatus = "loading" | "ready" | "error";
 
 const PAGE_SIZE = 48;
+const CARD_SIZE_STORAGE_KEY = "tyflix.librarycardsize";
+const CARD_SIZE_DEFAULT = 8.5;
+const CARD_SIZE_MIN = 6;
+const CARD_SIZE_MAX = 14;
+
+function clampCardSize(value: number): number {
+  if (!Number.isFinite(value)) {
+    return CARD_SIZE_DEFAULT;
+  }
+  return Math.min(CARD_SIZE_MAX, Math.max(CARD_SIZE_MIN, value));
+}
+
+function readStoredCardSize(): number {
+  try {
+    const raw = localStorage.getItem(CARD_SIZE_STORAGE_KEY);
+    if (raw === null) {
+      return CARD_SIZE_DEFAULT;
+    }
+    return clampCardSize(Number(raw));
+  } catch {
+    return CARD_SIZE_DEFAULT;
+  }
+}
+
+function writeStoredCardSize(value: number): void {
+  try {
+    localStorage.setItem(CARD_SIZE_STORAGE_KEY, String(value));
+  } catch {
+    // private mode / quota — preference stays in-memory only
+  }
+}
 
 export function LibraryPage() {
   const { mediaType } = useParams<{ mediaType?: string }>();
@@ -40,6 +71,13 @@ export function LibraryPage() {
   const [genres, setGenres] = useState<LibraryGenre[]>([]);
   const [firstChar, setFirstChar] = useState<string | null>(null);
   const [firstChars, setFirstChars] = useState<LibraryFirstCharacter[]>([]);
+  const [cardSize, setCardSize] = useState(readStoredCardSize);
+
+  const onCardSizeChange = useCallback((next: number) => {
+    const clamped = clampCardSize(next);
+    setCardSize(clamped);
+    writeStoredCardSize(clamped);
+  }, []);
 
   const activeType = mediaType === "tv" ? "show" : "movie";
   const activeSection = sections.find((s) => s.type === activeType) ?? null;
@@ -245,6 +283,24 @@ export function LibraryPage() {
             TV Shows
           </button>
         </div>
+
+        <label className="library-size">
+          <span className="library-size-hint library-size-hint--sm" aria-hidden="true">
+            ▢
+          </span>
+          <input
+            type="range"
+            min={CARD_SIZE_MIN}
+            max={CARD_SIZE_MAX}
+            step={0.5}
+            value={cardSize}
+            aria-label="Poster size"
+            onChange={(event) => onCardSizeChange(Number(event.target.value))}
+          />
+          <span className="library-size-hint library-size-hint--lg" aria-hidden="true">
+            ▢
+          </span>
+        </label>
       </div>
 
       <div className="library-controls" aria-label="Library filters">
@@ -309,7 +365,14 @@ export function LibraryPage() {
       {itemsStatus === "ready" && items.length > 0 ? (
         <>
           <div className="library-body">
-            <ul className="media-grid">
+            <ul
+              className="media-grid"
+              style={
+                {
+                  "--library-card-min": `${cardSize}rem`,
+                } as CSSProperties
+              }
+            >
               {items.map((item) => (
                 <li key={item.ratingKey}>
                   <LibraryCard item={item} />

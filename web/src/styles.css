@@ -1626,8 +1626,45 @@ a:hover {
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--library-card-min, 8.5rem), 1fr));
   gap: 1rem;
+}
+
+.library-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.library-size {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  user-select: none;
+}
+
+.library-size-hint {
+  line-height: 1;
+  opacity: 0.85;
+}
+
+.library-size-hint--sm {
+  font-size: 0.65rem;
+}
+
+.library-size-hint--lg {
+  font-size: 0.9rem;
+}
+
+.library-size input[type="range"] {
+  width: 7.5rem;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .library-controls {
