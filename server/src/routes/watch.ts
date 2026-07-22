@@ -222,6 +222,50 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     }
   });
 
+  // Reports one playback timeline event to Plex for the logged-in user so
+  // resume position / watched state update on their account.
+  router.post("/timeline", async (req, res) => {
+    const parsed = parseTimelineBody(req.body);
+    if (!parsed.ok) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+
+    const session = res.locals.session as SessionPayload | undefined;
+    if (!session) {
+      res.status(401).json({ error: "not authenticated" });
+      return;
+    }
+
+    let userToken: string | null;
+    try {
+      // readPlexToken throws on a tampered/corrupt blob; surface that as 502.
+      userToken = readPlexToken(session, sessionSecret);
+    } catch (err) {
+      respondUpstreamError(res, err);
+      return;
+    }
+    if (userToken === null) {
+      res.status(409).json({ error: "re-login required" });
+      return;
+    }
+
+    try {
+      const pmsToken = await resolvePmsToken(session.plexId, userToken);
+      await plexServer.reportTimeline({
+        ratingKey: parsed.value.ratingKey,
+        state: parsed.value.state,
+        timeMs: parsed.value.time,
+        durationMs: parsed.value.duration,
+        userToken: pmsToken,
+        clientId: plexClientId,
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
   // Selects (or clears) the burned-in subtitle for the current user on a media
   // item. The browser already has the ratingKey from a play descriptor; the
   // part id is resolved server-side so the client never has to guess it.
@@ -377,6 +421,64 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
   });
 
   return router;
+}
+
+type TimelineBody = {
+  ratingKey: string;
+  state: "playing" | "paused" | "stopped";
+  time: number;
+  duration: number;
+};
+
+function parseTimelineBody(
+  body: unknown,
+): { ok: true; value: TimelineBody } | { ok: false; error: string } {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "ratingKey must be numeric" };
+  }
+  const raw = body as {
+    ratingKey?: unknown;
+    state?: unknown;
+    time?: unknown;
+    duration?: unknown;
+  };
+
+  if (typeof raw.ratingKey !== "string" || !/^\d+$/.test(raw.ratingKey)) {
+    return { ok: false, error: "ratingKey must be numeric" };
+  }
+
+  if (
+    raw.state !== "playing" &&
+    raw.state !== "paused" &&
+    raw.state !== "stopped"
+  ) {
+    return {
+      ok: false,
+      error: 'state must be "playing", "paused", or "stopped"',
+    };
+  }
+
+  if (typeof raw.time !== "number" || !Number.isFinite(raw.time) || raw.time < 0) {
+    return { ok: false, error: "time must be a finite number >= 0" };
+  }
+
+  if (
+    typeof raw.duration !== "number" ||
+    !Number.isFinite(raw.duration) ||
+    raw.duration <= 0
+  ) {
+    return { ok: false, error: "duration must be a finite number > 0" };
+  }
+
+  return {
+    ok: true,
+    value: {
+      ratingKey: raw.ratingKey,
+      state: raw.state,
+      time: raw.time,
+      duration: raw.duration,
+    },
+  };
 }
 
 // "0" is valid (clear selection). Non-string / non-numeric → null.

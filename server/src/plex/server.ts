@@ -703,6 +703,48 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     }
   }
 
+  // Reports one playback timeline event for the calling user so Plex can
+  // update resume position / watched state. Param set is UNVERIFIED against
+  // a live PMS — keep the query construction easy to adjust. Uses the USER's
+  // token (not the owner token), like selectSubtitle.
+  async function reportTimeline(args: {
+    ratingKey: string;
+    state: "playing" | "paused" | "stopped";
+    timeMs: number;
+    durationMs: number;
+    userToken: string;
+    clientId: string;
+  }): Promise<void> {
+    const path = "/:/timeline";
+    const url = new URL(`${baseUrl}${path}`);
+    url.searchParams.set("ratingKey", args.ratingKey);
+    url.searchParams.set("key", `/library/metadata/${args.ratingKey}`);
+    url.searchParams.set("state", args.state);
+    url.searchParams.set("time", String(args.timeMs));
+    url.searchParams.set("duration", String(args.durationMs));
+    url.searchParams.set("X-Plex-Token", args.userToken);
+    url.searchParams.set("X-Plex-Client-Identifier", args.clientId);
+
+    let res: Response;
+    try {
+      res = await fetch(url, { method: "GET" });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Plex server request failed";
+      throw new PlexServerUpstreamError(message, 502);
+    }
+
+    // Logged so smoke tests can confirm the live PMS accepted the param set.
+    console.log(`Plex ${path} → ${res.status}`);
+
+    if (!res.ok) {
+      throw new PlexServerUpstreamError(
+        `Plex server ${path} failed (${res.status})`,
+        res.status,
+      );
+    }
+  }
+
   return {
     accounts,
     history,
@@ -716,6 +758,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     sectionFirstCharacters,
     fetchImage,
     selectSubtitle,
+    reportTimeline,
   };
 }
 

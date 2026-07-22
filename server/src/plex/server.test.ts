@@ -632,6 +632,92 @@ describe("plexServer.selectSubtitle", () => {
   });
 });
 
+describe("plexServer.reportTimeline", () => {
+  it("GETs /:/timeline with the user token and playback fields as query params", async () => {
+    let requestedUrl: string | null = null;
+    let requestedMethod: string | null = null;
+    globalThis.fetch = (async (
+      input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
+      requestedUrl =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      requestedMethod = init?.method ?? "GET";
+      return jsonResponse(200, {});
+    }) as typeof fetch;
+
+    await client().reportTimeline({
+      ratingKey: "12345",
+      state: "playing",
+      timeMs: 60000,
+      durationMs: 7200000,
+      userToken: "user-token-abc",
+      clientId: "client-id-1",
+    });
+
+    assert.equal(requestedMethod, "GET");
+    assert.notEqual(requestedUrl, null);
+    const url = new URL(requestedUrl!);
+    assert.equal(url.origin + url.pathname, `${BASE_URL}/:/timeline`);
+    assert.equal(url.searchParams.get("ratingKey"), "12345");
+    assert.equal(url.searchParams.get("key"), "/library/metadata/12345");
+    assert.equal(url.searchParams.get("state"), "playing");
+    assert.equal(url.searchParams.get("time"), "60000");
+    assert.equal(url.searchParams.get("duration"), "7200000");
+    assert.equal(url.searchParams.get("X-Plex-Token"), "user-token-abc");
+    assert.equal(url.searchParams.get("X-Plex-Client-Identifier"), "client-id-1");
+  });
+
+  it("throws PlexServerUpstreamError on a non-OK response", async () => {
+    globalThis.fetch = (async () =>
+      jsonResponse(500, { error: "boom" })) as typeof fetch;
+
+    await assert.rejects(
+      client().reportTimeline({
+        ratingKey: "12345",
+        state: "stopped",
+        timeMs: 0,
+        durationMs: 1000,
+        userToken: "user-token-abc",
+        clientId: "client-id-1",
+      }),
+      (err: unknown) => {
+        assert.ok(err instanceof PlexServerUpstreamError);
+        assert.equal(err.status, 500);
+        assert.match(err.message, /\/:\/timeline/);
+        return true;
+      },
+    );
+  });
+
+  it("throws PlexServerUpstreamError on network failure", async () => {
+    globalThis.fetch = (async () => {
+      throw new Error("network down");
+    }) as typeof fetch;
+
+    await assert.rejects(
+      client().reportTimeline({
+        ratingKey: "12345",
+        state: "paused",
+        timeMs: 100,
+        durationMs: 1000,
+        userToken: "user-token-abc",
+        clientId: "client-id-1",
+      }),
+      (err: unknown) => {
+        assert.ok(err instanceof PlexServerUpstreamError);
+        assert.equal(err.status, 502);
+        assert.match(err.message, /network down/);
+        return true;
+      },
+    );
+  });
+});
+
 describe("plexServer.sections", () => {
   it("returns movie and show sections, skipping other types and malformed rows", async () => {
     globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {

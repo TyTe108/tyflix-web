@@ -3,7 +3,11 @@ import { describe, it } from "node:test";
 import express from "express";
 import { requireAuth } from "../middleware/auth";
 import type { PlexConnectionResolver } from "../plex/connection";
-import type { PlexEpisode, PlexServerClient } from "../plex/server";
+import {
+  PlexServerUpstreamError,
+  type PlexEpisode,
+  type PlexServerClient,
+} from "../plex/server";
 import type { SharedServerAccessResolver } from "../plex/sharedServerAccess";
 import type { TransientTokenMinter } from "../plex/transientToken";
 import type { MediaStatusProvider } from "../seerr/mediaStatusProvider";
@@ -1028,6 +1032,184 @@ describe("PUT /api/watch/subtitle/:ratingKey", () => {
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { ok: true });
     assert.deepEqual(selectArgs, ["55501", "0", USER_TOKEN]);
+  });
+});
+
+describe("POST /api/watch/timeline", () => {
+  const validBody = {
+    ratingKey: "12345",
+    state: "playing" as const,
+    time: 60000,
+    duration: 7200000,
+  };
+
+  it("rejects an invalid body with 400 before calling plex", async () => {
+    let reportCalled = false;
+    const deps = baseDeps();
+    deps.plexServer = {
+      async reportTimeline() {
+        reportCalled = true;
+      },
+    } as unknown as PlexServerClient;
+    const app = createApp(deps);
+    const cookie = sessionCookie({ plexToken: USER_TOKEN });
+
+    const badRatingKey = await fetchLocal(app, "/api/watch/timeline", cookie, {
+      method: "POST",
+      body: { ...validBody, ratingKey: "abc" },
+    });
+    assert.equal(badRatingKey.status, 400);
+    assert.deepEqual(await badRatingKey.json(), {
+      error: "ratingKey must be numeric",
+    });
+
+    const badState = await fetchLocal(app, "/api/watch/timeline", cookie, {
+      method: "POST",
+      body: { ...validBody, state: "buffering" },
+    });
+    assert.equal(badState.status, 400);
+    assert.deepEqual(await badState.json(), {
+      error: 'state must be "playing", "paused", or "stopped"',
+    });
+
+    const badTime = await fetchLocal(app, "/api/watch/timeline", cookie, {
+      method: "POST",
+      body: { ...validBody, time: -1 },
+    });
+    assert.equal(badTime.status, 400);
+    assert.deepEqual(await badTime.json(), {
+      error: "time must be a finite number >= 0",
+    });
+
+    const badDuration = await fetchLocal(app, "/api/watch/timeline", cookie, {
+      method: "POST",
+      body: { ...validBody, duration: 0 },
+    });
+    assert.equal(badDuration.status, 400);
+    assert.deepEqual(await badDuration.json(), {
+      error: "duration must be a finite number > 0",
+    });
+
+    assert.equal(reportCalled, false);
+  });
+
+  it("returns 401 when no session cookie is present", async () => {
+    const app = createApp(baseDeps());
+    const response = await fetchLocal(app, "/api/watch/timeline", "", {
+      method: "POST",
+      body: validBody,
+    });
+
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), { error: "not authenticated" });
+  });
+
+  it("returns 409 when the session carries no Plex token", async () => {
+    const app = createApp(baseDeps());
+    const response = await fetchLocal(
+      app,
+      "/api/watch/timeline",
+      sessionCookie(),
+      { method: "POST", body: validBody },
+    );
+
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), { error: "re-login required" });
+  });
+
+  it("returns 502 when reportTimeline fails upstream", async () => {
+    const deps = baseDeps();
+    deps.plexServer = {
+      async reportTimeline() {
+        throw new PlexServerUpstreamError("Plex server /:/timeline failed (500)", 500);
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/timeline",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      { method: "POST", body: validBody },
+    );
+
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), {
+      error: "Plex server /:/timeline failed (500)",
+    });
+  });
+
+  it("reports timeline with the durable token on the happy path", async () => {
+    let reportArgs: {
+      ratingKey: string;
+      state: string;
+      timeMs: number;
+      durationMs: number;
+      userToken: string;
+      clientId: string;
+    } | null = null;
+    const deps = baseDeps();
+    deps.plexServer = {
+      async reportTimeline(args: {
+        ratingKey: string;
+        state: string;
+        timeMs: number;
+        durationMs: number;
+        userToken: string;
+        clientId: string;
+      }) {
+        reportArgs = args;
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/timeline",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      { method: "POST", body: validBody },
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.deepEqual(reportArgs, {
+      ratingKey: "12345",
+      state: "playing",
+      timeMs: 60000,
+      durationMs: 7200000,
+      userToken: USER_TOKEN,
+      clientId: CLIENT_ID,
+    });
+  });
+
+  it("reports timeline with the shared per-server token when resolveAccessToken finds one", async () => {
+    let reportToken: string | null = null;
+    const deps = baseDeps();
+    deps.sharedServerAccess = {
+      async resolveAccessToken() {
+        return SHARED_TOKEN;
+      },
+    } as SharedServerAccessResolver;
+    deps.plexServer = {
+      async reportTimeline(args: { userToken: string }) {
+        reportToken = args.userToken;
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/timeline",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      {
+        method: "POST",
+        body: { ...validBody, state: "paused", time: 0 },
+      },
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.equal(reportToken, SHARED_TOKEN);
   });
 });
 
