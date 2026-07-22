@@ -892,9 +892,6 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
       throw new PlexServerUpstreamError(message, 502);
     }
 
-    // Logged so smoke tests can confirm the live PMS accepted the param set.
-    console.log(`Plex ${path} → ${res.status}`);
-
     if (!res.ok) {
       throw new PlexServerUpstreamError(
         `Plex server ${path} failed (${res.status})`,
