@@ -25,6 +25,7 @@ Admin: manage requests that flow through to Radarr and Sonarr, with status and f
 ## What it does
 
 - Browse and search movies and TV from TMDB: trending, browse by genre, recommendations, cast and crew, collections, and studio and network pages.
+- Browse your actual library: a Plex-style view of what is really on the server (Movies and TV), with sort, genre and unwatched filters, an A–Z jump rail, an adjustable poster size, and grid or detail layouts.
 - Request a title in one click. Requests flow through Seerr into Radarr and Sonarr, which do the actual downloading and library management.
 - Play a title in the browser. Movies and individual TV episodes stream from Plex through an in-page player, transcoded on the fly so anything in the library plays regardless of its source format.
 - Show real availability on every title (in the library, partially available, or still processing), read live from Plex through Seerr.
@@ -79,7 +80,7 @@ Tyflix is deployed and in daily use on my home server, and it is still an active
 
 In-browser playback now works for both movies and TV — pick a title or a specific episode, hit play, and it streams from Plex right in the page. That closes a nice loop: watching through Tyflix feeds the same watched-versus-requested numbers the analytics already report.
 
-Further out: hardware-accelerated transcoding for faster startup, a client-side quality cap for constrained connections, a continue-watching rail, and subtitle and audio-track selection. The guiding idea is to keep integrating tools that already exist rather than rebuilding them, so Tyflix stays a thin, sharp layer over Plex and Seerr instead of a second copy of either.
+Since then it has grown a Plex-style **Library** (browse everything actually on the server, with sort, genre and unwatched filters, an A–Z jump rail, an adjustable poster size, and grid or detail layouts), in-player **audio-track and subtitle selection**, and **hardware-accelerated transcoding** on the server's Arc GPU. Further out: a client-side quality cap for constrained connections, a continue-watching rail, and per-user (rather than owner-based) watch state. The guiding idea is to keep integrating tools that already exist rather than rebuilding them, so Tyflix stays a thin, sharp layer over Plex and Seerr instead of a second copy of either.
 
 ## Notes
 
