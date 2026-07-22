@@ -1213,6 +1213,122 @@ describe("POST /api/watch/timeline", () => {
   });
 });
 
+describe("GET /api/watch/continue", () => {
+  it("returns { items: [] } when the session carries no Plex token", async () => {
+    let onDeckCalled = false;
+    const deps = baseDeps();
+    deps.plexServer = {
+      async onDeck() {
+        onDeckCalled = true;
+        return [];
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/continue",
+      sessionCookie(),
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { items: [] });
+    assert.equal(onDeckCalled, false);
+  });
+
+  it("returns on-deck items with the durable token on the happy path", async () => {
+    let onDeckToken: string | null = null;
+    const deps = baseDeps();
+    deps.plexServer = {
+      async onDeck(userToken: string) {
+        onDeckToken = userToken;
+        return [
+          {
+            ratingKey: "1001",
+            type: "movie",
+            title: "Inception",
+            subtitle: "2010",
+            thumb: "/library/metadata/1001/thumb/1",
+            viewOffset: 1_800_000,
+            duration: 8_880_000,
+          },
+        ];
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/continue",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      items: [
+        {
+          ratingKey: "1001",
+          type: "movie",
+          title: "Inception",
+          subtitle: "2010",
+          thumb: "/library/metadata/1001/thumb/1",
+          viewOffset: 1_800_000,
+          duration: 8_880_000,
+        },
+      ],
+    });
+    assert.equal(onDeckToken, USER_TOKEN);
+  });
+
+  it("uses the shared per-server token when resolveAccessToken finds one", async () => {
+    let onDeckToken: string | null = null;
+    const deps = baseDeps();
+    deps.sharedServerAccess = {
+      async resolveAccessToken() {
+        return SHARED_TOKEN;
+      },
+    } as SharedServerAccessResolver;
+    deps.plexServer = {
+      async onDeck(userToken: string) {
+        onDeckToken = userToken;
+        return [];
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/continue",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { items: [] });
+    assert.equal(onDeckToken, SHARED_TOKEN);
+  });
+
+  it("returns 502 when onDeck fails upstream", async () => {
+    const deps = baseDeps();
+    deps.plexServer = {
+      async onDeck() {
+        throw new PlexServerUpstreamError("Plex server /library/onDeck failed (500)", 500);
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/continue",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), {
+      error: "Plex server /library/onDeck failed (500)",
+    });
+  });
+});
+
 async function fetchLocal(
   app: express.Express,
   path: string,

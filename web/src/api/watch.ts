@@ -187,6 +187,35 @@ export async function fetchNextEpisode(
   }
 }
 
+export type ContinueItem = {
+  ratingKey: string;
+  type: "movie" | "episode";
+  title: string;
+  subtitle: string | null;
+  thumb: string | null;
+  viewOffset: number | null;
+  duration: number | null;
+};
+
+// Soft-fail: a failed continue list must never break the library landing.
+export async function fetchContinueWatching(): Promise<ContinueItem[]> {
+  try {
+    const res = await fetch("/api/watch/continue");
+    if (!res.ok) {
+      console.error(`Continue watching fetch failed (${res.status})`);
+      return [];
+    }
+    const body = (await res.json()) as { items?: unknown };
+    if (!Array.isArray(body.items)) {
+      return [];
+    }
+    return body.items as ContinueItem[];
+  } catch (err) {
+    console.error("Continue watching fetch failed", err);
+    return [];
+  }
+}
+
 function parseNextEpisode(value: unknown): NextEpisode | null {
   if (typeof value !== "object" || value === null) {
     return null;

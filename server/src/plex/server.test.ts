@@ -1021,6 +1021,91 @@ describe("plexServer.sectionItems", () => {
   });
 });
 
+describe("plexServer.onDeck", () => {
+  it("fetches /library/onDeck with the user token and maps movies and episodes", async () => {
+    let requestedToken: string | null = null;
+    let requestedPath: string | null = null;
+    globalThis.fetch = (async (
+      input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      requestedPath = new URL(url).pathname;
+      const headers = new Headers(init?.headers);
+      requestedToken = headers.get("X-Plex-Token");
+      return jsonResponse(200, {
+        MediaContainer: {
+          Metadata: [
+            {
+              ratingKey: 1001,
+              type: "movie",
+              title: "Inception",
+              year: 2010,
+              thumb: "/library/metadata/1001/thumb/1",
+              viewOffset: 1_800_000,
+              duration: 8_880_000,
+            },
+            {
+              ratingKey: 2002,
+              type: "episode",
+              title: "The One Where",
+              grandparentTitle: "Friends",
+              parentIndex: 1,
+              index: 1,
+              thumb: "/library/metadata/2002/thumb/2",
+              grandparentThumb: "/library/metadata/9000/thumb/9",
+              viewOffset: 600_000,
+              duration: 1_320_000,
+            },
+            { type: "season", ratingKey: 3003, title: "Season 1" },
+            { type: "movie", title: "No key" },
+          ],
+        },
+      });
+    }) as typeof fetch;
+
+    const items = await client().onDeck("user-token-abc");
+
+    assert.equal(requestedPath, "/library/onDeck");
+    assert.equal(requestedToken, "user-token-abc");
+    assert.deepEqual(items, [
+      {
+        ratingKey: "1001",
+        type: "movie",
+        title: "Inception",
+        subtitle: "2010",
+        thumb: "/library/metadata/1001/thumb/1",
+        viewOffset: 1_800_000,
+        duration: 8_880_000,
+      },
+      {
+        ratingKey: "2002",
+        type: "episode",
+        title: "Friends",
+        subtitle: "S1E1",
+        thumb: "/library/metadata/9000/thumb/9",
+        viewOffset: 600_000,
+        duration: 1_320_000,
+      },
+    ]);
+  });
+
+  it("throws PlexServerUpstreamError on a non-OK response", async () => {
+    globalThis.fetch = (async () =>
+      jsonResponse(500, { error: "boom" })) as typeof fetch;
+
+    await assert.rejects(
+      client().onDeck("user-token-abc"),
+      (err: unknown) => err instanceof PlexServerUpstreamError,
+    );
+  });
+});
+
 describe("plexServer.sectionGenres", () => {
   it("parses Directory[] into { id, title }, skipping malformed rows", async () => {
     let requestedUrl: string | null = null;

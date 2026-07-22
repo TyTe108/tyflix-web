@@ -93,6 +93,16 @@ export type LibraryItem = {
 
 export type LibrarySortKey = "title" | "added" | "year" | "rating";
 
+export type OnDeckItem = {
+  ratingKey: string;
+  type: "movie" | "episode";
+  title: string;
+  subtitle: string | null;
+  thumb: string | null;
+  viewOffset: number | null;
+  duration: number | null;
+};
+
 const LIBRARY_SORT_TO_PLEX: Record<LibrarySortKey, string> = {
   title: "titleSort:asc",
   added: "addedAt:desc",
@@ -637,6 +647,84 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     return { items, totalSize };
   }
 
+  // Per-account "continue watching" list from Plex On Deck. Must use the
+  // acting user's token — the owner token would return the owner's deck.
+  async function onDeck(userToken: string): Promise<OnDeckItem[]> {
+    const body = await getJsonWithToken("/library/onDeck", userToken);
+    const rows = asArray(mediaContainer(body)?.Metadata);
+    const items: OnDeckItem[] = [];
+
+    for (const row of rows) {
+      if (typeof row !== "object" || row === null) {
+        continue;
+      }
+      const ratingKey = (row as { ratingKey?: unknown }).ratingKey;
+      const typeRaw = (row as { type?: unknown }).type;
+      if (ratingKey === undefined || ratingKey === null) {
+        continue;
+      }
+      if (typeRaw !== "movie" && typeRaw !== "episode") {
+        continue;
+      }
+
+      const titleRaw = (row as { title?: unknown }).title;
+      const yearRaw = (row as { year?: unknown }).year;
+      const thumbRaw = (row as { thumb?: unknown }).thumb;
+      const grandparentTitleRaw = (row as { grandparentTitle?: unknown })
+        .grandparentTitle;
+      const grandparentThumbRaw = (row as { grandparentThumb?: unknown })
+        .grandparentThumb;
+      const parentIndexRaw = (row as { parentIndex?: unknown }).parentIndex;
+      const indexRaw = (row as { index?: unknown }).index;
+      const viewOffsetRaw = (row as { viewOffset?: unknown }).viewOffset;
+      const durationRaw = (row as { duration?: unknown }).duration;
+
+      let title: string;
+      let subtitle: string | null;
+      let thumb: string | null;
+
+      if (typeRaw === "movie") {
+        title = typeof titleRaw === "string" ? titleRaw : "";
+        subtitle = typeof yearRaw === "number" ? String(yearRaw) : null;
+        thumb = typeof thumbRaw === "string" ? thumbRaw : null;
+      } else {
+        title =
+          typeof grandparentTitleRaw === "string" &&
+          grandparentTitleRaw.length > 0
+            ? grandparentTitleRaw
+            : typeof titleRaw === "string"
+              ? titleRaw
+              : "";
+        const parentIndex =
+          typeof parentIndexRaw === "number" ? parentIndexRaw : null;
+        const index = typeof indexRaw === "number" ? indexRaw : null;
+        subtitle =
+          parentIndex !== null && index !== null
+            ? `S${parentIndex}E${index}`
+            : null;
+        thumb =
+          typeof grandparentThumbRaw === "string"
+            ? grandparentThumbRaw
+            : typeof thumbRaw === "string"
+              ? thumbRaw
+              : null;
+      }
+
+      items.push({
+        ratingKey: String(ratingKey),
+        type: typeRaw,
+        title,
+        subtitle,
+        thumb,
+        viewOffset:
+          typeof viewOffsetRaw === "number" ? viewOffsetRaw : null,
+        duration: typeof durationRaw === "number" ? durationRaw : null,
+      });
+    }
+
+    return items;
+  }
+
   async function sectionGenres(
     sectionKey: string,
   ): Promise<{ id: string; title: string }[]> {
@@ -814,6 +902,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     playbackMeta,
     sections,
     sectionItems,
+    onDeck,
     sectionGenres,
     sectionFirstCharacters,
     fetchImage,

@@ -128,6 +128,34 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     };
   }
 
+  router.get("/continue", async (req, res) => {
+    const session = res.locals.session as SessionPayload | undefined;
+    if (!session) {
+      res.status(401).json({ error: "not authenticated" });
+      return;
+    }
+
+    let userToken: string | null;
+    try {
+      userToken = readPlexToken(session, sessionSecret);
+    } catch (err) {
+      respondUpstreamError(res, err);
+      return;
+    }
+    if (userToken === null) {
+      res.json({ items: [] });
+      return;
+    }
+
+    try {
+      const pmsToken = await resolvePmsToken(session.plexId, userToken);
+      const items = await plexServer.onDeck(pmsToken);
+      res.json({ items });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
   router.get("/movie/:tmdbId", async (req, res) => {
     const tmdbIdRaw = req.params.tmdbId;
     if (!/^\d+$/.test(tmdbIdRaw)) {

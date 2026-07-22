@@ -12,6 +12,7 @@ import {
   type LibrarySortKey,
 } from "../api/library";
 import { LibraryCard } from "../components/LibraryCard";
+import { ContinueWatchingRail } from "../components/ContinueWatchingRail";
 import { LibraryDetailRow } from "../components/LibraryDetailRow";
 import { Dropdown } from "../components/Dropdown";
 import { PaginationControls } from "../components/PaginationControls";
@@ -288,6 +289,8 @@ export function LibraryPage() {
   return (
     <main className="page page-wide">
       <h1>Library</h1>
+
+      <ContinueWatchingRail />
 
       <div className="library-toolbar">
         <div className="discover-media-toggle" aria-label="Library type">
