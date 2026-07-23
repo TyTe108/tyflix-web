@@ -10,24 +10,49 @@ _Active project. Deployed and in daily use, and still being built out. The roadm
 
 ## Screenshots
 
-Discover: browse global trending from TMDB, with live availability read from Plex.
+**Discover** — browse global trending from TMDB, with live availability read from Plex: green means it is already on the server, amber means partially available.
 
 ![Discover page](docs/screenshots/discover.jpg)
 
-Title page: artwork and details for a single movie or show.
+**Library** — a Plex-style view of what is actually on the server, opening with a Continue Watching rail. Sort, filter by genre or unwatched, jump with the A–Z rail, and resize the posters; the progress bars and watched badges are read live from Plex.
 
-![Title page](docs/screenshots/title-page.jpg)
+![Library](docs/screenshots/library.jpg)
 
-Admin: manage requests that flow through to Radarr and Sonarr, with status and filters. Usernames here are demo labels.
+**Title page** — artwork, overview, cast and crew, live availability, and a one-click Play or Request.
 
-![Admin requests](docs/screenshots/admin.jpg)
+![Title page](docs/screenshots/title.jpg)
+
+**In-browser player** — movies and episodes stream from Plex through an in-page player, transcoded on the fly. The custom control bar carries playback speed, a resolution selector, audio-track selection (including commentary tracks), and subtitles.
+
+![Player](docs/screenshots/player.jpg)
+
+**Resume where you left off** — playback position syncs back to Plex, so any partly-watched title offers to resume from the exact second you stopped — whether you last watched in Tyflix or any other Plex client.
+
+![Resume](docs/screenshots/resume.jpg)
+
+**Up Next** — episodes auto-advance with a Plex-style "Up Next" card, triggered off the credits marker.
+
+![Up Next](docs/screenshots/upnext.jpg)
+
+**Home** — each user's own watched-versus-requested breakdown: how much they have requested, how much of it they have actually watched, and how much is sitting unwatched.
+
+![Home analytics](docs/screenshots/home.jpg)
+
+**Admin — system and storage** — host CPU, memory, load, temperatures, GPU transcode engines, and per-volume storage, proxied live from the server.
+
+![Admin system](docs/screenshots/admin-system.jpg)
+
+**Admin — per-user analytics** — watched-versus-requested across every user, with a "posture" flag for accounts that request far more than they watch. (Other users' names are blurred here for privacy.)
+
+![Admin users](docs/screenshots/admin-users.jpg)
 
 ## What it does
 
 - Browse and search movies and TV from TMDB: trending, browse by genre, recommendations, cast and crew, collections, and studio and network pages.
-- Browse your actual library: a Plex-style view of what is really on the server (Movies and TV), with sort, genre and unwatched filters, an A–Z jump rail, an adjustable poster size, and grid or detail layouts.
+- Browse your actual library: a Plex-style view of what is really on the server (Movies and TV), opening with a Continue Watching rail, with sort, genre and unwatched filters, an A–Z jump rail, an adjustable poster size, grid or detail layouts, and per-poster progress bars and watched badges.
 - Request a title in one click. Requests flow through Seerr into Radarr and Sonarr, which do the actual downloading and library management.
-- Play a title in the browser. Movies and individual TV episodes stream from Plex through an in-page player, transcoded on the fly so anything in the library plays regardless of its source format.
+- Play a title in the browser. Movies and individual TV episodes stream from Plex through an in-page player, transcoded on the fly so anything in the library plays regardless of its source format, with in-player controls for playback speed, resolution, audio track and subtitles, plus auto-advance to the next episode and a Plex-style "Up Next" card.
+- Pick up where you left off. Playback progress syncs back to Plex, so a Continue Watching rail, per-poster progress bars, watched badges, and a resume-from-position prompt all track the exact second you stopped — and stay in sync with every other Plex client.
 - Show real availability on every title (in the library, partially available, or still processing), read live from Plex through Seerr.
 - Report a problem with a title, such as bad audio or the wrong cut, and follow it through to resolution.
 - Plex Watchlist support, per-user request quotas, and quality-profile selection at request time.
@@ -63,6 +88,7 @@ This is the same shape as an enterprise pattern like SAP Cloud Connector reachin
 **Rate limiting that sees the real client.** Because the app sits behind the tunnel, every request arrives from the tunnel's address rather than the user's. A naive per-IP limiter would treat all traffic as one client. The limiter keys on the `CF-Connecting-IP` header that Cloudflare sets and overwrites, so a client cannot forge it, and falls back to the socket address for local development. The limit itself was tuned after a real finding: the admin dashboard polls a few endpoints every few seconds, and an early, tighter limit throttled the admin's own page inside a single window.
 
 **Security that does not rely on hiding the code.** All authorization happens on the server. Every route checks the session, and admin routes check an admin permission bit that mirrors Seerr's model. The long-lived Plex token never leaves the backend. Security headers ship a Content-Security-Policy scoped to exactly what the app loads: posters from TMDB, fonts from Google, everything else same-origin. The one subtlety is the Plex login popup, which needs a Cross-Origin-Opener-Policy that lets the opener keep a handle on the popup so the sign-in flow can close it when the login completes.
+
 **Joining two id systems.** Discovery is keyed by TMDB id, while Plex is keyed by its own rating keys. Availability and playability come from matching the two through Seerr's media records, so the app can show accurate status without guessing by title.
 
 ## Tech stack
@@ -80,7 +106,7 @@ Tyflix is deployed and in daily use on my home server, and it is still an active
 
 In-browser playback now works for both movies and TV — pick a title or a specific episode, hit play, and it streams from Plex right in the page. That closes a nice loop: watching through Tyflix feeds the same watched-versus-requested numbers the analytics already report.
 
-Since then it has grown a Plex-style **Library** (browse everything actually on the server, with sort, genre and unwatched filters, an A–Z jump rail, an adjustable poster size, and grid or detail layouts), in-player **audio-track and subtitle selection**, and **hardware-accelerated transcoding** on the server's Arc GPU. Further out: a client-side quality cap for constrained connections, a continue-watching rail, and per-user (rather than owner-based) watch state. The guiding idea is to keep integrating tools that already exist rather than rebuilding them, so Tyflix stays a thin, sharp layer over Plex and Seerr instead of a second copy of either.
+Since then it has grown a Plex-style **Library** (browse everything actually on the server, with sort, genre and unwatched filters, an A–Z jump rail, an adjustable poster size, and grid or detail layouts), full in-player controls (**playback speed, resolution, audio-track and subtitle selection**), **auto-advance with an "Up Next" card**, and **hardware-accelerated transcoding** on the server's Arc GPU. Most recently, **playback progress now syncs back to Plex**: a Continue Watching rail, per-poster progress bars, watched badges, and resume-from-position are all live, and watch state is now per-user rather than owner-based. Further out: an automatic bitrate cap for constrained connections, and **casting to LAN devices** (Chromecast and AirPlay). The guiding idea is to keep integrating tools that already exist rather than rebuilding them, so Tyflix stays a thin, sharp layer over Plex and Seerr instead of a second copy of either.
 
 ## Notes
 
