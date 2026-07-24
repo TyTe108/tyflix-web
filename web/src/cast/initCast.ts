@@ -12,6 +12,25 @@ const CAST_SENDER_SRC =
 
 let started = false;
 let configured = false;
+const readyListeners = new Set<() => void>();
+
+/**
+ * Fires once the CAF framework is configured (or immediately if it already
+ * is). Used by useCastState so the cast button can appear after async SDK load.
+ */
+export function subscribeCastReady(listener: () => void): () => void {
+  readyListeners.add(listener);
+  if (configured && window.cast?.framework) {
+    queueMicrotask(() => {
+      if (readyListeners.has(listener)) {
+        listener();
+      }
+    });
+  }
+  return () => {
+    readyListeners.delete(listener);
+  };
+}
 
 export function initCast(): void {
   if (started) {
@@ -91,6 +110,10 @@ function configureCastContext(): void {
     receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
     autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED,
   });
+
+  for (const listener of [...readyListeners]) {
+    listener();
+  }
 }
 
 /** Chromium family exposes `window.chrome`; Firefox/Safari do not. */

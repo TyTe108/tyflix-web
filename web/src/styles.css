@@ -748,6 +748,14 @@ a:hover {
   outline-offset: 2px;
 }
 
+.watch-control-btn--cast-active {
+  color: var(--accent);
+}
+
+.watch-control-btn--cast-active:hover {
+  color: var(--accent-hover);
+}
+
 .watch-control-btn svg {
   width: 1.25rem;
   height: 1.25rem;

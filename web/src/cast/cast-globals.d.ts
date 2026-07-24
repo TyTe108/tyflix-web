@@ -1,6 +1,7 @@
 /**
  * Minimal ambient types for the CAF web sender SDK loaded from gstatic.
- * Only the surface used by initCast — expand as later cast increments need it.
+ * Only the surface used by initCast / useCastState — expand as later
+ * cast increments need it.
  */
 
 declare namespace chrome.cast {
@@ -17,15 +18,42 @@ declare namespace chrome.cast {
 }
 
 declare namespace cast.framework {
+  enum CastContextEventType {
+    CAST_STATE_CHANGED = "caststatechanged",
+  }
+
+  enum CastState {
+    NO_DEVICES_AVAILABLE = "NO_DEVICES_AVAILABLE",
+    NOT_CONNECTED = "NOT_CONNECTED",
+    CONNECTING = "CONNECTING",
+    CONNECTED = "CONNECTED",
+  }
+
   interface CastOptions {
     receiverApplicationId: string;
     autoJoinPolicy?: chrome.cast.AutoJoinPolicy;
   }
 
+  interface CastStateEventData {
+    castState: CastState;
+  }
+
+  type CastContextEventHandler = (event: CastStateEventData) => void;
+
   class CastContext {
     static getInstance(): CastContext;
     setOptions(options: CastOptions): void;
-    getCastState(): string;
+    getCastState(): CastState;
+    addEventListener(
+      type: CastContextEventType,
+      handler: CastContextEventHandler,
+    ): void;
+    removeEventListener(
+      type: CastContextEventType,
+      handler: CastContextEventHandler,
+    ): void;
+    requestSession(): Promise<string | null>;
+    endCurrentSession(stopCasting: boolean): void;
   }
 }
 
