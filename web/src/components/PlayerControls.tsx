@@ -130,7 +130,6 @@ export function PlayerControls({
   const settingsOpenRef = useRef(false);
   const playbackRateRef = useRef(1);
   const remoteActiveRef = useRef(false);
-  const targetPlayingRef = useRef(false);
 
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -173,7 +172,6 @@ export function PlayerControls({
         volume,
         muted,
       };
-  targetPlayingRef.current = target.playing;
 
   const fallbackDuration =
     typeof durationMs === "number" &&
@@ -193,10 +191,13 @@ export function PlayerControls({
 
   const scheduleHide = () => {
     clearHideTimer();
-    const paused = remoteActiveRef.current
-      ? !targetPlayingRef.current
-      : videoRef.current === null || videoRef.current.paused;
-    if (paused || settingsOpenRef.current) {
+    // While casting there is no local video to reveal — keep controls on screen.
+    if (remoteActiveRef.current) {
+      setControlsVisible(true);
+      return;
+    }
+    const video = videoRef.current;
+    if (video === null || video.paused || settingsOpenRef.current) {
       setControlsVisible(true);
       return;
     }
@@ -302,18 +303,14 @@ export function PlayerControls({
     };
   }, [videoRef]);
 
-  // Keep auto-hide in sync with remote play/pause (no <video> events while casting).
+  // Keep controls pinned while casting (no local picture to free up).
   useEffect(() => {
     if (!remoteActive) {
       return;
     }
-    if (!remote.playing || settingsOpenRef.current) {
-      setControlsVisible(true);
-      clearHideTimer();
-      return;
-    }
-    scheduleHide();
-  }, [remoteActive, remote?.playing]);
+    setControlsVisible(true);
+    clearHideTimer();
+  }, [remoteActive]);
 
   // On cast disconnect, re-seed UI from the local <video> so we don't keep
   // showing the last remote snapshot through the local state branch.

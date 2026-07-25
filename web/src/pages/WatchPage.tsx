@@ -15,6 +15,7 @@ import {
   type WatchDescriptor,
   type WatchTuning,
 } from "../api/watch";
+import { CastStatusOverlay } from "../components/CastStatusOverlay";
 import {
   PlayerControls,
   type QualityId,
@@ -922,8 +923,30 @@ export function WatchPage() {
       />
     ) : null;
 
+  // Connected but media not yet loaded/playing → starting; once the receiver
+  // has real media state, keep the persistent "Playing on" label (incl. pause).
+  const castMediaReady =
+    castRemote.isActive &&
+    (castRemote.playing ||
+      castRemote.duration > 0 ||
+      castRemote.currentTime > 0);
+  const castStatusMode: "starting" | "playing" | null = !castUi.connected
+    ? null
+    : castMediaReady
+      ? "playing"
+      : "starting";
+  // Up Next takes precedence when both could show.
+  const castOverlay =
+    castStatusMode !== null && !showUpNext ? (
+      <CastStatusOverlay
+        mode={castStatusMode}
+        deviceName={castRemote.deviceName}
+      />
+    ) : null;
+
   const playerOverlay = (
     <>
+      {castOverlay}
       {resumeOverlay}
       {upNextOverlay}
     </>
