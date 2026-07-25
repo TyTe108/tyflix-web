@@ -5,7 +5,7 @@ import {
   type PlexConnectionResolver,
 } from "../plex/connection";
 import type { SharedServerAccessResolver } from "../plex/sharedServerAccess";
-import { buildHlsUrl } from "../plex/transcodeUrl";
+import { buildDashUrl, buildHlsUrl } from "../plex/transcodeUrl";
 import {
   PlexTransientError,
   type TransientTokenMinter,
@@ -35,6 +35,7 @@ type PlayDescriptor = {
   >;
   transient: string;
   hls: { local: string | null; remote: string };
+  dash: { local: string | null; remote: string };
   sessionId: string;
   streams: { audio: AudioStream[]; subtitle: SubtitleStream[] };
   durationMs: number | null;
@@ -88,16 +89,19 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     const transient = await transientMinter.mint(userToken);
     const connections = await plexConnection.resolveConnections();
 
-    // One transcode session shared across both connection URLs so the client
-    // can switch between local/remote without spawning a second transcode.
+    // One HLS transcode session shared across local/remote so the browser can
+    // fall over without spawning a second session. DASH gets its own session
+    // so Cast never fights the browser's HLS consumer for the same id.
     const sessionId = randomUUID();
-    const hlsParams = {
+    const dashSessionId = randomUUID();
+    const sharedParams = {
       ratingKey,
       token: transient,
       clientId: plexClientId,
-      sessionId,
       ...tuning,
     };
+    const hlsParams = { ...sharedParams, sessionId };
+    const dashParams = { ...sharedParams, sessionId: dashSessionId };
     const hls = {
       remote: buildHlsUrl({
         connectionUri: connections.remote,
@@ -111,6 +115,19 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
               ...hlsParams,
             }),
     };
+    const dash = {
+      remote: buildDashUrl({
+        connectionUri: connections.remote,
+        ...dashParams,
+      }),
+      local:
+        connections.local === null
+          ? null
+          : buildDashUrl({
+              connectionUri: connections.local,
+              ...dashParams,
+            }),
+    };
 
     // The transient is returned IN FULL (unlike the masked admin probe): the
     // browser needs it to authenticate directly to Plex. Intended design.
@@ -119,6 +136,7 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
       connections,
       transient,
       hls,
+      dash,
       sessionId,
       streams: { audio: meta.audio, subtitle: meta.subtitle },
       durationMs: meta.durationMs,

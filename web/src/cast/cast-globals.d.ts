@@ -1,7 +1,7 @@
 /**
  * Minimal ambient types for the CAF web sender SDK loaded from gstatic.
- * Only the surface used by initCast / useCastState — expand as later
- * cast increments need it.
+ * Only the surface used by initCast / useCastState / loadMediaOnCast —
+ * expand as later cast increments need it.
  */
 
 declare namespace chrome.cast {
@@ -14,6 +14,28 @@ declare namespace chrome.cast {
 
   namespace media {
     const DEFAULT_MEDIA_RECEIVER_APP_ID: string;
+
+    enum StreamType {
+      BUFFERED = "buffered",
+      LIVE = "live",
+      OTHER = "other",
+    }
+
+    class GenericMediaMetadata {
+      title?: string;
+      subtitle?: string;
+    }
+
+    class MediaInfo {
+      constructor(contentId: string, contentType: string);
+      streamType: StreamType;
+      metadata?: GenericMediaMetadata;
+    }
+
+    class LoadRequest {
+      constructor(mediaInfo: MediaInfo);
+      autoplay: boolean;
+    }
   }
 }
 
@@ -40,10 +62,15 @@ declare namespace cast.framework {
 
   type CastContextEventHandler = (event: CastStateEventData) => void;
 
+  class CastSession {
+    loadMedia(request: chrome.cast.media.LoadRequest): Promise<unknown>;
+  }
+
   class CastContext {
     static getInstance(): CastContext;
     setOptions(options: CastOptions): void;
     getCastState(): CastState;
+    getCurrentSession(): CastSession | null;
     addEventListener(
       type: CastContextEventType,
       handler: CastContextEventHandler,

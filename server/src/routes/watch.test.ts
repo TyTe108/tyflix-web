@@ -194,6 +194,7 @@ describe("GET /api/watch/movie/:tmdbId", () => {
       connections: typeof CONNECTIONS;
       transient: string;
       hls: { local: string | null; remote: string };
+      dash: { local: string | null; remote: string };
       sessionId: string;
       streams: { audio: unknown[]; subtitle: unknown[] };
       durationMs: number | null;
@@ -237,6 +238,25 @@ describe("GET /api/watch/movie/:tmdbId", () => {
     // The SAME sessionId must appear in both HLS URLs.
     assert.ok(body.hls.remote.includes(body.sessionId));
     assert.ok(localUrl.includes(body.sessionId));
+
+    // DASH URLs for Cast: start.mpd, local+remote share a session DISTINCT
+    // from the HLS sessionId.
+    assert.ok(
+      body.dash.remote.startsWith(`${CONNECTIONS.remote}/video/:/transcode/`),
+    );
+    assert.ok(body.dash.remote.includes("start.mpd"));
+    assert.ok(body.dash.remote.includes("protocol=dash"));
+    assert.notEqual(body.dash.local, null);
+    const dashLocal = body.dash.local as string;
+    assert.ok(dashLocal.startsWith(`${CONNECTIONS.local}/video/:/transcode/`));
+    assert.ok(dashLocal.includes("start.mpd"));
+
+    const dashSession = new URL(body.dash.remote).searchParams.get("session");
+    assert.ok(dashSession);
+    assert.notEqual(dashSession, body.sessionId);
+    assert.ok(dashLocal.includes(dashSession!));
+    assert.ok(!body.dash.remote.includes(body.sessionId));
+    assert.ok(!dashLocal.includes(body.sessionId));
 
     // The recovered durable token is what we mint from.
     assert.equal(mintedWith, USER_TOKEN);
@@ -320,6 +340,7 @@ describe("GET /api/watch/movie/:tmdbId", () => {
     const body = (await response.json()) as {
       connections: { local: string | null; remote: string };
       hls: { local: string | null; remote: string };
+      dash: { local: string | null; remote: string };
       sessionId: string;
     };
 
@@ -327,6 +348,9 @@ describe("GET /api/watch/movie/:tmdbId", () => {
     assert.equal(body.hls.local, null);
     assert.ok(body.hls.remote.includes("start.m3u8"));
     assert.ok(body.hls.remote.includes(body.sessionId));
+    assert.equal(body.dash.local, null);
+    assert.ok(body.dash.remote.includes("start.mpd"));
+    assert.ok(body.dash.remote.includes("protocol=dash"));
   });
 
   it("applies valid tuning query params to both HLS URLs", async () => {
@@ -340,12 +364,24 @@ describe("GET /api/watch/movie/:tmdbId", () => {
     assert.equal(response.status, 200);
     const body = (await response.json()) as {
       hls: { local: string | null; remote: string };
+      dash: { local: string | null; remote: string };
     };
     assert.notEqual(body.hls.local, null);
     const localUrl = body.hls.local as string;
 
     for (const url of [body.hls.remote, localUrl]) {
       const parsed = new URL(url);
+      assert.equal(parsed.searchParams.get("maxVideoBitrate"), "4000");
+      assert.equal(parsed.searchParams.get("videoResolution"), "1280x720");
+      assert.equal(parsed.searchParams.get("offset"), "90.5");
+      assert.equal(parsed.searchParams.get("audioStreamID"), "101");
+    }
+
+    assert.notEqual(body.dash.local, null);
+    for (const url of [body.dash.remote, body.dash.local as string]) {
+      const parsed = new URL(url);
+      assert.ok(url.includes("start.mpd"));
+      assert.equal(parsed.searchParams.get("protocol"), "dash");
       assert.equal(parsed.searchParams.get("maxVideoBitrate"), "4000");
       assert.equal(parsed.searchParams.get("videoResolution"), "1280x720");
       assert.equal(parsed.searchParams.get("offset"), "90.5");

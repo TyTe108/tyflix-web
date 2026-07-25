@@ -8,6 +8,11 @@ export type WatchHls = {
   remote: string;
 };
 
+export type WatchDash = {
+  local: string | null;
+  remote: string;
+};
+
 export type AudioStream = {
   id: string;
   language: string | null;
@@ -38,6 +43,7 @@ export type WatchDescriptor = {
   connections: WatchConnections;
   transient: string;
   hls: WatchHls;
+  dash: WatchDash;
   sessionId: string;
   streams: { audio: AudioStream[]; subtitle: SubtitleStream[] };
   durationMs: number | null;

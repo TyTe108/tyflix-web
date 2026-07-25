@@ -1,6 +1,6 @@
-// Builds Plex's universal-transcode HLS URL for browser playback, forcing a
-// transcode to H.264/AAC so HEVC (H.265) and other browser-undecodable sources
-// are converted rather than direct-played or stream-copied.
+// Builds Plex's universal-transcode URLs for browser (HLS) and Cast (DASH)
+// playback, forcing a transcode to H.264/AAC so HEVC (H.265) and other
+// undecodable sources are converted rather than direct-played or stream-copied.
 //
 // UNVERIFIED (do not treat as gospel): the exact universal-transcode parameter
 // set, and whether the X-Plex-Client-Profile-Extra below reliably forces H.264
@@ -8,10 +8,11 @@
 // The plan is to read the live /decision response (via the admin probe) and
 // iterate the profile if Plex still direct-plays or stream-copies HEVC.
 //
-// NOTE: fetching start.m3u8 actually STARTS a transcode session on the server;
-// the /decision variant does not, which is why the probe uses decision.
+// NOTE: fetching start.m3u8 / start.mpd actually STARTS a transcode session on
+// the server; the /decision variant does not, which is why the probe uses
+// decision.
 
-export type BuildHlsUrlParams = {
+export type BuildTranscodeUrlParams = {
   // Direct plex.direct base URL to stream from, e.g.
   // https://1-2-3-4.abc.plex.direct:32400 (no trailing slash required).
   connectionUri: string;
@@ -30,6 +31,8 @@ export type BuildHlsUrlParams = {
   offset?: number;
 };
 
+export type BuildHlsUrlParams = BuildTranscodeUrlParams;
+
 const TRANSCODE_BASE_PATH = "/video/:/transcode/universal";
 
 // Advertise an HLS / H.264 video / AAC audio transcode target. Combined with
@@ -39,14 +42,22 @@ const TRANSCODE_BASE_PATH = "/video/:/transcode/universal";
 const H264_HLS_PROFILE_EXTRA =
   "add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=mpegts&videoCodec=h264&audioCodec=aac)";
 
-// Shared builder; pathSegment is "start.m3u8" (real stream) or "decision".
+// DASH variant verified on-device against the Default Media Receiver. Keep
+// container=mpegts even though it looks odd for DASH — that is what played.
+const H264_DASH_PROFILE_EXTRA =
+  "add-transcode-target(type=videoProfile&context=streaming&protocol=dash&container=mpegts&videoCodec=h264&audioCodec=aac)";
+
+// Shared builder; pathSegment is "start.m3u8" / "start.mpd" (real stream) or
+// "decision".
 function buildTranscodeUrl(
   pathSegment: string,
-  params: BuildHlsUrlParams,
+  protocol: "hls" | "dash",
+  profileExtra: string,
+  params: BuildTranscodeUrlParams,
 ): string {
   const search = new URLSearchParams();
   search.set("path", `/library/metadata/${params.ratingKey}`);
-  search.set("protocol", "hls");
+  search.set("protocol", protocol);
   search.set("mediaIndex", "0");
   search.set("partIndex", "0");
   search.set("fastSeek", "1");
@@ -63,7 +74,7 @@ function buildTranscodeUrl(
   search.set("X-Plex-Client-Identifier", params.clientId);
   search.set("X-Plex-Session-Identifier", params.sessionId);
   search.set("session", params.sessionId);
-  search.set("X-Plex-Client-Profile-Extra", H264_HLS_PROFILE_EXTRA);
+  search.set("X-Plex-Client-Profile-Extra", profileExtra);
   search.set("X-Plex-Token", params.token);
 
   // Optional tuning params appended after the fixed set so the omitted-case
@@ -108,11 +119,22 @@ function buildTranscodeUrl(
 
 // Browser HLS stream URL (fetching it starts a real transcode).
 export function buildHlsUrl(params: BuildHlsUrlParams): string {
-  return buildTranscodeUrl("start.m3u8", params);
+  return buildTranscodeUrl("start.m3u8", "hls", H264_HLS_PROFILE_EXTRA, params);
+}
+
+// Cast DASH stream URL (fetching it starts a real transcode). Distinct session
+// id from HLS so browser + receiver never share one transcode session.
+export function buildDashUrl(params: BuildTranscodeUrlParams): string {
+  return buildTranscodeUrl(
+    "start.mpd",
+    "dash",
+    H264_DASH_PROFILE_EXTRA,
+    params,
+  );
 }
 
 // Same URL against the /decision endpoint, which reports Plex's transcode
 // decision WITHOUT starting a transcode.
 export function buildHlsDecisionUrl(params: BuildHlsUrlParams): string {
-  return buildTranscodeUrl("decision", params);
+  return buildTranscodeUrl("decision", "hls", H264_HLS_PROFILE_EXTRA, params);
 }

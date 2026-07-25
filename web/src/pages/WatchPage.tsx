@@ -22,6 +22,8 @@ import {
 } from "../components/PlayerControls";
 import { ResumeDialog } from "../components/ResumeDialog";
 import { UpNextCard } from "../components/UpNextCard";
+import { loadMediaOnCast } from "../cast/loadMediaOnCast";
+import { useCastState } from "../cast/useCastState";
 
 const AUTO_PLAY_STORAGE_KEY = "tyflix.autoPlay";
 const UP_NEXT_WINDOW_SEC = 30;
@@ -177,6 +179,7 @@ export function WatchPage() {
   const [resumeDialog, setResumeDialog] = useState<ResumeDialogState | null>(
     null,
   );
+  const castUi = useCastState();
   const autoPlayRef = useRef(autoPlay);
   const nextEpisodeRef = useRef(nextEpisode);
   const upNextDismissedRef = useRef(upNextDismissed);
@@ -528,10 +531,23 @@ export function WatchPage() {
   // first and falls back to the remote one on a fatal hls.js error.
   // Quality/audio switches update descriptor in place (status stays "ready") so
   // the <video> stays mounted; pendingResumeRef carries position across rebuilds.
+  // While casting, tear down local hls.js so only the receiver consumes the
+  // transcode session (one X-Plex-Session-Identifier).
   useEffect(() => {
     if (descriptor === null) {
       return;
     }
+
+    if (castUi.connected) {
+      const video = videoRef.current;
+      if (video !== null) {
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+      }
+      return;
+    }
+
     const video = videoRef.current;
     if (video === null) {
       return;
@@ -582,6 +598,8 @@ export function WatchPage() {
         video.src = primaryUrl;
         return () => {
           video.removeEventListener("loadedmetadata", onLoadedMetadata);
+          video.removeAttribute("src");
+          video.load();
         };
       }
       setStatus("error");
@@ -658,7 +676,40 @@ export function WatchPage() {
       hls?.destroy();
       hls = null;
     };
-  }, [descriptor]);
+  }, [descriptor, castUi.connected]);
+
+  // Hand the current title to the receiver whenever a Cast session is active.
+  useEffect(() => {
+    if (!castUi.connected || descriptor === null) {
+      return;
+    }
+
+    let cancelled = false;
+    void loadMediaOnCast({
+      contentUrl: descriptor.dash.local ?? descriptor.dash.remote,
+      title: descriptor.title,
+      subheading: descriptor.subheading,
+    }).then(
+      () => {
+        // Receiver is playing — CAST_STATE_CHANGED already reflects connected.
+      },
+      (err: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        console.warn("[cast] Failed to load media on receiver.", err);
+        // Drop the session so the button isn't stuck "connected" and local
+        // playback can re-attach via the gated hls effect above.
+        if (window.cast?.framework) {
+          cast.framework.CastContext.getInstance().endCurrentSession(true);
+        }
+      },
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [castUi.connected, descriptor]);
 
   const onAutoPlayChange = (value: boolean) => {
     setAutoPlay(value);
