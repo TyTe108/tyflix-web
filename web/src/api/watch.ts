@@ -100,20 +100,6 @@ export async function selectSubtitle(
   }
 }
 
-// Stops a Plex universal-transcode session by id (the HLS session from the
-// watch descriptor). Used before Cast so DASH isn't rejected with HTTP 400.
-export async function stopTranscodeSession(sessionId: string): Promise<void> {
-  const res = await fetch("/api/watch/transcode/stop", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sessionId }),
-  });
-  if (!res.ok) {
-    const message = await readErrorMessage(res);
-    throw new Error(message ?? `Failed to stop transcode (${res.status})`);
-  }
-}
-
 export type TimelineState = "playing" | "paused" | "stopped";
 
 export type TimelineBody = {

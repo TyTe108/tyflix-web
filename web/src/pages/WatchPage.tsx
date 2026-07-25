@@ -9,7 +9,6 @@ import {
   reportTimeline,
   reportTimelineBeacon,
   selectSubtitle,
-  stopTranscodeSession,
   type NextEpisode,
   type TimelineState,
   type WatchConnections,
@@ -23,7 +22,6 @@ import {
 } from "../components/PlayerControls";
 import { ResumeDialog } from "../components/ResumeDialog";
 import { UpNextCard } from "../components/UpNextCard";
-import { castDiag } from "../cast/castDiag";
 import { loadMediaOnCast } from "../cast/loadMediaOnCast";
 import { subscribeSessionReady } from "../cast/subscribeSessionReady";
 import { useCastState } from "../cast/useCastState";
@@ -685,17 +683,8 @@ export function WatchPage() {
   // (SESSION_STARTED / SESSION_RESUMED). CAST_STATE_CHANGED=CONNECTED can fire
   // before the Default Media Receiver accepts loadMedia.
   useEffect(() => {
-    // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
-    castDiag(
-      "WatchPage.loadEffect",
-      `mount descriptorNull=${descriptor === null} ratingKey=${descriptor?.ratingKey ?? "n/a"}`,
-    );
-
     if (descriptor === null) {
-      return () => {
-        // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
-        castDiag("WatchPage.loadEffect", "cleanup (descriptor was null)");
-      };
+      return;
     }
 
     const contentUrl = descriptor.dash.local ?? descriptor.dash.remote;
@@ -743,56 +732,18 @@ export function WatchPage() {
       session: cast.framework.CastSession | null,
       isRetry: boolean,
     ) => {
-      // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
-      castDiag(
-        "WatchPage.attemptLoad",
-        `call isRetry=${isRetry} cancelled=${cancelled} inFlight=${inFlight} alreadyLoaded=${alreadyLoadedFor(session)}`,
-      );
-
       if (cancelled) {
-        // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
-        castDiag("WatchPage.attemptLoad", "early-return guard=cancelled");
         return;
       }
       if (!isRetry && alreadyLoadedFor(session)) {
-        // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
-        castDiag(
-          "WatchPage.attemptLoad",
-          "early-return guard=alreadyLoaded",
-        );
         return;
       }
       if (inFlight) {
-        // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
-        castDiag("WatchPage.attemptLoad", "early-return guard=inFlight");
         return;
       }
       inFlight = true;
 
       void (async () => {
-        // Stop the browser's HLS transcode once per cast session before DASH
-        // loadMedia — Plex 400s the DASH manifest while that session is alive.
-        if (!isRetry) {
-          // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
-          castDiag(
-            "WatchPage.attemptLoad",
-            `stopTranscodeSession begin sessionId=${descriptor.sessionId}`,
-          );
-          try {
-            await stopTranscodeSession(descriptor.sessionId);
-            // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
-            castDiag("WatchPage.attemptLoad", "stopTranscodeSession ok");
-          } catch (err: unknown) {
-            // Non-fatal: continue with the cast load attempt.
-            console.warn(
-              "[cast] Failed to stop HLS transcode session.",
-              err,
-            );
-            // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
-            castDiag("WatchPage.attemptLoad", "stopTranscodeSession failed", err);
-          }
-        }
-
         if (cancelled) {
           inFlight = false;
           return;
@@ -823,14 +774,6 @@ export function WatchPage() {
         }
         const current =
           cast.framework.CastContext.getInstance().getCurrentSession();
-        const sessionNull = current === null;
-        const mediaNull =
-          current === null ? true : current.getMediaSession() === null;
-        // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
-        castDiag(
-          "WatchPage.mediaSessionCheck",
-          `elapsed≈10s isRetry=${isRetry} getCurrentSessionNull=${sessionNull} getMediaSessionNull=${mediaNull}`,
-        );
         if (current === null) {
           return;
         }
@@ -853,8 +796,6 @@ export function WatchPage() {
     });
 
     return () => {
-      // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
-      castDiag("WatchPage.loadEffect", "cleanup");
       cancelled = true;
       clearTimers();
       unsubscribe();

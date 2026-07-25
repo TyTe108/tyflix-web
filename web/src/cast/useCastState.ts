@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { castDiag } from "./castDiag";
 import { subscribeCastReady } from "./initCast";
 
 export type CastControlState = {
@@ -49,14 +48,7 @@ export function useCastState(): CastControlState {
 
     let context: cast.framework.CastContext | null = null;
 
-    const onCastStateChanged = (
-      event: cast.framework.CastStateEventData,
-    ) => {
-      // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
-      castDiag(
-        "useCastState",
-        `CAST_STATE_CHANGED castState=${event.castState}`,
-      );
+    const onCastStateChanged = () => {
       setSnapshot(readCastSnapshot());
     };
 

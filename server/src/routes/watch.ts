@@ -330,42 +330,6 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     }
   });
 
-  // Stops a Plex universal-transcode session (the browser's HLS session id)
-  // so Cast can start a DASH session without Plex returning HTTP 400.
-  router.post("/transcode/stop", async (req, res) => {
-    const sessionId = readTranscodeSessionId(req.body);
-    if (sessionId === null) {
-      res.status(400).json({ error: "sessionId must be a non-empty string" });
-      return;
-    }
-
-    const session = res.locals.session as SessionPayload | undefined;
-    if (!session) {
-      res.status(401).json({ error: "not authenticated" });
-      return;
-    }
-
-    let userToken: string | null;
-    try {
-      userToken = readPlexToken(session, sessionSecret);
-    } catch (err) {
-      respondUpstreamError(res, err);
-      return;
-    }
-    if (userToken === null) {
-      res.status(409).json({ error: "re-login required" });
-      return;
-    }
-
-    try {
-      const pmsToken = await resolvePmsToken(session.plexId, userToken);
-      await plexServer.stopTranscodeSession(sessionId, pmsToken);
-      res.json({ ok: true });
-    } catch (err) {
-      respondUpstreamError(res, err);
-    }
-  });
-
   // Selects (or clears) the burned-in subtitle for the current user on a media
   // item. The browser already has the ratingKey from a play descriptor; the
   // part id is resolved server-side so the client never has to guess it.
@@ -591,17 +555,6 @@ function readSubtitleStreamID(body: unknown): string | null {
     return null;
   }
   return raw;
-}
-
-function readTranscodeSessionId(body: unknown): string | null {
-  if (typeof body !== "object" || body === null) {
-    return null;
-  }
-  const sessionId = (body as { sessionId?: unknown }).sessionId;
-  if (typeof sessionId !== "string" || sessionId.trim() === "") {
-    return null;
-  }
-  return sessionId;
 }
 
 function parsePlayTuning(
