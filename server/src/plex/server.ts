@@ -903,6 +903,40 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     }
   }
 
+  // Stops a universal-transcode session by id so a subsequent DASH (cast)
+  // session isn't rejected with HTTP 400 while the browser's HLS session is
+  // still alive server-side. Uses the USER's token.
+  async function stopTranscodeSession(
+    sessionId: string,
+    userToken: string,
+  ): Promise<void> {
+    const path = "/video/:/transcode/universal/stop";
+    const url = new URL(`${baseUrl}${path}`);
+    url.searchParams.set("session", sessionId);
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "GET",
+        headers: {
+          "X-Plex-Token": userToken,
+          Accept: "application/json",
+        },
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Plex server request failed";
+      throw new PlexServerUpstreamError(message, 502);
+    }
+
+    if (!res.ok) {
+      throw new PlexServerUpstreamError(
+        `Plex server ${path} failed (${res.status})`,
+        res.status,
+      );
+    }
+  }
+
   return {
     accounts,
     history,
@@ -918,6 +952,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     fetchImage,
     selectSubtitle,
     reportTimeline,
+    stopTranscodeSession,
   };
 }
 

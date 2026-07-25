@@ -5,7 +5,7 @@ import {
   type PlexConnectionResolver,
 } from "../plex/connection";
 import type { SharedServerAccessResolver } from "../plex/sharedServerAccess";
-import { buildDashUrl, buildHlsUrl } from "../plex/transcodeUrl";
+import { buildDashUrl, buildDashDecisionUrl, buildHlsUrl } from "../plex/transcodeUrl";
 import {
   PlexTransientError,
   type TransientTokenMinter,
@@ -36,6 +36,7 @@ type PlayDescriptor = {
   transient: string;
   hls: { local: string | null; remote: string };
   dash: { local: string | null; remote: string };
+  dashDecision: { local: string | null; remote: string };
   sessionId: string;
   streams: { audio: AudioStream[]; subtitle: SubtitleStream[] };
   durationMs: number | null;
@@ -128,6 +129,20 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
               ...dashParams,
             }),
     };
+    // Same DASH session id as dash{} — Plex requires /decision before start.mpd.
+    const dashDecision = {
+      remote: buildDashDecisionUrl({
+        connectionUri: connections.remote,
+        ...dashParams,
+      }),
+      local:
+        connections.local === null
+          ? null
+          : buildDashDecisionUrl({
+              connectionUri: connections.local,
+              ...dashParams,
+            }),
+    };
 
     // The transient is returned IN FULL (unlike the masked admin probe): the
     // browser needs it to authenticate directly to Plex. Intended design.
@@ -137,6 +152,7 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
       transient,
       hls,
       dash,
+      dashDecision,
       sessionId,
       streams: { audio: meta.audio, subtitle: meta.subtitle },
       durationMs: meta.durationMs,
@@ -308,6 +324,42 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
         userToken: pmsToken,
         clientId: plexClientId,
       });
+      res.json({ ok: true });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
+  // Stops a Plex universal-transcode session (the browser's HLS session id)
+  // so Cast can start a DASH session without Plex returning HTTP 400.
+  router.post("/transcode/stop", async (req, res) => {
+    const sessionId = readTranscodeSessionId(req.body);
+    if (sessionId === null) {
+      res.status(400).json({ error: "sessionId must be a non-empty string" });
+      return;
+    }
+
+    const session = res.locals.session as SessionPayload | undefined;
+    if (!session) {
+      res.status(401).json({ error: "not authenticated" });
+      return;
+    }
+
+    let userToken: string | null;
+    try {
+      userToken = readPlexToken(session, sessionSecret);
+    } catch (err) {
+      respondUpstreamError(res, err);
+      return;
+    }
+    if (userToken === null) {
+      res.status(409).json({ error: "re-login required" });
+      return;
+    }
+
+    try {
+      const pmsToken = await resolvePmsToken(session.plexId, userToken);
+      await plexServer.stopTranscodeSession(sessionId, pmsToken);
       res.json({ ok: true });
     } catch (err) {
       respondUpstreamError(res, err);
@@ -539,6 +591,17 @@ function readSubtitleStreamID(body: unknown): string | null {
     return null;
   }
   return raw;
+}
+
+function readTranscodeSessionId(body: unknown): string | null {
+  if (typeof body !== "object" || body === null) {
+    return null;
+  }
+  const sessionId = (body as { sessionId?: unknown }).sessionId;
+  if (typeof sessionId !== "string" || sessionId.trim() === "") {
+    return null;
+  }
+  return sessionId;
 }
 
 function parsePlayTuning(

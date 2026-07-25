@@ -138,3 +138,9 @@ export function buildDashUrl(params: BuildTranscodeUrlParams): string {
 export function buildHlsDecisionUrl(params: BuildHlsUrlParams): string {
   return buildTranscodeUrl("decision", "hls", H264_HLS_PROFILE_EXTRA, params);
 }
+
+// DASH /decision handshake — required before start.mpd or Plex returns 400
+// "session lacking decision". Same session id / params as buildDashUrl.
+export function buildDashDecisionUrl(params: BuildTranscodeUrlParams): string {
+  return buildTranscodeUrl("decision", "dash", H264_DASH_PROFILE_EXTRA, params);
+}

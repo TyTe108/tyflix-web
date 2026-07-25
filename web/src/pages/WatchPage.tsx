@@ -9,6 +9,7 @@ import {
   reportTimeline,
   reportTimelineBeacon,
   selectSubtitle,
+  stopTranscodeSession,
   type NextEpisode,
   type TimelineState,
   type WatchConnections,
@@ -22,7 +23,9 @@ import {
 } from "../components/PlayerControls";
 import { ResumeDialog } from "../components/ResumeDialog";
 import { UpNextCard } from "../components/UpNextCard";
+import { castDiag } from "../cast/castDiag";
 import { loadMediaOnCast } from "../cast/loadMediaOnCast";
+import { subscribeSessionReady } from "../cast/subscribeSessionReady";
 import { useCastState } from "../cast/useCastState";
 
 const AUTO_PLAY_STORAGE_KEY = "tyflix.autoPlay";
@@ -678,38 +681,185 @@ export function WatchPage() {
     };
   }, [descriptor, castUi.connected]);
 
-  // Hand the current title to the receiver whenever a Cast session is active.
+  // Hand the current title to the receiver once the Cast *session* is ready
+  // (SESSION_STARTED / SESSION_RESUMED). CAST_STATE_CHANGED=CONNECTED can fire
+  // before the Default Media Receiver accepts loadMedia.
   useEffect(() => {
-    if (!castUi.connected || descriptor === null) {
-      return;
+    // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+    castDiag(
+      "WatchPage.loadEffect",
+      `mount descriptorNull=${descriptor === null} ratingKey=${descriptor?.ratingKey ?? "n/a"}`,
+    );
+
+    if (descriptor === null) {
+      return () => {
+        // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+        castDiag("WatchPage.loadEffect", "cleanup (descriptor was null)");
+      };
     }
 
+    const contentUrl = descriptor.dash.local ?? descriptor.dash.remote;
+    const decisionUrl =
+      descriptor.dashDecision.local ?? descriptor.dashDecision.remote;
+    const title = descriptor.title;
+    const subheading = descriptor.subheading;
+
     let cancelled = false;
-    void loadMediaOnCast({
-      contentUrl: descriptor.dash.local ?? descriptor.dash.remote,
-      title: descriptor.title,
-      subheading: descriptor.subheading,
-    }).then(
-      () => {
-        // Receiver is playing — CAST_STATE_CHANGED already reflects connected.
-      },
-      (err: unknown) => {
+    let loadedContentUrl: string | null = null;
+    let loadedSession: cast.framework.CastSession | null = null;
+    let inFlight = false;
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+
+    const clearTimers = () => {
+      for (const id of timers) {
+        clearTimeout(id);
+      }
+      timers.clear();
+    };
+
+    const endSession = () => {
+      if (window.cast?.framework) {
+        cast.framework.CastContext.getInstance().endCurrentSession(true);
+      }
+    };
+
+    const schedule = (fn: () => void, ms: number) => {
+      const id = setTimeout(() => {
+        timers.delete(id);
+        fn();
+      }, ms);
+      timers.add(id);
+    };
+
+    const alreadyLoadedFor = (
+      session: cast.framework.CastSession | null,
+    ): boolean =>
+      loadedContentUrl === contentUrl &&
+      loadedSession !== null &&
+      session !== null &&
+      loadedSession === session;
+
+    const attemptLoad = (
+      session: cast.framework.CastSession | null,
+      isRetry: boolean,
+    ) => {
+      // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+      castDiag(
+        "WatchPage.attemptLoad",
+        `call isRetry=${isRetry} cancelled=${cancelled} inFlight=${inFlight} alreadyLoaded=${alreadyLoadedFor(session)}`,
+      );
+
+      if (cancelled) {
+        // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+        castDiag("WatchPage.attemptLoad", "early-return guard=cancelled");
+        return;
+      }
+      if (!isRetry && alreadyLoadedFor(session)) {
+        // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+        castDiag(
+          "WatchPage.attemptLoad",
+          "early-return guard=alreadyLoaded",
+        );
+        return;
+      }
+      if (inFlight) {
+        // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+        castDiag("WatchPage.attemptLoad", "early-return guard=inFlight");
+        return;
+      }
+      inFlight = true;
+
+      void (async () => {
+        // Stop the browser's HLS transcode once per cast session before DASH
+        // loadMedia — Plex 400s the DASH manifest while that session is alive.
+        if (!isRetry) {
+          // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+          castDiag(
+            "WatchPage.attemptLoad",
+            `stopTranscodeSession begin sessionId=${descriptor.sessionId}`,
+          );
+          try {
+            await stopTranscodeSession(descriptor.sessionId);
+            // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+            castDiag("WatchPage.attemptLoad", "stopTranscodeSession ok");
+          } catch (err: unknown) {
+            // Non-fatal: continue with the cast load attempt.
+            console.warn(
+              "[cast] Failed to stop HLS transcode session.",
+              err,
+            );
+            // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+            castDiag("WatchPage.attemptLoad", "stopTranscodeSession failed", err);
+          }
+        }
+
+        if (cancelled) {
+          inFlight = false;
+          return;
+        }
+
+        try {
+          await loadMediaOnCast({ contentUrl, decisionUrl, title, subheading });
+          if (!cancelled) {
+            loadedContentUrl = contentUrl;
+            loadedSession = session;
+          }
+        } catch (err: unknown) {
+          if (!cancelled) {
+            console.warn("[cast] Failed to load media on receiver.", err);
+            endSession();
+          }
+        } finally {
+          inFlight = false;
+        }
+      })();
+
+      // Cold Plex DASH transcodes can take well over a few seconds before the
+      // receiver reports a media session. One retry at ~10s; if still nothing,
+      // warn and leave the Cast session up (do not bounce back to local hls).
+      schedule(() => {
         if (cancelled) {
           return;
         }
-        console.warn("[cast] Failed to load media on receiver.", err);
-        // Drop the session so the button isn't stuck "connected" and local
-        // playback can re-attach via the gated hls effect above.
-        if (window.cast?.framework) {
-          cast.framework.CastContext.getInstance().endCurrentSession(true);
+        const current =
+          cast.framework.CastContext.getInstance().getCurrentSession();
+        const sessionNull = current === null;
+        const mediaNull =
+          current === null ? true : current.getMediaSession() === null;
+        // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+        castDiag(
+          "WatchPage.mediaSessionCheck",
+          `elapsed≈10s isRetry=${isRetry} getCurrentSessionNull=${sessionNull} getMediaSessionNull=${mediaNull}`,
+        );
+        if (current === null) {
+          return;
         }
-      },
-    );
+        if (current.getMediaSession() !== null) {
+          return;
+        }
+        if (!isRetry) {
+          inFlight = false;
+          attemptLoad(session, true);
+          return;
+        }
+        console.warn(
+          "[cast] Receiver has no media session after load retry; leaving Cast session active.",
+        );
+      }, 10_000);
+    };
+
+    const unsubscribe = subscribeSessionReady((session) => {
+      attemptLoad(session, false);
+    });
 
     return () => {
+      // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+      castDiag("WatchPage.loadEffect", "cleanup");
       cancelled = true;
+      clearTimers();
+      unsubscribe();
     };
-  }, [castUi.connected, descriptor]);
+  }, [descriptor]);
 
   const onAutoPlayChange = (value: boolean) => {
     setAutoPlay(value);

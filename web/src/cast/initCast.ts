@@ -7,6 +7,8 @@
  * unavailable via __onGCastApiAvailable(false, …).
  */
 
+import { castDiag } from "./castDiag";
+
 const CAST_SENDER_SRC =
   "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1";
 
@@ -19,15 +21,30 @@ const readyListeners = new Set<() => void>();
  * is). Used by useCastState so the cast button can appear after async SDK load.
  */
 export function subscribeCastReady(listener: () => void): () => void {
+  // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+  castDiag(
+    "subscribeCastReady",
+    `subscribe (listeners=${readyListeners.size + 1}, configured=${configured})`,
+  );
   readyListeners.add(listener);
   if (configured && window.cast?.framework) {
     queueMicrotask(() => {
       if (readyListeners.has(listener)) {
+        // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+        castDiag(
+          "subscribeCastReady",
+          "fire (already-configured microtask)",
+        );
         listener();
       }
     });
   }
   return () => {
+    // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+    castDiag(
+      "subscribeCastReady",
+      `unsubscribe (listeners=${readyListeners.size - 1})`,
+    );
     readyListeners.delete(listener);
   };
 }
@@ -46,6 +63,13 @@ export function initCast(): void {
 
   const previous = window.__onGCastApiAvailable;
   window.__onGCastApiAvailable = (isAvailable, reason) => {
+    // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+    castDiag(
+      "initCast",
+      `__onGCastApiAvailable isAvailable=${isAvailable}`,
+      reason ?? "",
+    );
+
     try {
       previous?.(isAvailable, reason);
     } catch {
@@ -98,6 +122,8 @@ export function initCast(): void {
     }
   };
   document.head.appendChild(script);
+  // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+  castDiag("initCast", "SDK script injected", CAST_SENDER_SRC);
 }
 
 function configureCastContext(): void {
@@ -106,12 +132,17 @@ function configureCastContext(): void {
   }
   configured = true;
 
+  // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+  castDiag("initCast", "configureCastContext ran");
+
   cast.framework.CastContext.getInstance().setOptions({
     receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
     autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED,
   });
 
   for (const listener of [...readyListeners]) {
+    // TEMPORARY [cast-diag] — remove once the cast load bug is fixed
+    castDiag("subscribeCastReady", "fire (from configureCastContext)");
     listener();
   }
 }

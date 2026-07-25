@@ -1,7 +1,7 @@
 /**
  * Minimal ambient types for the CAF web sender SDK loaded from gstatic.
- * Only the surface used by initCast / useCastState / loadMediaOnCast —
- * expand as later cast increments need it.
+ * Only the surface used by initCast / useCastState / loadMediaOnCast /
+ * subscribeSessionReady — expand as later cast increments need it.
  */
 
 declare namespace chrome.cast {
@@ -42,6 +42,7 @@ declare namespace chrome.cast {
 declare namespace cast.framework {
   enum CastContextEventType {
     CAST_STATE_CHANGED = "caststatechanged",
+    SESSION_STATE_CHANGED = "sessionstatechanged",
   }
 
   enum CastState {
@@ -49,6 +50,16 @@ declare namespace cast.framework {
     NOT_CONNECTED = "NOT_CONNECTED",
     CONNECTING = "CONNECTING",
     CONNECTED = "CONNECTED",
+  }
+
+  enum SessionState {
+    NO_SESSION = "NO_SESSION",
+    SESSION_STARTING = "SESSION_STARTING",
+    SESSION_STARTED = "SESSION_STARTED",
+    SESSION_START_FAILED = "SESSION_START_FAILED",
+    SESSION_ENDING = "SESSION_ENDING",
+    SESSION_ENDED = "SESSION_ENDED",
+    SESSION_RESUMED = "SESSION_RESUMED",
   }
 
   interface CastOptions {
@@ -60,24 +71,37 @@ declare namespace cast.framework {
     castState: CastState;
   }
 
-  type CastContextEventHandler = (event: CastStateEventData) => void;
+  interface SessionStateEventData {
+    sessionState: SessionState;
+    session: CastSession | null;
+  }
 
   class CastSession {
     loadMedia(request: chrome.cast.media.LoadRequest): Promise<unknown>;
+    getMediaSession(): object | null;
   }
 
   class CastContext {
     static getInstance(): CastContext;
     setOptions(options: CastOptions): void;
     getCastState(): CastState;
+    getSessionState(): SessionState;
     getCurrentSession(): CastSession | null;
     addEventListener(
-      type: CastContextEventType,
-      handler: CastContextEventHandler,
+      type: CastContextEventType.CAST_STATE_CHANGED,
+      handler: (event: CastStateEventData) => void,
+    ): void;
+    addEventListener(
+      type: CastContextEventType.SESSION_STATE_CHANGED,
+      handler: (event: SessionStateEventData) => void,
     ): void;
     removeEventListener(
-      type: CastContextEventType,
-      handler: CastContextEventHandler,
+      type: CastContextEventType.CAST_STATE_CHANGED,
+      handler: (event: CastStateEventData) => void,
+    ): void;
+    removeEventListener(
+      type: CastContextEventType.SESSION_STATE_CHANGED,
+      handler: (event: SessionStateEventData) => void,
     ): void;
     requestSession(): Promise<string | null>;
     endCurrentSession(stopCasting: boolean): void;

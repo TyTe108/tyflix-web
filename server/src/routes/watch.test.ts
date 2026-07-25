@@ -195,6 +195,7 @@ describe("GET /api/watch/movie/:tmdbId", () => {
       transient: string;
       hls: { local: string | null; remote: string };
       dash: { local: string | null; remote: string };
+      dashDecision: { local: string | null; remote: string };
       sessionId: string;
       streams: { audio: unknown[]; subtitle: unknown[] };
       durationMs: number | null;
@@ -257,6 +258,19 @@ describe("GET /api/watch/movie/:tmdbId", () => {
     assert.ok(dashLocal.includes(dashSession!));
     assert.ok(!body.dash.remote.includes(body.sessionId));
     assert.ok(!dashLocal.includes(body.sessionId));
+
+    // dashDecision shares the DASH session id and uses /decision (not start.mpd).
+    assert.ok(body.dashDecision.remote.includes("/decision?"));
+    assert.ok(body.dashDecision.remote.includes("protocol=dash"));
+    assert.ok(body.dashDecision.remote.includes(dashSession!));
+    assert.notEqual(body.dashDecision.local, null);
+    const dashDecisionLocal = body.dashDecision.local as string;
+    assert.ok(dashDecisionLocal.includes("/decision?"));
+    assert.ok(dashDecisionLocal.includes(dashSession!));
+    assert.equal(
+      new URL(body.dashDecision.remote).searchParams.get("session"),
+      dashSession,
+    );
 
     // The recovered durable token is what we mint from.
     assert.equal(mintedWith, USER_TOKEN);
@@ -341,6 +355,7 @@ describe("GET /api/watch/movie/:tmdbId", () => {
       connections: { local: string | null; remote: string };
       hls: { local: string | null; remote: string };
       dash: { local: string | null; remote: string };
+      dashDecision: { local: string | null; remote: string };
       sessionId: string;
     };
 
@@ -351,6 +366,9 @@ describe("GET /api/watch/movie/:tmdbId", () => {
     assert.equal(body.dash.local, null);
     assert.ok(body.dash.remote.includes("start.mpd"));
     assert.ok(body.dash.remote.includes("protocol=dash"));
+    assert.equal(body.dashDecision.local, null);
+    assert.ok(body.dashDecision.remote.includes("/decision?"));
+    assert.ok(body.dashDecision.remote.includes("protocol=dash"));
   });
 
   it("applies valid tuning query params to both HLS URLs", async () => {
@@ -1281,6 +1299,152 @@ describe("POST /api/watch/timeline", () => {
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { ok: true });
     assert.equal(reportToken, SHARED_TOKEN);
+  });
+});
+
+describe("POST /api/watch/transcode/stop", () => {
+  it("rejects an invalid body with 400 before calling plex", async () => {
+    let stopCalled = false;
+    const deps = baseDeps();
+    deps.plexServer = {
+      async stopTranscodeSession() {
+        stopCalled = true;
+      },
+    } as unknown as PlexServerClient;
+    const app = createApp(deps);
+    const cookie = sessionCookie({ plexToken: USER_TOKEN });
+
+    const missing = await fetchLocal(app, "/api/watch/transcode/stop", cookie, {
+      method: "POST",
+      body: {},
+    });
+    assert.equal(missing.status, 400);
+    assert.deepEqual(await missing.json(), {
+      error: "sessionId must be a non-empty string",
+    });
+
+    const empty = await fetchLocal(app, "/api/watch/transcode/stop", cookie, {
+      method: "POST",
+      body: { sessionId: "   " },
+    });
+    assert.equal(empty.status, 400);
+    assert.deepEqual(await empty.json(), {
+      error: "sessionId must be a non-empty string",
+    });
+
+    const wrongType = await fetchLocal(
+      app,
+      "/api/watch/transcode/stop",
+      cookie,
+      { method: "POST", body: { sessionId: 123 } },
+    );
+    assert.equal(wrongType.status, 400);
+    assert.deepEqual(await wrongType.json(), {
+      error: "sessionId must be a non-empty string",
+    });
+
+    assert.equal(stopCalled, false);
+  });
+
+  it("returns 401 when no session cookie is present", async () => {
+    const app = createApp(baseDeps());
+    const response = await fetchLocal(app, "/api/watch/transcode/stop", "", {
+      method: "POST",
+      body: { sessionId: "sess-abc-123" },
+    });
+
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), { error: "not authenticated" });
+  });
+
+  it("returns 409 when the session carries no Plex token", async () => {
+    const app = createApp(baseDeps());
+    const response = await fetchLocal(
+      app,
+      "/api/watch/transcode/stop",
+      sessionCookie(),
+      { method: "POST", body: { sessionId: "sess-abc-123" } },
+    );
+
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), { error: "re-login required" });
+  });
+
+  it("returns 502 when stopTranscodeSession fails upstream", async () => {
+    const deps = baseDeps();
+    deps.plexServer = {
+      async stopTranscodeSession() {
+        throw new PlexServerUpstreamError(
+          "Plex server /video/:/transcode/universal/stop failed (500)",
+          500,
+        );
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/transcode/stop",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      { method: "POST", body: { sessionId: "sess-abc-123" } },
+    );
+
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), {
+      error: "Plex server /video/:/transcode/universal/stop failed (500)",
+    });
+  });
+
+  it("stops the transcode with the durable token on the happy path", async () => {
+    let stopArgs: { sessionId: string; userToken: string } | null = null;
+    const deps = baseDeps();
+    deps.plexServer = {
+      async stopTranscodeSession(sessionId: string, userToken: string) {
+        stopArgs = { sessionId, userToken };
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/transcode/stop",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      { method: "POST", body: { sessionId: "sess-abc-123" } },
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.deepEqual(stopArgs, {
+      sessionId: "sess-abc-123",
+      userToken: USER_TOKEN,
+    });
+  });
+
+  it("stops with the shared per-server token when resolveAccessToken finds one", async () => {
+    let stopToken: string | null = null;
+    const deps = baseDeps();
+    deps.sharedServerAccess = {
+      async resolveAccessToken() {
+        return SHARED_TOKEN;
+      },
+    } as SharedServerAccessResolver;
+    deps.plexServer = {
+      async stopTranscodeSession(_sessionId: string, userToken: string) {
+        stopToken = userToken;
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/transcode/stop",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      { method: "POST", body: { sessionId: "sess-abc-123" } },
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.equal(stopToken, SHARED_TOKEN);
   });
 });
 

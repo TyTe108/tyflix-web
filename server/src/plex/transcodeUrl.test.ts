@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildDashUrl, buildHlsDecisionUrl, buildHlsUrl } from "./transcodeUrl";
+import { buildDashDecisionUrl, buildDashUrl, buildHlsDecisionUrl, buildHlsUrl } from "./transcodeUrl";
 
 const PARAMS = {
   connectionUri: "https://1-2-3-4.abc123.plex.direct:32400",
@@ -306,6 +306,50 @@ describe("buildDashUrl", () => {
         dash.searchParams.get(key),
         hls.searchParams.get(key),
         `param ${key} should match HLS baseline`,
+      );
+    }
+  });
+});
+
+describe("buildDashDecisionUrl", () => {
+  it("swaps the start.mpd segment for decision, keeping dash protocol", () => {
+    const url = buildDashDecisionUrl(PARAMS);
+    assert.ok(
+      url.startsWith(
+        "https://1-2-3-4.abc123.plex.direct:32400/video/:/transcode/universal/decision?",
+      ),
+      `unexpected decision path: ${url}`,
+    );
+
+    const parsed = new URL(url);
+    assert.equal(parsed.searchParams.get("protocol"), "dash");
+    assert.equal(parsed.searchParams.get("directPlay"), "0");
+    assert.equal(parsed.searchParams.get("subtitles"), "burn");
+    assert.equal(parsed.searchParams.get("path"), "/library/metadata/12345");
+    assert.equal(parsed.searchParams.get("X-Plex-Token"), "transient-a-b-c");
+    assert.equal(parsed.searchParams.get("session"), "sess-abc-123");
+    assert.equal(
+      parsed.searchParams.get("X-Plex-Client-Profile-Extra"),
+      "add-transcode-target(type=videoProfile&context=streaming&protocol=dash&container=mpegts&videoCodec=h264&audioCodec=aac)",
+    );
+  });
+
+  it("matches buildDashUrl params except the path segment", () => {
+    const dash = new URL(buildDashUrl(PARAMS));
+    const decision = new URL(buildDashDecisionUrl(PARAMS));
+
+    assert.ok(dash.pathname.endsWith("/start.mpd"));
+    assert.ok(decision.pathname.endsWith("/decision"));
+
+    const dashKeys = [...dash.searchParams.keys()].sort();
+    const decisionKeys = [...decision.searchParams.keys()].sort();
+    assert.deepEqual(dashKeys, decisionKeys);
+
+    for (const key of dashKeys) {
+      assert.equal(
+        decision.searchParams.get(key),
+        dash.searchParams.get(key),
+        `param ${key} should match DASH start.mpd`,
       );
     }
   });
