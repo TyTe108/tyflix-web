@@ -7,6 +7,7 @@ import {
   type RefObject,
 } from "react";
 import type { AudioStream, SubtitleStream } from "../api/watch";
+import type { RemotePlaybackControl } from "../cast/useCastPlayer";
 import { useCastState } from "../cast/useCastState";
 
 export type QualityId = "original" | "1080p" | "720p" | "480p";
@@ -25,8 +26,19 @@ type PlayerControlsProps = {
   onStreamSettingsChange: (settings: StreamSettings) => Promise<void>;
   autoPlay?: boolean;
   onAutoPlayChange?: (value: boolean) => void;
+  /** When active, the bar reads/writes the Cast receiver instead of <video>. */
+  remote?: RemotePlaybackControl;
   overlay?: ReactNode;
   children: ReactNode;
+};
+
+/** Unified read model for whichever target currently owns the control bar. */
+type PlaybackTarget = {
+  playing: boolean;
+  currentTime: number;
+  duration: number;
+  volume: number;
+  muted: boolean;
 };
 
 const HIDE_DELAY_MS = 3000;
@@ -105,6 +117,7 @@ export function PlayerControls({
   onStreamSettingsChange,
   autoPlay,
   onAutoPlayChange,
+  remote,
   overlay,
   children,
 }: PlayerControlsProps) {
@@ -116,6 +129,8 @@ export function PlayerControls({
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settingsOpenRef = useRef(false);
   const playbackRateRef = useRef(1);
+  const remoteActiveRef = useRef(false);
+  const targetPlayingRef = useRef(false);
 
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -138,6 +153,28 @@ export function PlayerControls({
   settingsOpenRef.current = settingsOpen;
   playbackRateRef.current = playbackRate;
 
+  const remoteActive = remote?.isActive === true;
+  remoteActiveRef.current = remoteActive;
+
+  // Prefer the remote when casting; otherwise the local <video> state.
+  // While scrubbing, keep the local currentTime preview even if remote is active.
+  const target: PlaybackTarget = remoteActive
+    ? {
+        playing: remote.playing,
+        currentTime: scrubbingRef.current ? currentTime : remote.currentTime,
+        duration: remote.duration,
+        volume: remote.volume,
+        muted: remote.muted,
+      }
+    : {
+        playing,
+        currentTime,
+        duration,
+        volume,
+        muted,
+      };
+  targetPlayingRef.current = target.playing;
+
   const fallbackDuration =
     typeof durationMs === "number" &&
     Number.isFinite(durationMs) &&
@@ -156,8 +193,10 @@ export function PlayerControls({
 
   const scheduleHide = () => {
     clearHideTimer();
-    const video = videoRef.current;
-    if (video === null || video.paused || settingsOpenRef.current) {
+    const paused = remoteActiveRef.current
+      ? !targetPlayingRef.current
+      : videoRef.current === null || videoRef.current.paused;
+    if (paused || settingsOpenRef.current) {
       setControlsVisible(true);
       return;
     }
@@ -185,6 +224,10 @@ export function PlayerControls({
     };
 
     const onPlayback = () => {
+      // Remote owns the UI while casting — don't let a torn-down <video> fight it.
+      if (remoteActiveRef.current) {
+        return;
+      }
       setPlaying(!video.paused);
       if (video.paused || settingsOpenRef.current) {
         setControlsVisible(true);
@@ -194,26 +237,41 @@ export function PlayerControls({
       }
     };
     const onTime = () => {
+      if (remoteActiveRef.current) {
+        return;
+      }
       if (!scrubbingRef.current) {
         setCurrentTime(video.currentTime);
       }
       setDuration(resolveDuration());
     };
     const onVolume = () => {
+      if (remoteActiveRef.current) {
+        return;
+      }
       setVolume(video.volume);
       setMuted(video.muted);
     };
     const onEnded = () => {
+      if (remoteActiveRef.current) {
+        return;
+      }
       setPlaying(false);
       setControlsVisible(true);
       clearHideTimer();
     };
     const onRateChange = () => {
+      if (remoteActiveRef.current) {
+        return;
+      }
       setPlaybackRate(video.playbackRate);
     };
     // Re-apply the chosen rate after a source reload (e.g. future quality
     // restart) so the browser's default 1× does not silently win.
     const onLoadedMetadata = () => {
+      if (remoteActiveRef.current) {
+        return;
+      }
       video.playbackRate = playbackRateRef.current;
       onTime();
     };
@@ -243,6 +301,48 @@ export function PlayerControls({
       video.removeEventListener("ended", onEnded);
     };
   }, [videoRef]);
+
+  // Keep auto-hide in sync with remote play/pause (no <video> events while casting).
+  useEffect(() => {
+    if (!remoteActive) {
+      return;
+    }
+    if (!remote.playing || settingsOpenRef.current) {
+      setControlsVisible(true);
+      clearHideTimer();
+      return;
+    }
+    scheduleHide();
+  }, [remoteActive, remote?.playing]);
+
+  // On cast disconnect, re-seed UI from the local <video> so we don't keep
+  // showing the last remote snapshot through the local state branch.
+  useEffect(() => {
+    if (remoteActive) {
+      return;
+    }
+    const video = videoRef.current;
+    if (video === null) {
+      return;
+    }
+    setPlaying(!video.paused);
+    if (!scrubbingRef.current) {
+      setCurrentTime(video.currentTime);
+    }
+    setDuration(
+      Number.isFinite(video.duration) && video.duration > 0
+        ? video.duration
+        : fallbackDurationRef.current,
+    );
+    setVolume(video.volume);
+    setMuted(video.muted);
+    if (video.paused || settingsOpenRef.current) {
+      setControlsVisible(true);
+      clearHideTimer();
+    } else {
+      scheduleHide();
+    }
+  }, [remoteActive, videoRef]);
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -304,6 +404,10 @@ export function PlayerControls({
   };
 
   const togglePlay = () => {
+    if (remoteActive && remote) {
+      remote.playOrPause();
+      return;
+    }
     withVideo((video) => {
       if (video.paused) {
         void video.play().catch((err: unknown) => {
@@ -324,12 +428,45 @@ export function PlayerControls({
   };
 
   const toggleMute = () => {
+    if (remoteActive && remote) {
+      remote.muteOrUnmute();
+      return;
+    }
     withVideo((video) => {
       video.muted = !video.muted;
     });
   };
 
+  const seekTo = (seconds: number) => {
+    if (remoteActive && remote) {
+      remote.seek(seconds);
+      return;
+    }
+    withVideo((video) => {
+      video.currentTime = seconds;
+    });
+  };
+
+  const setVolumeLevel = (level: number) => {
+    if (remoteActive && remote) {
+      if (level > 0 && remote.muted) {
+        remote.muteOrUnmute();
+      }
+      remote.setVolumeLevel(level);
+      return;
+    }
+    withVideo((video) => {
+      video.volume = level;
+      if (level > 0 && video.muted) {
+        video.muted = false;
+      }
+    });
+  };
+
   const setSpeed = (rate: number) => {
+    if (remoteActive) {
+      return;
+    }
     setPlaybackRate(rate);
     withVideo((video) => {
       video.playbackRate = rate;
@@ -418,6 +555,9 @@ export function PlayerControls({
   ];
 
   const toggleFullscreen = () => {
+    if (remoteActive) {
+      return;
+    }
     const shell = shellRef.current;
     if (shell === null) {
       return;
@@ -445,11 +585,11 @@ export function PlayerControls({
     togglePlay();
   };
 
-  const total = duration > 0 ? duration : fallbackDuration;
+  const total = target.duration > 0 ? target.duration : fallbackDuration;
   const progressMax = total > 0 ? total : 0;
   const progressValue = Math.min(
-    currentTime,
-    progressMax > 0 ? progressMax : currentTime,
+    target.currentTime,
+    progressMax > 0 ? progressMax : target.currentTime,
   );
 
   return (
@@ -487,12 +627,14 @@ export function PlayerControls({
           hidden={!settingsOpen}
         >
           <h2 className="watch-settings-title">Settings</h2>
-          <SettingsOptionGroup
-            label="Speed"
-            options={SPEED_OPTIONS}
-            value={playbackRate}
-            onChange={setSpeed}
-          />
+          {!remoteActive ? (
+            <SettingsOptionGroup
+              label="Speed"
+              options={SPEED_OPTIONS}
+              value={playbackRate}
+              onChange={setSpeed}
+            />
+          ) : null}
           <SettingsOptionGroup
             label="Quality"
             options={QUALITY_OPTIONS}
@@ -535,14 +677,14 @@ export function PlayerControls({
           <button
             type="button"
             className="watch-control-btn"
-            aria-label={playing ? "Pause" : "Play"}
+            aria-label={target.playing ? "Pause" : "Play"}
             onClick={togglePlay}
           >
-            {playing ? <IconPause /> : <IconPlay />}
+            {target.playing ? <IconPause /> : <IconPlay />}
           </button>
 
           <span className="watch-time" aria-hidden="true">
-            {formatTime(currentTime)} / {formatTime(total)}
+            {formatTime(target.currentTime)} / {formatTime(total)}
           </span>
 
           <label className="watch-seek">
@@ -555,23 +697,22 @@ export function PlayerControls({
               value={progressValue}
               disabled={progressMax <= 0}
               aria-label="Seek"
-              aria-valuetext={`${formatTime(currentTime)} of ${formatTime(total)}`}
+              aria-valuetext={`${formatTime(target.currentTime)} of ${formatTime(total)}`}
               onPointerDown={() => {
                 scrubbingRef.current = true;
+                if (remoteActive && remote) {
+                  setCurrentTime(remote.currentTime);
+                }
               }}
               onPointerUp={(event) => {
                 scrubbingRef.current = false;
-                withVideo((video) => {
-                  video.currentTime = Number(event.currentTarget.value);
-                });
+                seekTo(Number(event.currentTarget.value));
               }}
               onChange={(event) => {
                 const next = Number(event.currentTarget.value);
                 setCurrentTime(next);
                 if (!scrubbingRef.current) {
-                  withVideo((video) => {
-                    video.currentTime = next;
-                  });
+                  seekTo(next);
                 }
               }}
               onInput={(event) => {
@@ -583,10 +724,16 @@ export function PlayerControls({
           <button
             type="button"
             className="watch-control-btn"
-            aria-label={muted || volume === 0 ? "Unmute" : "Mute"}
+            aria-label={
+              target.muted || target.volume === 0 ? "Unmute" : "Mute"
+            }
             onClick={toggleMute}
           >
-            {muted || volume === 0 ? <IconVolumeMuted /> : <IconVolume />}
+            {target.muted || target.volume === 0 ? (
+              <IconVolumeMuted />
+            ) : (
+              <IconVolume />
+            )}
           </button>
 
           <label className="watch-volume">
@@ -596,28 +743,24 @@ export function PlayerControls({
               min={0}
               max={1}
               step={0.01}
-              value={muted ? 0 : volume}
+              value={target.muted ? 0 : target.volume}
               aria-label="Volume"
               onChange={(event) => {
-                const next = Number(event.currentTarget.value);
-                withVideo((video) => {
-                  video.volume = next;
-                  if (next > 0 && video.muted) {
-                    video.muted = false;
-                  }
-                });
+                setVolumeLevel(Number(event.currentTarget.value));
               }}
             />
           </label>
 
-          <button
-            type="button"
-            className="watch-control-btn"
-            aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-            onClick={toggleFullscreen}
-          >
-            {fullscreen ? <IconFullscreenExit /> : <IconFullscreen />}
-          </button>
+          {!remoteActive ? (
+            <button
+              type="button"
+              className="watch-control-btn"
+              aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+              onClick={toggleFullscreen}
+            >
+              {fullscreen ? <IconFullscreenExit /> : <IconFullscreen />}
+            </button>
+          ) : null}
 
           {cast.available ? (
             <button

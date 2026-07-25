@@ -1,7 +1,8 @@
 /**
  * Minimal ambient types for the CAF web sender SDK loaded from gstatic.
- * Only the surface used by initCast / useCastState / loadMediaOnCast /
- * subscribeSessionReady — expand as later cast increments need it.
+ * Only the surface used by initCast / useCastState / useCastPlayer /
+ * loadMediaOnCast / subscribeSessionReady — expand as later cast increments
+ * need it.
  */
 
 declare namespace chrome.cast {
@@ -10,6 +11,10 @@ declare namespace chrome.cast {
     TAB_AND_ORIGIN_SCOPED = "tab_and_origin_scoped",
     ORIGIN_SCOPED = "origin_scoped",
     PAGE_SCOPED = "page_scoped",
+  }
+
+  interface Receiver {
+    friendlyName: string;
   }
 
   namespace media {
@@ -79,6 +84,48 @@ declare namespace cast.framework {
   class CastSession {
     loadMedia(request: chrome.cast.media.LoadRequest): Promise<unknown>;
     getMediaSession(): object | null;
+    getCastDevice(): chrome.cast.Receiver;
+  }
+
+  enum RemotePlayerEventType {
+    IS_CONNECTED_CHANGED = "isConnectedChanged",
+    IS_MEDIA_LOADED_CHANGED = "isMediaLoadedChanged",
+    IS_PAUSED_CHANGED = "isPausedChanged",
+    CURRENT_TIME_CHANGED = "currentTimeChanged",
+    DURATION_CHANGED = "durationChanged",
+    VOLUME_LEVEL_CHANGED = "volumeLevelChanged",
+    IS_MUTED_CHANGED = "isMutedChanged",
+  }
+
+  class RemotePlayer {
+    isConnected: boolean;
+    isMediaLoaded: boolean;
+    isPaused: boolean;
+    currentTime: number;
+    duration: number;
+    volumeLevel: number;
+    isMuted: boolean;
+  }
+
+  interface RemotePlayerChangedEvent {
+    field: string;
+    value: unknown;
+  }
+
+  class RemotePlayerController {
+    constructor(player: RemotePlayer);
+    addEventListener(
+      type: RemotePlayerEventType,
+      handler: (event: RemotePlayerChangedEvent) => void,
+    ): void;
+    removeEventListener(
+      type: RemotePlayerEventType,
+      handler: (event: RemotePlayerChangedEvent) => void,
+    ): void;
+    playOrPause(): void;
+    seek(): void;
+    setVolumeLevel(): void;
+    muteOrUnmute(): void;
   }
 
   class CastContext {

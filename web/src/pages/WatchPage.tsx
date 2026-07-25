@@ -24,6 +24,7 @@ import { ResumeDialog } from "../components/ResumeDialog";
 import { UpNextCard } from "../components/UpNextCard";
 import { loadMediaOnCast } from "../cast/loadMediaOnCast";
 import { subscribeSessionReady } from "../cast/subscribeSessionReady";
+import { useCastPlayer } from "../cast/useCastPlayer";
 import { useCastState } from "../cast/useCastState";
 
 const AUTO_PLAY_STORAGE_KEY = "tyflix.autoPlay";
@@ -163,6 +164,9 @@ export function WatchPage() {
   const tmdbId = parseTmdbId(rawTmdbId);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pendingResumeRef = useRef<PendingResume | null>(null);
+  // Last good Cast receiver position; survives disconnect so local HLS can resume.
+  const lastRemotePositionRef = useRef<number | null>(null);
+  const wasCastConnectedRef = useRef(false);
   // Last subtitleStreamId successfully applied via PUT. Avoids redundant
   // selects when only quality/audio change. Defaults to Off (null); we do not
   // reflect a pre-existing server-side selection on load.
@@ -181,6 +185,7 @@ export function WatchPage() {
     null,
   );
   const castUi = useCastState();
+  const castRemote = useCastPlayer();
   const autoPlayRef = useRef(autoPlay);
   const nextEpisodeRef = useRef(nextEpisode);
   const upNextDismissedRef = useRef(upNextDismissed);
@@ -258,6 +263,7 @@ export function WatchPage() {
     setDescriptor(null);
     setResumeDialog(null);
     pendingResumeRef.current = null;
+    lastRemotePositionRef.current = null;
     appliedSubtitleIdRef.current = null;
 
     void load()
@@ -527,6 +533,47 @@ export function WatchPage() {
       video.removeEventListener("ended", onEnded);
     };
   }, [descriptor, navigate]);
+
+  // Latch the receiver's playback position while casting so disconnect can
+  // hand off to local resume (pendingResumeRef) instead of restarting at 0.
+  useEffect(() => {
+    if (!castRemote.isActive) {
+      return;
+    }
+    const t = castRemote.currentTime;
+    if (typeof t === "number" && Number.isFinite(t) && t > 0) {
+      lastRemotePositionRef.current = t;
+    }
+  }, [castRemote.isActive, castRemote.currentTime]);
+
+  // Must run BEFORE the hls effect below: when castUi.connected flips
+  // true → false, seed pendingResumeRef so applyPendingResume seeks there
+  // once the re-attached manifest parses.
+  useEffect(() => {
+    const connected = castUi.connected;
+    if (wasCastConnectedRef.current && !connected) {
+      const latched = lastRemotePositionRef.current;
+      lastRemotePositionRef.current = null;
+      if (
+        typeof latched === "number" &&
+        Number.isFinite(latched) &&
+        latched > 0
+      ) {
+        let position = latched;
+        const durationMs = timelineDurationMsRef.current;
+        if (durationMs !== null && durationMs > 0) {
+          const durationSec = durationMs / 1000;
+          if (position > durationSec) {
+            position = durationSec;
+          }
+        }
+        if (Number.isFinite(position) && position > 0) {
+          pendingResumeRef.current = { position, wasPlaying: true };
+        }
+      }
+    }
+    wasCastConnectedRef.current = connected;
+  }, [castUi.connected]);
 
   // Wire up playback once a descriptor is ready. Tries the local connection
   // first and falls back to the remote one on a fatal hls.js error.
@@ -977,6 +1024,7 @@ export function WatchPage() {
             onStreamSettingsChange={onStreamSettingsChange}
             autoPlay={isEpisode ? autoPlay : undefined}
             onAutoPlayChange={isEpisode ? onAutoPlayChange : undefined}
+            remote={castRemote}
             overlay={playerOverlay}
           >
             <video
