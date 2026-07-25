@@ -142,6 +142,62 @@ function buildThumbUrls(
   });
 }
 
+function resolveTimelineDurationMs(
+  primarySeconds: number,
+  fallbackMs: number | null | undefined,
+): number {
+  const fromPrimary = Math.round(primarySeconds * 1000);
+  if (Number.isFinite(fromPrimary) && fromPrimary > 0) {
+    return fromPrimary;
+  }
+  if (
+    typeof fallbackMs === "number" &&
+    Number.isFinite(fallbackMs) &&
+    fallbackMs > 0
+  ) {
+    return Math.round(fallbackMs);
+  }
+  return 0;
+}
+
+type TimelinePayload = {
+  ratingKey: string;
+  state: TimelineState;
+  time: number;
+  duration: number;
+};
+
+function buildTimelinePayload(
+  ratingKey: string,
+  state: TimelineState,
+  timeMs: number,
+  durationMs: number,
+): TimelinePayload | null {
+  if (durationMs <= 0) {
+    return null;
+  }
+  return {
+    ratingKey,
+    state,
+    time: Math.max(0, timeMs),
+    duration: durationMs,
+  };
+}
+
+function sendTimelinePayload(
+  payload: TimelinePayload | null,
+  useBeacon: boolean,
+): void {
+  if (payload === null) {
+    return;
+  }
+  if (useBeacon) {
+    reportTimelineBeacon(payload);
+  } else {
+    void reportTimeline(payload);
+  }
+}
+
 export function WatchPage() {
   const navigate = useNavigate();
   const {
@@ -187,6 +243,15 @@ export function WatchPage() {
   );
   const castUi = useCastState();
   const castRemote = useCastPlayer();
+  const castRemoteRef = useRef(castRemote);
+  castRemoteRef.current = castRemote;
+  const castReportingRef = useRef(false);
+  // Inert local reporter whenever a cast session is connected — HLS tears the
+  // <video> down on connected, which can precede RemotePlayer.isActive.
+  castReportingRef.current = castUi.connected || castRemote.isActive;
+  const castTimelineBridgeRef = useRef<{
+    onPlayingChange: (playing: boolean) => void;
+  } | null>(null);
   const autoPlayRef = useRef(autoPlay);
   const nextEpisodeRef = useRef(nextEpisode);
   const upNextDismissedRef = useRef(upNextDismissed);
@@ -363,9 +428,14 @@ export function WatchPage() {
 
   // Report playback timeline to Plex (resume position / watched state). Bound to
   // ratingKey only so quality/audio switches don't restart the heartbeat.
+  // While casting, this local <video> reporter is inert — the torn-down element
+  // reads currentTime 0 and must not overwrite a good resume point.
   useEffect(() => {
     const ratingKey = descriptor?.ratingKey;
     if (ratingKey === undefined || ratingKey === "") {
+      return;
+    }
+    if (castReportingRef.current) {
       return;
     }
 
@@ -385,55 +455,22 @@ export function WatchPage() {
       }
     };
 
-    const resolveDurationMs = (): number => {
-      const fromVideo = Math.round(video.duration * 1000);
-      if (Number.isFinite(fromVideo) && fromVideo > 0) {
-        return fromVideo;
-      }
-      const fallback = timelineDurationMsRef.current;
-      if (
-        typeof fallback === "number" &&
-        Number.isFinite(fallback) &&
-        fallback > 0
-      ) {
-        return Math.round(fallback);
-      }
-      return 0;
-    };
+    const resolveDurationMs = (): number =>
+      resolveTimelineDurationMs(video.duration, timelineDurationMsRef.current);
 
     const resolveTimeMs = (): number =>
       Math.max(0, Math.round(video.currentTime * 1000));
 
-    const buildPayload = (
-      state: TimelineState,
-    ): {
-      ratingKey: string;
-      state: TimelineState;
-      time: number;
-      duration: number;
-    } | null => {
-      const duration = resolveDurationMs();
-      if (duration <= 0) {
-        return null;
-      }
-      return {
+    const buildPayload = (state: TimelineState): TimelinePayload | null =>
+      buildTimelinePayload(
         ratingKey,
         state,
-        time: resolveTimeMs(),
-        duration,
-      };
-    };
+        resolveTimeMs(),
+        resolveDurationMs(),
+      );
 
     const sendTimeline = (state: TimelineState, useBeacon = false): void => {
-      const payload = buildPayload(state);
-      if (payload === null) {
-        return;
-      }
-      if (useBeacon) {
-        reportTimelineBeacon(payload);
-      } else {
-        void reportTimeline(payload);
-      }
+      sendTimelinePayload(buildPayload(state), useBeacon);
     };
 
     const sendFinalStopped = (): void => {
@@ -500,9 +537,147 @@ export function WatchPage() {
       video.removeEventListener("ended", onEnded);
       window.removeEventListener("pagehide", onPageHide);
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      // Handing off to the cast reporter — do not beacon the torn-down video's 0.
+      if (castReportingRef.current) {
+        clearHeartbeat();
+        return;
+      }
       sendFinalStopped();
     };
-  }, [descriptor?.ratingKey]);
+  }, [descriptor?.ratingKey, castUi.connected, castRemote.isActive]);
+
+  // Cast-session timeline reporter. Active only while castRemote.isActive; uses
+  // the receiver clock so a cast viewing drives resume / watched like local play.
+  useEffect(() => {
+    const ratingKey = descriptor?.ratingKey;
+    if (ratingKey === undefined || ratingKey === "" || !castRemote.isActive) {
+      return;
+    }
+
+    let heartbeatId: ReturnType<typeof setInterval> | null = null;
+    let finalStoppedSent = false;
+
+    const clearHeartbeat = () => {
+      if (heartbeatId !== null) {
+        clearInterval(heartbeatId);
+        heartbeatId = null;
+      }
+    };
+
+    const resolveDurationMs = (): number =>
+      resolveTimelineDurationMs(
+        castRemoteRef.current.duration,
+        timelineDurationMsRef.current,
+      );
+
+    const resolveTimeMs = (): number => {
+      const live = castRemoteRef.current.currentTime;
+      if (typeof live === "number" && Number.isFinite(live) && live > 0) {
+        return Math.round(live * 1000);
+      }
+      // Disconnect may zero RemotePlayer before this cleanup runs; the latch
+      // still holds the last good receiver position (handoff clears it later).
+      const latched = lastRemotePositionRef.current;
+      if (
+        typeof latched === "number" &&
+        Number.isFinite(latched) &&
+        latched > 0
+      ) {
+        return Math.round(latched * 1000);
+      }
+      return 0;
+    };
+
+    const buildPayload = (state: TimelineState): TimelinePayload | null =>
+      buildTimelinePayload(
+        ratingKey,
+        state,
+        resolveTimeMs(),
+        resolveDurationMs(),
+      );
+
+    const sendTimeline = (state: TimelineState, useBeacon = false): void => {
+      sendTimelinePayload(buildPayload(state), useBeacon);
+    };
+
+    const sendFinalStopped = (): void => {
+      if (finalStoppedSent) {
+        return;
+      }
+      finalStoppedSent = true;
+      clearHeartbeat();
+      // Never beacon a bogus 0 after a real cast session with no latched time.
+      if (resolveTimeMs() <= 0) {
+        return;
+      }
+      sendTimeline("stopped", true);
+    };
+
+    const startHeartbeat = () => {
+      clearHeartbeat();
+      heartbeatId = setInterval(() => {
+        sendTimeline("playing");
+      }, TIMELINE_HEARTBEAT_MS);
+    };
+
+    const onPlaying = () => {
+      sendTimeline("playing");
+      startHeartbeat();
+    };
+
+    const onPaused = () => {
+      clearHeartbeat();
+      if (resolveTimeMs() <= 0) {
+        return;
+      }
+      sendTimeline("paused");
+    };
+
+    const onPageHide = () => {
+      sendFinalStopped();
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        if (resolveTimeMs() <= 0) {
+          return;
+        }
+        sendTimeline("paused", true);
+      }
+    };
+
+    castTimelineBridgeRef.current = {
+      onPlayingChange: (playing) => {
+        if (playing) {
+          onPlaying();
+        } else {
+          onPaused();
+        }
+      },
+    };
+
+    if (castRemoteRef.current.playing) {
+      onPlaying();
+    }
+
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      castTimelineBridgeRef.current = null;
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      sendFinalStopped();
+    };
+  }, [descriptor?.ratingKey, castRemote.isActive]);
+
+  // Drive cast timeline playing/paused off RemotePlayer updates (same session).
+  useEffect(() => {
+    if (!castRemote.isActive) {
+      return;
+    }
+    castTimelineBridgeRef.current?.onPlayingChange(castRemote.playing);
+  }, [castRemote.isActive, castRemote.playing]);
 
   // Auto-advance on ended. Refs keep the listener current without rebinding
   // on every autoPlay / nextEpisode change.
