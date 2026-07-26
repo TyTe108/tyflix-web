@@ -115,6 +115,11 @@ export function LoginPage() {
     <main className="page login">
       <h1>Tyflix</h1>
       <p className="muted">Sign in with your Plex account to continue.</p>
+      <p className="muted">
+        Plex will show a &ldquo;Security Alert&rdquo; pop-up during sign-in.
+        That&rsquo;s expected and not a problem with Tyflix. Just continue and
+        sign in as normal.
+      </p>
 
       {phase === "waiting" ? (
         <p>Waiting for approval…</p>
