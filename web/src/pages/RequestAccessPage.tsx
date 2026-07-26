@@ -148,7 +148,7 @@ export function RequestAccessPage() {
           </p>
           <p>
             If your request is approved, <strong>Plex</strong> will email you an
-            invitation — Tyflix itself will not send you email.
+            invitation. Tyflix itself will not send you email.
           </p>
           <p>
             Click Accept in that invitation. If you don&rsquo;t already have a
@@ -203,7 +203,7 @@ export function RequestAccessPage() {
           <fieldset className="request-access-step">
             <legend>Do you already have a Plex account?</legend>
             <p className="muted">
-              Tyflix can&rsquo;t look this up for you — Plex doesn&rsquo;t expose
+              Tyflix can&rsquo;t look this up for you. Plex doesn&rsquo;t expose
               an account check. Your answer only changes the instructions we show
               next.
             </p>
@@ -253,7 +253,7 @@ export function RequestAccessPage() {
             ) : (
               <p className="muted">
                 You don&rsquo;t need a Plex account yet. If approved, Plex will
-                email you an invitation — accepting it is when you create a free
+                email you an invitation. Accepting it is when you create a free
                 Plex account, if you need one.
               </p>
             )}
@@ -296,7 +296,7 @@ export function RequestAccessPage() {
           <fieldset className="request-access-step">
             <legend>About you</legend>
             <p className="muted">
-              A name and a short note on who you are — enough for Tyler to
+              A name and a short note on who you are, enough for Tyler to
               recognize the request.
             </p>
             <label className="request-access-field">
