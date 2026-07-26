@@ -1,72 +1,70 @@
 # Tyflix
 
-Tyflix is a self-hosted web app that gives a Plex server a proper front door: browse and discover titles, request them in one click, see what is already in the library, and play it — all behind a Plex sign-in.
+Tyflix puts a real front door on a Plex server. Browse, request, see what's already in the library, play it. All behind a Plex login.
 
-It is built on top of Seerr, the request manager in the Overseerr and Jellyseerr family, which handles the pipeline into Radarr and Sonarr. Tyflix adds the parts that Seerr leaves thin for my use: a poster-forward browse-and-discover experience, in-browser playback, per-user analytics, and an admin view of the server itself. The goal was a clean front end my household could use without ever touching the automation tools underneath.
+It sits on top of Seerr, the request manager in the Overseerr and Jellyseerr family, which handles the pipeline into Radarr and Sonarr. Tyflix adds the parts Seerr leaves thin for what I needed: a poster-forward browse experience, in-browser playback, per-user analytics, and an admin view of the server itself. The point was that nobody in my house should ever have to open Radarr.
 
-**Live instance:** https://tyflix.tylerte.dev (signing in needs a Plex account with access to the server)
+**Live instance:** https://tyflix.tylerte.dev (you need a Plex account with access to the server to sign in)
 
-_Active project. Deployed and in daily use, and still being built out. The roadmap is at the bottom._
+Deployed, in daily use, still being built. Roadmap's at the bottom.
 
 ## Screenshots
 
-**Discover** — browse global trending from TMDB, with live availability read from Plex: green means it is already on the server, amber means partially available.
+**Discover.** Global trending from TMDB with live Plex availability layered on top. Green means it's already on the server, amber means partial.
 
 ![Discover page](docs/screenshots/discover.jpg)
 
-**Library** — a Plex-style view of what is actually on the server, opening with a Continue Watching rail. Sort, filter by genre or unwatched, jump with the A–Z rail, and resize the posters; the progress bars and watched badges are read live from Plex.
+**Library.** What's actually on the server, Plex-style, opening on a Continue Watching rail. Sort, filter by genre or unwatched, jump with the A-Z rail, resize the posters. Progress bars and watched badges read live from Plex.
 
 ![Library](docs/screenshots/library.jpg)
 
-**Title page** — artwork, overview, cast and crew, live availability, and a one-click Play or Request.
+**Title page.** Artwork, overview, cast and crew, availability, and one button that's either Play or Request depending on what the server already has.
 
 ![Title page](docs/screenshots/title.jpg)
 
-**In-browser player** — movies and episodes stream from Plex through an in-page player, transcoded on the fly. The custom control bar carries playback speed, a resolution selector, audio-track selection (including commentary tracks), and subtitles.
+**In-browser player.** Movies and episodes stream from Plex, transcoded on the fly. The control bar is custom: playback speed, resolution, audio track (commentary included), subtitles.
 
 ![Player](docs/screenshots/player.jpg)
 
-**Resume where you left off** — playback position syncs back to Plex, so any partly-watched title offers to resume from the exact second you stopped — whether you last watched in Tyflix or any other Plex client.
+**Resume where you left off.** Playback position syncs back to Plex, so a half-watched title offers to pick up at the exact second you stopped. Doesn't matter whether you last watched in Tyflix or on the TV in the other room.
 
 ![Resume](docs/screenshots/resume.jpg)
 
-**Up Next** — episodes auto-advance with a Plex-style "Up Next" card, triggered off the credits marker.
+**Up Next.** Episodes auto-advance off the credits marker, with the Plex-style card and countdown.
 
 ![Up Next](docs/screenshots/upnext.jpg)
 
-**Home** — each user's own watched-versus-requested breakdown: how much they have requested, how much of it they have actually watched, and how much is sitting unwatched.
+**Home.** Your own watched-versus-requested numbers. How much you asked for, how much you actually watched, how much is sitting there untouched.
 
 ![Home analytics](docs/screenshots/home.jpg)
 
-**Admin — system and storage** — host CPU, memory, load, temperatures, GPU transcode engines, and per-volume storage, proxied live from the server.
+**Admin, system and storage.** Host CPU, memory, load, temperatures, GPU transcode engines, per-volume storage. Proxied live off the server.
 
 ![Admin system](docs/screenshots/admin-system.jpg)
 
-**Admin — per-user analytics** — watched-versus-requested across every user, with a "posture" flag for accounts that request far more than they watch. (Other users' names are blurred here for privacy.)
+**Admin, per-user analytics.** The same watched-versus-requested split across every account, with a posture flag for people who request far more than they ever watch. Other users' names are blurred here.
 
 ![Admin users](docs/screenshots/admin-users.jpg)
 
-## What it does
+## Everything else in there
 
-- Browse and search movies and TV from TMDB: trending, browse by genre, recommendations, cast and crew, collections, and studio and network pages.
-- Browse your actual library: a Plex-style view of what is really on the server (Movies and TV), opening with a Continue Watching rail, with sort, genre and unwatched filters, an A–Z jump rail, an adjustable poster size, grid or detail layouts, and per-poster progress bars and watched badges.
-- Request a title in one click. Requests flow through Seerr into Radarr and Sonarr, which do the actual downloading and library management.
-- Play a title in the browser. Movies and individual TV episodes stream from Plex through an in-page player, transcoded on the fly so anything in the library plays regardless of its source format, with in-player controls for playback speed, resolution, audio track and subtitles, plus auto-advance to the next episode and a Plex-style "Up Next" card.
-- Pick up where you left off. Playback progress syncs back to Plex, so a Continue Watching rail, per-poster progress bars, watched badges, and a resume-from-position prompt all track the exact second you stopped — and stay in sync with every other Plex client.
-- Show real availability on every title (in the library, partially available, or still processing), read live from Plex through Seerr.
-- Report a problem with a title, such as bad audio or the wrong cut, and follow it through to resolution.
-- Plex Watchlist support, per-user request quotas, and quality-profile selection at request time.
-- An admin area with system and storage metrics, running jobs, container health, user management, and a per-user "watched versus requested" view that shows how much requested content actually gets watched.
+Beyond what's in the screenshots:
+
+- Full TMDB discovery: search, browse by genre, recommendations, cast and crew, collections, studio and network pages.
+- Requests flow through Seerr into Radarr and Sonarr, which do the actual downloading and library management. Tyflix doesn't reimplement any of that.
+- Report a problem on a title, like bad audio or the wrong cut, and follow it through to resolution.
+- Plex Watchlist, per-user request quotas, and quality-profile selection at request time.
+- The admin area also covers running jobs, container health, and user management.
 
 ## Architecture
 
-Tyflix is a single Node service. It serves a JSON API and the built React app from the same origin.
+Tyflix is one Node service. It serves a JSON API and the built React app from the same origin.
 
-- **Frontend:** React, Vite, and TypeScript. A dark, poster-forward interface with a persistent sidebar.
-- **Backend:** Node, Express, and TypeScript. It holds every credential and talks to four upstreams: Plex for accounts and the library, Seerr for requests and media status and issues, TMDB for discovery metadata and images, and a small host-metrics service for the dashboard.
+- **Frontend:** React, Vite, TypeScript. Dark, poster-forward, persistent sidebar.
+- **Backend:** Node, Express, TypeScript. It holds every credential and talks to four upstreams: Plex for accounts and the library, Seerr for requests and media status and issues, TMDB for discovery metadata and images, and a small host-metrics service that feeds the admin dashboard.
 - **Auth:** users sign in with their Plex account over Plex's PIN flow. The browser only ever holds a signed, httpOnly session cookie. The Plex token stays on the server.
-- **Playback:** to stream, the server mints a short-lived Plex *transient* token from the user's stored token and hands the browser Plex's own direct `plex.direct` address, so video goes straight from Plex to the in-page player and never passes through the tunnel. Plex transcodes on demand; the durable token never leaves the backend.
-- **Deployment:** the whole app runs in Docker on a home server, on the same Docker network as Seerr. It is reachable from anywhere through a Cloudflare Tunnel, so no inbound ports are open on the home network. TLS terminates at Cloudflare's edge.
+- **Playback:** the server mints a short-lived Plex *transient* token from the user's stored token and hands the browser Plex's own `plex.direct` address, so video goes straight from Plex to the in-page player and never touches the tunnel. Plex transcodes on demand. The durable token never leaves the backend.
+- **Deployment:** the whole thing runs in Docker on a home server, on the same Docker network as Seerr, reachable from anywhere through a Cloudflare Tunnel. No inbound ports are open on the home network. TLS terminates at Cloudflare's edge.
 
 ```
 Browser --https--> Cloudflare edge --tunnel--> cloudflared --> Tyflix (Node)
@@ -75,21 +73,21 @@ Browser --https--> Cloudflare edge --tunnel--> cloudflared --> Tyflix (Node)
                                                                  |-> TMDB
 ```
 
-(Only the control plane goes through the tunnel — video streams direct from the browser to Plex over HTTPS.)
+Only the control plane goes through the tunnel. Video streams direct from the browser to Plex over HTTPS.
 
 ## Notable engineering decisions
 
-**Outbound-only public access (a reverse-invoke model).** The app runs at home but is reachable from anywhere, with no inbound port open on the network. Instead of forwarding a port through the router, which would put a service straight on the public internet, I moved access onto a broker-mediated, outbound-only model built on a Cloudflare Tunnel. A lightweight connector (cloudflared) runs next to the app and dials out to Cloudflare's edge, keeping a persistent connection open from the inside. Cloudflare acts as the broker: when a request arrives for the public hostname, the edge sends it back down that already-open connection to the connector, which passes it to the app over the local Docker network. Every connection starts inside the network and goes out, so the router never accepts unsolicited inbound traffic, and TLS and edge filtering happen at Cloudflare.
+**Outbound-only public access, a reverse-invoke model.** The app runs at home and is reachable from anywhere with no inbound port open on the network. The obvious way to do this is to forward a port on the router, which puts a service straight on the public internet. I didn't want that, so access runs on a broker-mediated, outbound-only model built on a Cloudflare Tunnel. A lightweight connector (cloudflared) sits next to the app and dials out to Cloudflare's edge, holding a connection open from the inside. Cloudflare acts as the broker: a request arrives for the public hostname, the edge pushes it back down that already-open connection, and the connector hands it to the app over the local Docker network. Every connection starts inside the network and goes out. The router never accepts unsolicited inbound traffic, and TLS and edge filtering happen at Cloudflare.
 
-This is the same shape as an enterprise pattern like SAP Cloud Connector reaching SAP BTP: the on-premise side opens the tunnel outbound, and the cloud reverse-invokes back through it. The result is a home-hosted service that is publicly reachable while the network perimeter stays closed.
+It's the same shape as an enterprise pattern like SAP Cloud Connector reaching SAP BTP. The on-premise side opens the tunnel outbound and the cloud reverse-invokes back through it. Publicly reachable service, closed perimeter.
 
-**Streaming video without pushing it through the tunnel.** Everything else in the app rides the outbound tunnel, but video is the deliberate exception. Proxying a movie through Cloudflare would be slow and outside the terms for that path, so playback streams straight from Plex to the browser instead. When a user hits play, the server mints a short-lived Plex *transient* token from their stored token — the long-lived token never reaches the browser — and returns Plex's own direct address, both a local and a remote one, so the player uses whichever it can actually reach. Plex transcodes on demand, forced to H.264, so anything in the library plays in a browser regardless of its source codec. The control plane stays behind the tunnel; only the video goes direct.
+**Streaming video without pushing it through the tunnel.** Everything else in the app rides the outbound tunnel. Video is the deliberate exception. Proxying a movie through Cloudflare would be slow and outside the terms for that path, so playback streams straight from Plex to the browser instead. When a user hits play, the server mints a short-lived Plex *transient* token from their stored token (the long-lived one never reaches the browser) and returns Plex's own direct address, both a local one and a remote one, so the player uses whichever it can actually reach. Plex transcodes on demand, forced to H.264, so anything in the library plays in a browser no matter what codec it was ripped in. Control plane behind the tunnel, video direct.
 
-**Rate limiting that sees the real client.** Because the app sits behind the tunnel, every request arrives from the tunnel's address rather than the user's. A naive per-IP limiter would treat all traffic as one client. The limiter keys on the `CF-Connecting-IP` header that Cloudflare sets and overwrites, so a client cannot forge it, and falls back to the socket address for local development. The limit itself was tuned after a real finding: the admin dashboard polls a few endpoints every few seconds, and an early, tighter limit throttled the admin's own page inside a single window.
+**Rate limiting that sees the real client.** Sitting behind the tunnel means every request arrives from the tunnel's address rather than the user's, so a naive per-IP limiter treats all traffic as one client. The limiter keys on the `CF-Connecting-IP` header, which Cloudflare sets and overwrites so a client can't forge it, and falls back to the socket address for local development. The limit itself got tuned after I throttled myself: the admin dashboard polls a few endpoints every couple of seconds, and an early, tighter limit locked the admin out of their own page inside a single window.
 
-**Security that does not rely on hiding the code.** All authorization happens on the server. Every route checks the session, and admin routes check an admin permission bit that mirrors Seerr's model. The long-lived Plex token never leaves the backend. Security headers ship a Content-Security-Policy scoped to exactly what the app loads: posters from TMDB, fonts from Google, everything else same-origin. The one subtlety is the Plex login popup, which needs a Cross-Origin-Opener-Policy that lets the opener keep a handle on the popup so the sign-in flow can close it when the login completes.
+**Security that doesn't depend on the code being private.** Authorization all happens on the server. Every route checks the session, and admin routes check an admin permission bit that mirrors Seerr's model. The long-lived Plex token never leaves the backend. Security headers ship a Content-Security-Policy scoped to exactly what the app loads: posters from TMDB, fonts from Google, everything else same-origin. The one awkward exception is the Plex login popup, which needs a Cross-Origin-Opener-Policy loose enough that the opener keeps a handle on the popup and can close it once sign-in completes.
 
-**Joining two id systems.** Discovery is keyed by TMDB id, while Plex is keyed by its own rating keys. Availability and playability come from matching the two through Seerr's media records, so the app can show accurate status without guessing by title.
+**Joining two id systems.** Discovery is keyed by TMDB id. Plex is keyed by its own rating keys. Availability and playability come from matching the two through Seerr's media records, which is how the app shows accurate status instead of guessing by title.
 
 ## Tech stack
 
@@ -102,12 +100,14 @@ This is the same shape as an enterprise pattern like SAP Cloud Connector reachin
 
 ## Status and roadmap
 
-Tyflix is deployed and in daily use on my home server, and it is still an active work in progress. It covers most of Seerr's user-facing surface, plus features Seerr does not have, like the per-user watched-versus-requested analytics.
+Tyflix is deployed and in daily use on my home server, and it's still an active work in progress. It covers most of Seerr's user-facing surface plus a few things Seerr doesn't do, like the per-user watched-versus-requested analytics.
 
-In-browser playback now works for both movies and TV — pick a title or a specific episode, hit play, and it streams from Plex right in the page. That closes a nice loop: watching through Tyflix feeds the same watched-versus-requested numbers the analytics already report.
+Recent work: the Plex-style Library, the full set of in-player controls, auto-advance with the Up Next card, hardware-accelerated transcoding on the server's Arc GPU, and progress sync back to Plex. That last one also made watch state per-user instead of owner-based, which is what makes the Continue Watching rail and the per-poster progress bars mean anything.
 
-Since then it has grown a Plex-style **Library** (browse everything actually on the server, with sort, genre and unwatched filters, an A–Z jump rail, an adjustable poster size, and grid or detail layouts), full in-player controls (**playback speed, resolution, audio-track and subtitle selection**), **auto-advance with an "Up Next" card**, and **hardware-accelerated transcoding** on the server's Arc GPU. Most recently, **playback progress now syncs back to Plex**: a Continue Watching rail, per-poster progress bars, watched badges, and resume-from-position are all live, and watch state is now per-user rather than owner-based. Further out: an automatic bitrate cap for constrained connections, and **casting to LAN devices** (Chromecast and AirPlay). The guiding idea is to keep integrating tools that already exist rather than rebuilding them, so Tyflix stays a thin, sharp layer over Plex and Seerr instead of a second copy of either.
+Next up: an automatic bitrate cap for constrained connections, and casting to LAN devices (Chromecast and AirPlay).
+
+Wherever I can, I'd rather wire up a tool that already works than rebuild it. Tyflix is a layer over Plex and Seerr, not a second copy of either.
 
 ## Notes
 
-Tyflix is a personal, self-hosted project. It is not affiliated with Plex, and it does not host or distribute media. It manages access to a private Plex library. This repository holds the application code; deployment details specific to my own network are kept out of it.
+Personal project, self-hosted, not affiliated with Plex. It doesn't host or distribute media; it manages access to a private Plex library. This repository is application code only. Deployment details specific to my own network stay out of it.
