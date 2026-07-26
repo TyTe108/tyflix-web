@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { submitAccessRequest } from "../api/accessRequests";
+import { useAccessRequestsEnabled } from "../hooks/useAccessRequestsEnabled";
 
 const EMAIL_MAX = 254;
 const NAME_MAX = 80;
@@ -11,6 +12,7 @@ const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 type Step = 1 | 2 | 3 | 4;
 
 export function RequestAccessPage() {
+  const accessRequestsEnabled = useAccessRequestsEnabled();
   const [step, setStep] = useState<Step>(1);
   const [hasPlexAccount, setHasPlexAccount] = useState<boolean | null>(null);
   const [email, setEmail] = useState("");
@@ -106,6 +108,33 @@ export function RequestAccessPage() {
     }
 
     setError(result.message);
+  }
+
+  if (accessRequestsEnabled === null) {
+    return (
+      <main className="page login request-access">
+        <p className="muted">Loading…</p>
+      </main>
+    );
+  }
+
+  if (accessRequestsEnabled === false) {
+    return (
+      <main className="page login request-access">
+        <h1>Request access</h1>
+        <div className="request-access-success">
+          <p>
+            Tyflix isn&rsquo;t accepting access requests right now. Try again
+            later, or contact whoever runs this instance.
+          </p>
+        </div>
+        <p>
+          <Link to="/login" className="btn">
+            Back to sign in
+          </Link>
+        </p>
+      </main>
+    );
   }
 
   if (submitted) {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { checkPlexLogin, startPlexLogin } from "../api/auth";
 import { useAuth } from "../auth/AuthContext";
+import { useAccessRequestsEnabled } from "../hooks/useAccessRequestsEnabled";
 
 const POLL_MS = 2000;
 const TIMEOUT_MS = 150_000;
@@ -11,6 +12,7 @@ type LoginPhase = "idle" | "waiting" | "error" | "forbidden";
 export function LoginPage() {
   const { status, refresh } = useAuth();
   const navigate = useNavigate();
+  const accessRequestsEnabled = useAccessRequestsEnabled();
   const [phase, setPhase] = useState<LoginPhase>("idle");
   const [message, setMessage] = useState<string | null>(null);
   const popupRef = useRef<Window | null>(null);
@@ -129,7 +131,7 @@ export function LoginPage() {
         </button>
       )}
 
-      {phase === "idle" ? (
+      {phase === "idle" && accessRequestsEnabled === true ? (
         <p className="muted login-request-link">
           <Link to="/request-access">Don&rsquo;t have access? Request it</Link>
         </p>
@@ -138,11 +140,13 @@ export function LoginPage() {
       {phase === "forbidden" && message ? (
         <div className="login-forbidden" role="alert">
           <p className="error">{message}</p>
-          <p className="login-forbidden-cta">
-            <Link to="/request-access" className="btn">
-              Request access
-            </Link>
-          </p>
+          {accessRequestsEnabled === true ? (
+            <p className="login-forbidden-cta">
+              <Link to="/request-access" className="btn">
+                Request access
+              </Link>
+            </p>
+          ) : null}
         </div>
       ) : phase === "error" && message ? (
         <p className="error" role="alert">

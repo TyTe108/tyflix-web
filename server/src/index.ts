@@ -17,6 +17,7 @@ import { createTransientTokenMinter } from "./plex/transientToken";
 import { createAccessRequestsRouter } from "./routes/accessRequests";
 import { createAdminRouter } from "./routes/admin";
 import { createAuthRouter } from "./routes/auth";
+import { createConfigRouter } from "./routes/config";
 import { createDiscoverRouter } from "./routes/discover";
 import { createLibraryRouter } from "./routes/library";
 import { createIssuesRouter } from "./routes/issues";
@@ -149,6 +150,15 @@ async function start(): Promise<void> {
       seerr,
       sessionSecret: config.sessionSecret,
       secureCookies,
+    }),
+  );
+
+  // Public feature-flag probe (no secrets). Always mounted so the SPA can
+  // learn whether optional public flows are available while logged out.
+  app.use(
+    "/api/config",
+    createConfigRouter({
+      accessRequestsEnabled: accessRequestStore !== undefined,
     }),
   );
 
