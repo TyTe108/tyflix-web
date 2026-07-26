@@ -12,6 +12,7 @@ import { MediaDetailPage } from "./pages/MediaDetailPage";
 import { MyIssuesPage } from "./pages/MyIssuesPage";
 import { MyRequestsPage } from "./pages/MyRequestsPage";
 import { PersonPage } from "./pages/PersonPage";
+import { RequestAccessPage } from "./pages/RequestAccessPage";
 import { WatchPage } from "./pages/WatchPage";
 import { WatchlistPage } from "./pages/WatchlistPage";
 
@@ -19,6 +20,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/request-access" element={<RequestAccessPage />} />
       <Route element={<ProtectedRoute />}>
         <Route element={<AppShell />}>
           <Route path="/" element={<Navigate to="/library" replace />} />

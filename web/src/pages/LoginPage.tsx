@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { checkPlexLogin, startPlexLogin } from "../api/auth";
 import { useAuth } from "../auth/AuthContext";
 
@@ -129,7 +129,22 @@ export function LoginPage() {
         </button>
       )}
 
-      {(phase === "error" || phase === "forbidden") && message ? (
+      {phase === "idle" ? (
+        <p className="muted login-request-link">
+          <Link to="/request-access">Don&rsquo;t have access? Request it</Link>
+        </p>
+      ) : null}
+
+      {phase === "forbidden" && message ? (
+        <div className="login-forbidden" role="alert">
+          <p className="error">{message}</p>
+          <p className="login-forbidden-cta">
+            <Link to="/request-access" className="btn">
+              Request access
+            </Link>
+          </p>
+        </div>
+      ) : phase === "error" && message ? (
         <p className="error" role="alert">
           {message}
         </p>
