@@ -27,3 +27,17 @@ export const apiRateLimiter = rateLimit({
   keyGenerator: clientIpKey,
   message: { error: "Too many requests, please try again later." },
 });
+
+// Public access-request submit: 5/hour/IP. Much tighter than the general
+// limiter — each submission costs owner attention.
+const ACCESS_REQUEST_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const ACCESS_REQUEST_MAX = 5;
+
+export const accessRequestLimiter = rateLimit({
+  windowMs: ACCESS_REQUEST_WINDOW_MS,
+  limit: ACCESS_REQUEST_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: clientIpKey,
+  message: { error: "Too many requests, please try again later." },
+});

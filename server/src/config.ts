@@ -1,3 +1,5 @@
+import path from "node:path";
+
 export type AppConfig = {
   port: number;
   nodeEnv: "development" | "production" | "test";
@@ -10,6 +12,8 @@ export type AppConfig = {
   seerrApiKey: string;
   dashboardUrl: string;
   tmdbApiKey: string;
+  /** Absolute path to the access-requests JSON file. Absent = feature off. */
+  accessRequestsFile?: string;
 };
 
 export function validate(
@@ -106,7 +110,26 @@ function parseTmdbApiKey(raw: string | undefined): string {
   return validate("TMDB_API_KEY", raw, () => null);
 }
 
+/**
+ * Truly optional: unset/whitespace → feature off (undefined). When set, must
+ * be a non-empty absolute path — a relative path means the Docker volume mount
+ * is wrong and should fail loud at boot.
+ */
+function parseAccessRequestsFile(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === "") {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (!path.isAbsolute(trimmed)) {
+    throw new Error(
+      "Invalid ACCESS_REQUESTS_FILE: must be an absolute path",
+    );
+  }
+  return trimmed;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+  const accessRequestsFile = parseAccessRequestsFile(env.ACCESS_REQUESTS_FILE);
   return {
     port: parsePort(env.PORT),
     nodeEnv: parseNodeEnv(env.NODE_ENV),
@@ -119,5 +142,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     seerrApiKey: parseSeerrApiKey(env.SEERR_API_KEY),
     dashboardUrl: parseDashboardUrl(env.DASHBOARD_URL),
     tmdbApiKey: parseTmdbApiKey(env.TMDB_API_KEY),
+    ...(accessRequestsFile !== undefined ? { accessRequestsFile } : {}),
   };
 }

@@ -34,6 +34,36 @@ describe("loadConfig", () => {
     });
   });
 
+  it("omits accessRequestsFile when ACCESS_REQUESTS_FILE is unset or whitespace", () => {
+    const unset = loadConfig(validEnv);
+    assert.equal("accessRequestsFile" in unset, false);
+
+    const blank = loadConfig({ ...validEnv, ACCESS_REQUESTS_FILE: "  " });
+    assert.equal("accessRequestsFile" in blank, false);
+  });
+
+  it("accepts an absolute ACCESS_REQUESTS_FILE path", () => {
+    const config = loadConfig({
+      ...validEnv,
+      ACCESS_REQUESTS_FILE: "/data/access-requests.json",
+    });
+    assert.equal(config.accessRequestsFile, "/data/access-requests.json");
+  });
+
+  it("throws when ACCESS_REQUESTS_FILE is a relative path", () => {
+    assert.throws(
+      () =>
+        loadConfig({
+          ...validEnv,
+          ACCESS_REQUESTS_FILE: "data/access-requests.json",
+        }),
+      (err: unknown) =>
+        err instanceof Error &&
+        err.message.includes("ACCESS_REQUESTS_FILE") &&
+        err.message.includes("absolute"),
+    );
+  });
+
   it("strips trailing slashes from DASHBOARD_URL", () => {
     const config = loadConfig({
       ...validEnv,
