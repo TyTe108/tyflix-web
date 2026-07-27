@@ -3383,6 +3383,56 @@ a.library-detail-title:hover {
   font-size: 0.875rem;
 }
 
+.admin-access-note {
+  margin: 0.45rem 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.admin-access-granted,
+.admin-access-admin-note,
+.admin-access-ip {
+  margin: 0.35rem 0 0;
+  font-size: 0.875rem;
+}
+
+.admin-access-ip {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+}
+
+.admin-access-sections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+
+.admin-access-section {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.admin-access-section input {
+  accent-color: var(--accent);
+}
+
+.admin-access-confirm {
+  background: var(--warn);
+  color: var(--accent-contrast);
+}
+
+.admin-access-confirm:hover {
+  background: color-mix(in srgb, var(--warn) 85%, var(--text));
+}
+
 .btn:disabled {
   cursor: not-allowed;
   opacity: 0.55;

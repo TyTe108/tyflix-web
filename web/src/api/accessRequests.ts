@@ -7,6 +7,36 @@ export type AccessRequestInput = {
   website: string;
 };
 
+export type AccessRequestStatus =
+  | "pending"
+  | "invited"
+  | "accepted"
+  | "denied";
+
+export type AccessRequest = {
+  id: string;
+  email: string;
+  plexUsername: string | null;
+  name: string;
+  note: string;
+  hasPlexAccount: boolean;
+  status: AccessRequestStatus;
+  createdAt: number;
+  decidedAt: number | null;
+  invitedAt: number | null;
+  acceptedAt: number | null;
+  sectionIds: number[] | null;
+  adminNote: string | null;
+  sourceIp: string | null;
+};
+
+export type ShareableSection = {
+  id: number;
+  key: number;
+  title: string;
+  type: string;
+};
+
 export type SubmitAccessRequestResult =
   | { ok: true }
   | { ok: false; kind: "validation"; message: string }
@@ -81,4 +111,84 @@ export async function submitAccessRequest(
     kind: "error",
     message: `Request failed (${res.status}). Please try again.`,
   };
+}
+
+export async function fetchAccessRequests(): Promise<AccessRequest[]> {
+  const res = await fetch("/api/admin/access-requests");
+  if (!res.ok) {
+    throw new Error(await errorMessage(res, "Failed to load access requests"));
+  }
+  return (await res.json()) as AccessRequest[];
+}
+
+export async function fetchAccessRequestSections(): Promise<ShareableSection[]> {
+  const res = await fetch("/api/admin/access-requests/sections");
+  if (!res.ok) {
+    throw new Error(
+      await errorMessage(res, "Failed to load shareable sections"),
+    );
+  }
+  return (await res.json()) as ShareableSection[];
+}
+
+export async function approveAccessRequest(
+  id: string,
+  sectionIds?: number[],
+): Promise<AccessRequest> {
+  const res = await fetch(
+    `/api/admin/access-requests/${encodeURIComponent(id)}/approve`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        sectionIds !== undefined ? { sectionIds } : {},
+      ),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(await errorMessage(res, "Failed to approve access request"));
+  }
+  return (await res.json()) as AccessRequest;
+}
+
+export async function denyAccessRequest(id: string): Promise<AccessRequest> {
+  const res = await fetch(
+    `/api/admin/access-requests/${encodeURIComponent(id)}/deny`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(await errorMessage(res, "Failed to deny access request"));
+  }
+  return (await res.json()) as AccessRequest;
+}
+
+export function accessRequestStatusBadgeClass(
+  status: AccessRequestStatus,
+): string {
+  switch (status) {
+    case "pending":
+      return "request-status request-status-pending";
+    case "invited":
+      return "request-status request-status-processing";
+    case "accepted":
+      return "request-status request-status-approved";
+    case "denied":
+      return "request-status request-status-declined";
+  }
+}
+
+async function errorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: unknown };
+    if (typeof body.error === "string" && body.error.trim() !== "") {
+      return body.error;
+    }
+  } catch {
+    // fall through
+  }
+  return `${fallback} (${res.status})`;
 }

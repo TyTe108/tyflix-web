@@ -1,5 +1,14 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import {
+  accessRequestStatusBadgeClass,
+  approveAccessRequest,
+  denyAccessRequest,
+  fetchAccessRequestSections,
+  fetchAccessRequests,
+  type AccessRequest,
+  type ShareableSection,
+} from "../api/accessRequests";
 import {
   fetchAdminContainers,
   fetchAdminSystem,
@@ -54,6 +63,7 @@ import { usePagination } from "../hooks/usePagination";
 const ADMIN_TABS = [
   { id: "requests", label: "Requests" },
   { id: "issues", label: "Issues" },
+  { id: "access", label: "Access" },
   { id: "users", label: "Users" },
   { id: "system", label: "System" },
   { id: "jobs", label: "Jobs" },
@@ -119,6 +129,7 @@ export function AdminPage() {
       >
         {activeTab === "requests" ? <RequestsPanel /> : null}
         {activeTab === "issues" ? <IssuesPanel /> : null}
+        {activeTab === "access" ? <AccessPanel /> : null}
         {activeTab === "users" ? <UsersPanel /> : null}
         {activeTab === "system" ? <SystemPanel /> : null}
         {activeTab === "jobs" ? <JobsPanel /> : null}
@@ -345,6 +356,329 @@ function IssuesPanel() {
         </>
       ) : null}
     </section>
+  );
+}
+
+function AccessPanel() {
+  const { data, status, error, lastUpdated, refresh } = usePolledResource(
+    fetchAccessRequests,
+    30000,
+  );
+  const [sections, setSections] = useState<ShareableSection[] | null>(null);
+  const [sectionsFailed, setSectionsFailed] = useState(false);
+  const [sectionsLoaded, setSectionsLoaded] = useState(false);
+  const [selectedById, setSelectedById] = useState<Record<string, number[]>>(
+    {},
+  );
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const list = await fetchAccessRequestSections();
+        if (!cancelled) {
+          setSections(list);
+          setSectionsFailed(false);
+          setSectionsLoaded(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setSections(null);
+          setSectionsFailed(true);
+          setSectionsLoaded(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const sorted = useMemo(() => {
+    const rows = data ?? [];
+    return [...rows].sort((a, b) => {
+      if (a.status === "pending" && b.status !== "pending") {
+        return -1;
+      }
+      if (b.status === "pending" && a.status !== "pending") {
+        return 1;
+      }
+      return b.createdAt - a.createdAt;
+    });
+  }, [data]);
+
+  const sectionTitleById = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const section of sections ?? []) {
+      map.set(section.id, section.title);
+    }
+    return map;
+  }, [sections]);
+
+  function selectedIdsFor(requestId: string): number[] {
+    const explicit = selectedById[requestId];
+    if (explicit !== undefined) {
+      return explicit;
+    }
+    return (sections ?? []).map((s) => s.id);
+  }
+
+  function toggleSection(requestId: string, sectionId: number) {
+    setConfirmId(null);
+    const current = selectedIdsFor(requestId);
+    const next = current.includes(sectionId)
+      ? current.filter((id) => id !== sectionId)
+      : [...current, sectionId];
+    setSelectedById((prev) => ({ ...prev, [requestId]: next }));
+  }
+
+  const runApprove = useCallback(
+    async (id: string, sectionIds: number[] | undefined) => {
+      setActiveId(id);
+      setActionError(null);
+      setConfirmId(null);
+      try {
+        if (sectionIds === undefined) {
+          await approveAccessRequest(id);
+        } else {
+          await approveAccessRequest(id, sectionIds);
+        }
+      } catch (err: unknown) {
+        setActionError(
+          err instanceof Error ? err.message : "Failed to approve request",
+        );
+      } finally {
+        refresh();
+        setActiveId(null);
+      }
+    },
+    [refresh],
+  );
+
+  const runDeny = useCallback(
+    async (id: string) => {
+      setActiveId(id);
+      setActionError(null);
+      setConfirmId(null);
+      try {
+        await denyAccessRequest(id);
+      } catch (err: unknown) {
+        setActionError(
+          err instanceof Error ? err.message : "Failed to deny request",
+        );
+      } finally {
+        refresh();
+        setActiveId(null);
+      }
+    },
+    [refresh],
+  );
+
+  return (
+    <section className="admin-section" aria-labelledby="access-heading">
+      <h2 id="access-heading">Access</h2>
+
+      {status === "loading" ? (
+        <p className="muted">Loading access requests…</p>
+      ) : null}
+
+      {status === "error" ? (
+        <div className="stats-error">
+          <p className="error">{error ?? "Failed to load access requests"}</p>
+          <button type="button" className="btn secondary" onClick={refresh}>
+            Retry
+          </button>
+        </div>
+      ) : null}
+
+      {status === "ready" && actionError ? (
+        <p className="error admin-requests-action-error">{actionError}</p>
+      ) : null}
+
+      {status === "ready" ? (
+        <>
+          <UpdatedLine lastUpdated={lastUpdated} refreshError={error} />
+          {sorted.length === 0 ? (
+            <p className="muted">No access requests</p>
+          ) : (
+            <ul className="admin-requests-list">
+              {sorted.map((request) => {
+                const selectedIds = selectedIdsFor(request.id);
+                const showPicker =
+                  !sectionsFailed &&
+                  sections !== null &&
+                  sections.length > 0;
+                const canApprove =
+                  request.status === "pending" &&
+                  sectionsLoaded &&
+                  (sectionsFailed || selectedIds.length > 0);
+
+                return (
+                  <AccessRequestRow
+                    key={request.id}
+                    request={request}
+                    sections={showPicker ? sections : null}
+                    selectedIds={selectedIds}
+                    sectionTitleById={sectionTitleById}
+                    confirming={confirmId === request.id}
+                    inFlight={activeId === request.id}
+                    canApprove={canApprove}
+                    onToggleSection={(sectionId) =>
+                      toggleSection(request.id, sectionId)
+                    }
+                    onRowClick={() => {
+                      if (confirmId === request.id) {
+                        setConfirmId(null);
+                      }
+                    }}
+                    onApproveClick={() => {
+                      if (confirmId === request.id) {
+                        void runApprove(
+                          request.id,
+                          sectionsFailed ? undefined : selectedIds,
+                        );
+                        return;
+                      }
+                      setConfirmId(request.id);
+                    }}
+                    onDenyClick={() => void runDeny(request.id)}
+                  />
+                );
+              })}
+            </ul>
+          )}
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function AccessRequestRow({
+  request,
+  sections,
+  selectedIds,
+  sectionTitleById,
+  confirming,
+  inFlight,
+  canApprove,
+  onToggleSection,
+  onRowClick,
+  onApproveClick,
+  onDenyClick,
+}: {
+  request: AccessRequest;
+  sections: ShareableSection[] | null;
+  selectedIds: number[];
+  sectionTitleById: Map<number, string>;
+  confirming: boolean;
+  inFlight: boolean;
+  canApprove: boolean;
+  onToggleSection: (sectionId: number) => void;
+  onRowClick: () => void;
+  onApproveClick: () => void;
+  onDenyClick: () => void;
+}) {
+  const pending = request.status === "pending";
+
+  const grantedTitles =
+    request.sectionIds === null
+      ? []
+      : request.sectionIds.map(
+          (id) => sectionTitleById.get(id) ?? `Section ${id}`,
+        );
+
+  return (
+    <li className="admin-request-row admin-access-row" onClick={onRowClick}>
+      <div className="admin-request-main">
+        <span className="admin-request-title">{request.name}</span>
+        <span className={accessRequestStatusBadgeClass(request.status)}>
+          {request.status}
+        </span>
+        <span className="stats-tag">
+          {request.hasPlexAccount ? "Has Plex account" : "No Plex account"}
+        </span>
+      </div>
+
+      <div className="admin-request-meta muted">
+        <span>{request.email}</span>
+        {request.plexUsername ? (
+          <span>Plex: {request.plexUsername}</span>
+        ) : null}
+        <span>Requested {formatEpoch(request.createdAt)}</span>
+        {request.decidedAt !== null ? (
+          <span>Decided {formatEpoch(request.decidedAt)}</span>
+        ) : null}
+      </div>
+
+      <p className="admin-access-note">{request.note}</p>
+
+      {grantedTitles.length > 0 ? (
+        <p className="admin-access-granted muted">
+          Libraries: {grantedTitles.join(", ")}
+        </p>
+      ) : null}
+
+      {request.adminNote ? (
+        <p className="admin-access-admin-note muted">
+          Admin note: {request.adminNote}
+        </p>
+      ) : null}
+
+      {request.sourceIp ? (
+        <p className="admin-access-ip muted">{request.sourceIp}</p>
+      ) : null}
+
+      {pending && sections !== null ? (
+        <fieldset
+          className="admin-access-sections"
+          disabled={inFlight}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <legend className="visually-hidden">Libraries to share</legend>
+          {sections.map((section) => (
+            <label key={section.id} className="admin-access-section">
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(section.id)}
+                onChange={() => onToggleSection(section.id)}
+              />
+              {section.title}
+            </label>
+          ))}
+        </fieldset>
+      ) : null}
+
+      {pending ? (
+        <div
+          className="admin-request-actions"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className={confirming ? "btn admin-access-confirm" : "btn"}
+            disabled={inFlight || !canApprove}
+            onClick={onApproveClick}
+          >
+            {inFlight
+              ? "Working…"
+              : confirming
+                ? "Send invite?"
+                : "Approve"}
+          </button>
+          <button
+            type="button"
+            className="btn secondary"
+            disabled={inFlight}
+            onClick={onDenyClick}
+          >
+            Deny
+          </button>
+        </div>
+      ) : null}
+    </li>
   );
 }
 
