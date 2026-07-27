@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 import {
+  AccessRequestTransitionError,
   createAccessRequestStore,
   type AccessRequest,
 } from "./store";
@@ -126,5 +127,84 @@ describe("createAccessRequestStore", () => {
     const onDisk = JSON.parse(await readFile(filePath, "utf8")) as AccessRequest[];
     assert.equal(onDisk.length, 1);
     assert.deepEqual(onDisk[0], a);
+  });
+
+  it("markInvited transitions pending → invited and persists", async () => {
+    const filePath = await tempStorePath();
+    const store = await createAccessRequestStore(filePath);
+    const created = await store.add({
+      email: "invite@example.com",
+      name: "Invitee",
+      note: "friend",
+      hasPlexAccount: true,
+      sourceIp: null,
+    });
+
+    const updated = await store.markInvited(created.id, {
+      sectionIds: [122223622, 122223654],
+      invitedAt: 1_785_000_100,
+    });
+
+    assert.equal(updated.status, "invited");
+    assert.equal(updated.invitedAt, 1_785_000_100);
+    assert.deepEqual(updated.sectionIds, [122223622, 122223654]);
+    assert.ok(updated.decidedAt !== null);
+    assert.equal(store.findById(created.id)?.status, "invited");
+
+    const reloaded = await createAccessRequestStore(filePath);
+    assert.equal(reloaded.findById(created.id)?.status, "invited");
+  });
+
+  it("markDenied transitions pending → denied and never requires Plex fields", async () => {
+    const filePath = await tempStorePath();
+    const store = await createAccessRequestStore(filePath);
+    const created = await store.add({
+      email: "deny@example.com",
+      name: "Denied",
+      note: "nope",
+      hasPlexAccount: false,
+      sourceIp: null,
+    });
+
+    const updated = await store.markDenied(created.id, {
+      adminNote: "unknown to me",
+    });
+
+    assert.equal(updated.status, "denied");
+    assert.equal(updated.adminNote, "unknown to me");
+    assert.ok(updated.decidedAt !== null);
+    assert.equal(updated.invitedAt, null);
+    assert.equal(updated.sectionIds, null);
+  });
+
+  it("markInvited/markDenied throw AccessRequestTransitionError when not pending", async () => {
+    const filePath = await tempStorePath();
+    const store = await createAccessRequestStore(filePath);
+    const created = await store.add({
+      email: "twice@example.com",
+      name: "Twice",
+      note: "hi",
+      hasPlexAccount: false,
+      sourceIp: null,
+    });
+    await store.markDenied(created.id);
+
+    await assert.rejects(
+      () =>
+        store.markInvited(created.id, {
+          sectionIds: [1],
+          invitedAt: 1,
+        }),
+      (err: unknown) =>
+        err instanceof AccessRequestTransitionError &&
+        err.attempted === "invited" &&
+        err.currentStatus === "denied",
+    );
+    await assert.rejects(
+      () => store.markDenied(created.id),
+      (err: unknown) =>
+        err instanceof AccessRequestTransitionError &&
+        err.attempted === "denied",
+    );
   });
 });

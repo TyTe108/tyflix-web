@@ -3,16 +3,18 @@ import { describe, it } from "node:test";
 import express from "express";
 import type {
   AccessRequest,
-  AccessRequestStore,
   NewAccessRequestInput,
 } from "../accessRequests/store";
 import { normalizeEmail } from "../accessRequests/store";
 import { createAccessRequestsRouter } from "./accessRequests";
 
-type FakeStore = AccessRequestStore & {
+type FakeStore = {
   records: AccessRequest[];
   addCalls: NewAccessRequestInput[];
   failNextAdd?: Error;
+  list(): AccessRequest[];
+  findByEmail(email: string): AccessRequest | undefined;
+  add(input: NewAccessRequestInput): Promise<AccessRequest>;
 };
 
 function createFakeStore(
@@ -58,7 +60,7 @@ function createFakeStore(
   return store;
 }
 
-function buildApp(store: AccessRequestStore): express.Express {
+function buildApp(store: FakeStore): express.Express {
   const app = express();
   app.use(express.json());
   app.use("/api/access-requests", createAccessRequestsRouter({ store }));

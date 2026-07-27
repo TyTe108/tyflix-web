@@ -12,9 +12,11 @@ import {
 import { createPlexClient } from "./plex/client";
 import { createPlexConnectionResolver } from "./plex/connection";
 import { createPlexServerClient } from "./plex/server";
+import { createPlexSharingClient } from "./plex/sharing";
 import { createSharedServerAccessResolver } from "./plex/sharedServerAccess";
 import { createTransientTokenMinter } from "./plex/transientToken";
 import { createAccessRequestsRouter } from "./routes/accessRequests";
+import { createAdminAccessRequestsRouter } from "./routes/adminAccessRequests";
 import { createAdminRouter } from "./routes/admin";
 import { createAuthRouter } from "./routes/auth";
 import { createConfigRouter } from "./routes/config";
@@ -177,6 +179,24 @@ async function start(): Promise<void> {
     requireAuth(config.sessionSecret),
     createMeRouter({ plexServer, seerr }),
   );
+
+  // More specific than /api/admin — mount first. Same ACCESS_REQUESTS_FILE gate
+  // as the public submit route.
+  if (accessRequestStore !== undefined) {
+    const sharing = createPlexSharingClient({
+      baseUrl: config.plexBaseUrl,
+      ownerToken: config.plexToken,
+      clientId: config.plexClientId,
+    });
+    app.use(
+      "/api/admin/access-requests",
+      createAdminAccessRequestsRouter({
+        store: accessRequestStore,
+        sharing,
+        sessionSecret: config.sessionSecret,
+      }),
+    );
+  }
 
   app.use(
     "/api/admin",

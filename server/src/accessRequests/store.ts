@@ -34,10 +34,44 @@ export type NewAccessRequestInput = {
   sourceIp: string | null;
 };
 
+export type MarkInvitedInput = {
+  sectionIds: number[];
+  invitedAt: number;
+  adminNote?: string | null;
+};
+
+export type MarkDeniedInput = {
+  adminNote?: string;
+};
+
+/** Thrown when a status transition is not pending → invited/denied. */
+export class AccessRequestTransitionError extends Error {
+  readonly id: string;
+  readonly currentStatus: AccessRequestStatus;
+  readonly attempted: "invited" | "denied";
+
+  constructor(
+    id: string,
+    currentStatus: AccessRequestStatus,
+    attempted: "invited" | "denied",
+  ) {
+    super(
+      `cannot transition access request ${id} from ${currentStatus} to ${attempted}`,
+    );
+    this.name = "AccessRequestTransitionError";
+    this.id = id;
+    this.currentStatus = currentStatus;
+    this.attempted = attempted;
+  }
+}
+
 export type AccessRequestStore = {
   list(): AccessRequest[];
   findByEmail(email: string): AccessRequest | undefined;
+  findById(id: string): AccessRequest | undefined;
   add(input: NewAccessRequestInput): Promise<AccessRequest>;
+  markInvited(id: string, input: MarkInvitedInput): Promise<AccessRequest>;
+  markDenied(id: string, input?: MarkDeniedInput): Promise<AccessRequest>;
 };
 
 export function normalizeEmail(email: string): string {
@@ -68,6 +102,21 @@ export async function createAccessRequestStore(
     return records.find((r) => r.email === normalized);
   }
 
+  function findById(id: string): AccessRequest | undefined {
+    return records.find((r) => r.id === id);
+  }
+
+  function enqueueWrite<T>(work: () => Promise<T>): Promise<T> {
+    const done = writeChain.then(work);
+    writeChain = done.then(
+      () => undefined,
+      () => {
+        // Keep the chain alive after a failed write so later submits still run.
+      },
+    );
+    return done;
+  }
+
   async function add(input: NewAccessRequestInput): Promise<AccessRequest> {
     const email = normalizeEmail(input.email);
     const record: AccessRequest = {
@@ -93,7 +142,7 @@ export async function createAccessRequestStore(
     // Serialize writes so concurrent submits cannot interleave and lose a row.
     // Email uniqueness is enforced here (not by the caller): re-check inside
     // the chain so two same-email adds both resolve to the same record.
-    const done: Promise<AccessRequest> = writeChain.then(async () => {
+    return enqueueWrite(async () => {
       const existing = records.find((r) => r.email === email);
       if (existing !== undefined) {
         return existing;
@@ -103,16 +152,79 @@ export async function createAccessRequestStore(
       records = next;
       return record;
     });
-    writeChain = done.then(
-      () => undefined,
-      () => {
-        // Keep the chain alive after a failed write so later submits still run.
-      },
-    );
-    return await done;
   }
 
-  return { list, findByEmail, add };
+  async function markInvited(
+    id: string,
+    input: MarkInvitedInput,
+  ): Promise<AccessRequest> {
+    return enqueueWrite(async () => {
+      const index = records.findIndex((r) => r.id === id);
+      if (index < 0) {
+        throw new Error(`access request not found: ${id}`);
+      }
+      const current = records[index]!;
+      if (current.status !== "pending") {
+        throw new AccessRequestTransitionError(
+          id,
+          current.status,
+          "invited",
+        );
+      }
+
+      const now = Math.floor(Date.now() / 1000);
+      const updated: AccessRequest = {
+        ...current,
+        status: "invited",
+        decidedAt: now,
+        invitedAt: input.invitedAt,
+        sectionIds: input.sectionIds.slice(),
+        adminNote:
+          input.adminNote !== undefined ? input.adminNote : current.adminNote,
+      };
+      const next = records.slice();
+      next[index] = updated;
+      await atomicWrite(filePath, next);
+      records = next;
+      return updated;
+    });
+  }
+
+  async function markDenied(
+    id: string,
+    input: MarkDeniedInput = {},
+  ): Promise<AccessRequest> {
+    return enqueueWrite(async () => {
+      const index = records.findIndex((r) => r.id === id);
+      if (index < 0) {
+        throw new Error(`access request not found: ${id}`);
+      }
+      const current = records[index]!;
+      if (current.status !== "pending") {
+        throw new AccessRequestTransitionError(id, current.status, "denied");
+      }
+
+      const now = Math.floor(Date.now() / 1000);
+      const updated: AccessRequest = {
+        ...current,
+        status: "denied",
+        decidedAt: now,
+        adminNote:
+          input.adminNote !== undefined
+            ? input.adminNote.trim() === ""
+              ? null
+              : input.adminNote.trim()
+            : current.adminNote,
+      };
+      const next = records.slice();
+      next[index] = updated;
+      await atomicWrite(filePath, next);
+      records = next;
+      return updated;
+    });
+  }
+
+  return { list, findByEmail, findById, add, markInvited, markDenied };
 }
 
 async function loadRecords(filePath: string): Promise<AccessRequest[]> {

@@ -14,7 +14,7 @@ const NOTE_MAX = 280;
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export type AccessRequestsRouterDeps = {
-  store: AccessRequestStore;
+  store: Pick<AccessRequestStore, "findByEmail" | "add">;
 };
 
 export function createAccessRequestsRouter(
