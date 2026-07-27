@@ -45,8 +45,18 @@ export type ShareableSection = {
   type: string;
 };
 
+/**
+ * A pending "Library Request Sent" invite from plex.tv.
+ *
+ * `id` is a string because plex.tv uses two shapes (observed 2026-07-27):
+ *   - Invitee WITH a Plex account: numeric id, e.g. id="60318749" username="schr465"
+ *   - Invitee WITHOUT a Plex account: id is the email itself, username=""
+ *     e.g. id="someone@example.com" username=""
+ * Do not coerce to number — that silently drops the no-account case this feature
+ * creates most often.
+ */
 export type PendingInvite = {
-  id: number;
+  id: string;
   email: string;
   username: string;
   createdAt: number;
@@ -303,19 +313,24 @@ function parsePendingInvites(xml: string): PendingInvite[] {
     const email = attr(tag, "email");
     const username = attr(tag, "username");
     const createdAt = attr(tag, "createdAt");
+    // username may be "" (no-Plex-account invitee) — still required as an
+    // attribute, but empty is valid. email and id are required; createdAt
+    // must be a numeric epoch.
     if (
       id === undefined ||
+      id === "" ||
       email === undefined ||
+      email === "" ||
       username === undefined ||
       createdAt === undefined
     ) {
       continue;
     }
-    if (!/^\d+$/.test(id) || !/^\d+$/.test(createdAt)) {
+    if (!/^\d+$/.test(createdAt)) {
       continue;
     }
     invites.push({
-      id: Number(id),
+      id,
       email,
       username,
       createdAt: Number(createdAt),

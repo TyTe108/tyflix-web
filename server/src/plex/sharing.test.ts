@@ -28,11 +28,18 @@ const SERVER_SECTIONS_XML = `<?xml version="1.0" encoding="UTF-8"?>
 </MediaContainer>`;
 
 const PENDING_INVITES_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<MediaContainer size="1">
+<MediaContainer size="2">
   <Invite id="60318749" createdAt="1784702249" friend="0" home="0" server="1"
-          username="someone" email="someone@example.com" friendlyName="someone">
+          username="schr465" email="has-account@example.com" friendlyName="schr465">
     <Server name="Tyflix" numLibraries="2"/>
   </Invite>
+  <Invite id="no-account@example.com" createdAt="1785194557"
+          username="" email="no-account@example.com" thumb=""
+          friendlyName="no-account@example.com">
+    <Server name="Tyflix" numLibraries="2"/>
+  </Invite>
+  <Invite id="60318750" createdAt="not-an-epoch" username="bad" email="bad@example.com"/>
+  <Invite id="60318751" createdAt="1784702250" username="missing-email"/>
 </MediaContainer>`;
 
 const SHARES_XML = `<?xml version="1.0" encoding="UTF-8"?>
@@ -334,15 +341,21 @@ describe("createPlexSharingClient", () => {
     ]);
   });
 
-  it("parses pending invites", async () => {
+  it("parses pending invites for both Plex-account and no-account shapes", async () => {
     stubFetch();
     const invites = await client().listPendingInvites();
     assert.deepEqual(invites, [
       {
-        id: 60318749,
-        email: "someone@example.com",
-        username: "someone",
+        id: "60318749",
+        email: "has-account@example.com",
+        username: "schr465",
         createdAt: 1784702249,
+      },
+      {
+        id: "no-account@example.com",
+        email: "no-account@example.com",
+        username: "",
+        createdAt: 1785194557,
       },
     ]);
   });
