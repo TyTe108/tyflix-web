@@ -30,6 +30,16 @@ export type AccessRequest = {
   sourceIp: string | null;
 };
 
+/** List row from GET /api/admin/access-requests after reconciliation. */
+export type AccessRequestView = AccessRequest & {
+  plexInviteMissing?: boolean;
+};
+
+export type AccessRequestsListResponse = {
+  requests: AccessRequestView[];
+  reconciledAt: number | null;
+};
+
 export type ShareableSection = {
   id: number;
   key: number;
@@ -113,12 +123,12 @@ export async function submitAccessRequest(
   };
 }
 
-export async function fetchAccessRequests(): Promise<AccessRequest[]> {
+export async function fetchAccessRequests(): Promise<AccessRequestsListResponse> {
   const res = await fetch("/api/admin/access-requests");
   if (!res.ok) {
     throw new Error(await errorMessage(res, "Failed to load access requests"));
   }
-  return (await res.json()) as AccessRequest[];
+  return (await res.json()) as AccessRequestsListResponse;
 }
 
 export async function fetchAccessRequestSections(): Promise<ShareableSection[]> {

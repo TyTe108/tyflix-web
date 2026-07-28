@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import express from "express";
 import type {
   AccessRequest,
+  MarkAcceptedInput,
   MarkDeniedInput,
   MarkInvitedInput,
 } from "../accessRequests/store";
@@ -10,11 +11,14 @@ import { AccessRequestTransitionError } from "../accessRequests/store";
 import {
   PlexSharingError,
   type InviteResult,
+  type PendingInvite,
   type ShareableSection,
+  type SharedServerShare,
 } from "../plex/sharing";
 import { issueSession, SESSION_COOKIE_NAME } from "../session";
 import {
   createAdminAccessRequestsRouter,
+  type AccessRequestsListResponse,
   type AdminAccessRequestsRouterDeps,
 } from "./adminAccessRequests";
 
@@ -76,11 +80,25 @@ function pendingRecord(
   };
 }
 
+function invitedRecord(
+  overrides: Partial<AccessRequest> = {},
+): AccessRequest {
+  return pendingRecord({
+    status: "invited",
+    decidedAt: 1_785_000_050,
+    invitedAt: 1_785_000_050,
+    sectionIds: [122223622],
+    ...overrides,
+  });
+}
+
 type FakeStore = AdminAccessRequestsRouterDeps["store"] & {
   records: AccessRequest[];
   markInvitedCalls: Array<{ id: string; input: MarkInvitedInput }>;
   markDeniedCalls: Array<{ id: string; input: MarkDeniedInput | undefined }>;
+  markAcceptedCalls: Array<{ id: string; input: MarkAcceptedInput }>;
   failNextMarkInvited?: Error;
+  failNextMarkAccepted?: Error;
 };
 
 function createFakeStore(initial: AccessRequest[] = []): FakeStore {
@@ -88,6 +106,7 @@ function createFakeStore(initial: AccessRequest[] = []): FakeStore {
     records: initial.map((r) => ({ ...r })),
     markInvitedCalls: [],
     markDeniedCalls: [],
+    markAcceptedCalls: [],
     list() {
       return this.records.slice();
     },
@@ -143,16 +162,45 @@ function createFakeStore(initial: AccessRequest[] = []): FakeStore {
       this.records[index] = updated;
       return updated;
     },
+    async markAccepted(id: string, input: MarkAcceptedInput) {
+      this.markAcceptedCalls.push({ id, input });
+      if (this.failNextMarkAccepted) {
+        const err = this.failNextMarkAccepted;
+        this.failNextMarkAccepted = undefined;
+        throw err;
+      }
+      const index = this.records.findIndex((r) => r.id === id);
+      if (index < 0) {
+        throw new Error(`access request not found: ${id}`);
+      }
+      const current = this.records[index]!;
+      if (current.status !== "invited") {
+        throw new AccessRequestTransitionError(id, current.status, "accepted");
+      }
+      const updated: AccessRequest = {
+        ...current,
+        status: "accepted",
+        acceptedAt: input.acceptedAt,
+      };
+      this.records[index] = updated;
+      return updated;
+    },
   };
   return store;
 }
 
 type FakeSharing = AdminAccessRequestsRouterDeps["sharing"] & {
   inviteCalls: Array<{ email: string; sectionIds: number[] }>;
+  pendingCalls: number;
+  sharesCalls: number;
   sections: ShareableSection[];
+  pendingInvites: PendingInvite[];
+  shares: SharedServerShare[];
   inviteResult: InviteResult | (() => InviteResult);
   inviteError?: Error;
   sectionsError?: Error;
+  pendingError?: Error;
+  sharesError?: Error;
 };
 
 function createFakeSharing(
@@ -160,7 +208,11 @@ function createFakeSharing(
 ): FakeSharing {
   const sharing: FakeSharing = {
     inviteCalls: [],
+    pendingCalls: 0,
+    sharesCalls: 0,
     sections: SECTIONS.slice(),
+    pendingInvites: [],
+    shares: [],
     inviteResult: { ok: true },
     async listShareableSections() {
       if (this.sectionsError) {
@@ -179,6 +231,20 @@ function createFakeSharing(
       return typeof this.inviteResult === "function"
         ? this.inviteResult()
         : this.inviteResult;
+    },
+    async listPendingInvites() {
+      this.pendingCalls += 1;
+      if (this.pendingError) {
+        throw this.pendingError;
+      }
+      return this.pendingInvites.slice();
+    },
+    async listShares() {
+      this.sharesCalls += 1;
+      if (this.sharesError) {
+        throw this.sharesError;
+      }
+      return this.shares.slice();
     },
     ...overrides,
   };
@@ -257,17 +323,27 @@ describe("admin access-requests routes", () => {
     assert.equal(response.status, 403);
   });
 
-  it("GET / returns stored rows", async () => {
+  it("GET / returns { requests, reconciledAt } and skips Plex with no invited rows", async () => {
     const rows = [
       pendingRecord({ id: "a" }),
-      pendingRecord({ id: "b", email: "other@example.com" }),
+      pendingRecord({
+        id: "b",
+        email: "other@example.com",
+        status: "denied",
+        decidedAt: 1,
+      }),
     ];
-    const app = buildApp(createFakeStore(rows), createFakeSharing());
+    const sharing = createFakeSharing();
+    const app = buildApp(createFakeStore(rows), sharing);
     const response = await request(app, "/api/admin/access-requests", {
       cookie: sessionCookie(ADMIN_PERMISSION),
     });
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), rows);
+    const body = (await response.json()) as AccessRequestsListResponse;
+    assert.deepEqual(body.requests, rows);
+    assert.equal(typeof body.reconciledAt, "number");
+    assert.equal(sharing.pendingCalls, 0);
+    assert.equal(sharing.sharesCalls, 0);
   });
 
   it("GET /sections returns shareable sections", async () => {
@@ -500,5 +576,258 @@ describe("admin access-requests routes", () => {
 
     assert.equal(response.status, 502);
     assert.equal(sharing.inviteCalls.length, 0);
+  });
+});
+
+describe("access-request reconciliation", () => {
+  it("marks invited rows accepted when email is in shared_servers", async () => {
+    const store = createFakeStore([
+      invitedRecord({
+        email: "  Someone@Example.COM ",
+      }),
+    ]);
+    // Store already normalizes on add; simulate stored normalized email.
+    store.records[0]!.email = "someone@example.com";
+
+    const sharing = createFakeSharing({
+      shares: [
+        {
+          userId: 1,
+          username: "someone",
+          email: "  SOMEONE@example.com ",
+          invitedAt: 1_785_000_040,
+          acceptedAt: 1_785_000_090,
+          allLibraries: false,
+        },
+      ],
+    });
+    const app = buildApp(store, sharing);
+
+    const response = await request(app, "/api/admin/access-requests", {
+      cookie: sessionCookie(ADMIN_PERMISSION),
+    });
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as AccessRequestsListResponse;
+    assert.equal(body.requests[0]?.status, "accepted");
+    assert.equal(body.requests[0]?.acceptedAt, 1_785_000_090);
+    assert.equal(body.requests[0]?.plexInviteMissing, undefined);
+    assert.equal(typeof body.reconciledAt, "number");
+    assert.equal(store.records[0]?.status, "accepted");
+    assert.equal(store.markAcceptedCalls.length, 1);
+
+    // Within cache window: still invited? already accepted — no Plex on next
+    // read if no invited rows remain.
+    const second = await request(app, "/api/admin/access-requests", {
+      cookie: sessionCookie(ADMIN_PERMISSION),
+    });
+    const secondBody = (await second.json()) as AccessRequestsListResponse;
+    assert.equal(secondBody.requests[0]?.status, "accepted");
+    assert.equal(sharing.pendingCalls, 1);
+    assert.equal(sharing.sharesCalls, 1);
+  });
+
+  it("leaves invited rows alone when still in invites/requested", async () => {
+    const store = createFakeStore([invitedRecord()]);
+    const sharing = createFakeSharing({
+      pendingInvites: [
+        {
+          id: "60318749",
+          email: "Someone@Example.COM",
+          username: "someone",
+          createdAt: 1_785_000_050,
+        },
+      ],
+    });
+    const app = buildApp(store, sharing);
+
+    const response = await request(app, "/api/admin/access-requests", {
+      cookie: sessionCookie(ADMIN_PERMISSION),
+    });
+    const body = (await response.json()) as AccessRequestsListResponse;
+    assert.equal(body.requests[0]?.status, "invited");
+    assert.equal(body.requests[0]?.plexInviteMissing, undefined);
+    assert.equal(store.markAcceptedCalls.length, 0);
+    assert.equal(store.records[0]?.status, "invited");
+  });
+
+  it("flags invited rows missing from both Plex lists without mutating", async () => {
+    const store = createFakeStore([invitedRecord()]);
+    const sharing = createFakeSharing();
+    const app = buildApp(store, sharing);
+
+    const response = await request(app, "/api/admin/access-requests", {
+      cookie: sessionCookie(ADMIN_PERMISSION),
+    });
+    const body = (await response.json()) as AccessRequestsListResponse;
+    assert.equal(body.requests[0]?.status, "invited");
+    assert.equal(body.requests[0]?.plexInviteMissing, true);
+    assert.equal(store.records[0]?.status, "invited");
+    assert.equal(store.markAcceptedCalls.length, 0);
+  });
+
+  it("does not touch pending/denied rows and does not call Plex for them alone", async () => {
+    const store = createFakeStore([
+      pendingRecord({ id: "p" }),
+      pendingRecord({
+        id: "d",
+        email: "denied@example.com",
+        status: "denied",
+        decidedAt: 1,
+      }),
+    ]);
+    const sharing = createFakeSharing();
+    const app = buildApp(store, sharing);
+
+    const response = await request(app, "/api/admin/access-requests", {
+      cookie: sessionCookie(ADMIN_PERMISSION),
+    });
+    const body = (await response.json()) as AccessRequestsListResponse;
+    assert.equal(body.requests.length, 2);
+    assert.equal(sharing.pendingCalls, 0);
+    assert.equal(sharing.sharesCalls, 0);
+    assert.equal(store.markAcceptedCalls.length, 0);
+  });
+
+  it("skips reconciliation entirely when Plex throws", async () => {
+    const store = createFakeStore([invitedRecord()]);
+    const sharing = createFakeSharing({
+      pendingError: new PlexSharingError("plex down", 502),
+    });
+    const app = buildApp(store, sharing);
+
+    const response = await request(app, "/api/admin/access-requests", {
+      cookie: sessionCookie(ADMIN_PERMISSION),
+    });
+    const body = (await response.json()) as AccessRequestsListResponse;
+    assert.equal(body.reconciledAt, null);
+    assert.equal(body.requests[0]?.status, "invited");
+    assert.equal(body.requests[0]?.plexInviteMissing, undefined);
+    assert.equal(store.records[0]?.status, "invited");
+    assert.equal(store.markAcceptedCalls.length, 0);
+  });
+
+  it("survives markAccepted write failure without failing the list", async () => {
+    const store = createFakeStore([invitedRecord()]);
+    store.failNextMarkAccepted = new Error("disk full");
+    const sharing = createFakeSharing({
+      shares: [
+        {
+          userId: 1,
+          username: "someone",
+          email: "someone@example.com",
+          invitedAt: 1,
+          acceptedAt: 99,
+          allLibraries: true,
+        },
+      ],
+    });
+    const app = buildApp(store, sharing);
+
+    const response = await request(app, "/api/admin/access-requests", {
+      cookie: sessionCookie(ADMIN_PERMISSION),
+    });
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as AccessRequestsListResponse;
+    assert.equal(body.requests[0]?.status, "invited");
+    assert.equal(typeof body.reconciledAt, "number");
+    assert.equal(store.records[0]?.status, "invited");
+  });
+
+  it("caches Plex lists across reads while invited rows remain", async () => {
+    const store = createFakeStore([
+      invitedRecord({ id: "a", email: "a@example.com" }),
+      invitedRecord({ id: "b", email: "b@example.com" }),
+    ]);
+    const sharing = createFakeSharing({
+      pendingInvites: [
+        {
+          id: "1",
+          email: "a@example.com",
+          username: "a",
+          createdAt: 1,
+        },
+        {
+          id: "2",
+          email: "b@example.com",
+          username: "b",
+          createdAt: 1,
+        },
+      ],
+    });
+    const app = buildApp(store, sharing);
+
+    await request(app, "/api/admin/access-requests", {
+      cookie: sessionCookie(ADMIN_PERMISSION),
+    });
+    await request(app, "/api/admin/access-requests", {
+      cookie: sessionCookie(ADMIN_PERMISSION),
+    });
+
+    assert.equal(sharing.pendingCalls, 1);
+    assert.equal(sharing.sharesCalls, 1);
+  });
+
+  it("approve invalidates the Plex cache so the next list re-fetches", async () => {
+    const store = createFakeStore([
+      invitedRecord({ id: "existing", email: "existing@example.com" }),
+      pendingRecord({ id: "req-1", email: "new@example.com" }),
+    ]);
+    const sharing = createFakeSharing({
+      pendingInvites: [
+        {
+          id: "1",
+          email: "existing@example.com",
+          username: "existing",
+          createdAt: 1,
+        },
+      ],
+    });
+    const app = buildApp(store, sharing);
+
+    // Prime the cache with a snapshot that does not yet include the new invite.
+    await request(app, "/api/admin/access-requests", {
+      cookie: sessionCookie(ADMIN_PERMISSION),
+    });
+    assert.equal(sharing.pendingCalls, 1);
+    assert.equal(sharing.sharesCalls, 1);
+
+    const approve = await request(
+      app,
+      "/api/admin/access-requests/req-1/approve",
+      {
+        method: "POST",
+        cookie: sessionCookie(ADMIN_PERMISSION),
+        body: { sectionIds: [122223622] },
+      },
+    );
+    assert.equal(approve.status, 200);
+
+    // Plex now shows the new invite; without invalidation the cached snapshot
+    // would flag it plexInviteMissing.
+    sharing.pendingInvites = [
+      {
+        id: "1",
+        email: "existing@example.com",
+        username: "existing",
+        createdAt: 1,
+      },
+      {
+        id: "2",
+        email: "new@example.com",
+        username: "",
+        createdAt: 2,
+      },
+    ];
+
+    const list = await request(app, "/api/admin/access-requests", {
+      cookie: sessionCookie(ADMIN_PERMISSION),
+    });
+    assert.equal(list.status, 200);
+    const body = (await list.json()) as AccessRequestsListResponse;
+    const approved = body.requests.find((r) => r.id === "req-1");
+    assert.equal(approved?.status, "invited");
+    assert.equal(approved?.plexInviteMissing, undefined);
+    assert.equal(sharing.pendingCalls, 2);
+    assert.equal(sharing.sharesCalls, 2);
   });
 });

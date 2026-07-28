@@ -1,23 +1,52 @@
 import { Router } from "express";
 import {
   AccessRequestTransitionError,
+  normalizeEmail,
+  type AccessRequest,
   type AccessRequestStore,
 } from "../accessRequests/store";
 import { requireAdmin } from "../middleware/auth";
 import {
   PlexSharingError,
   type InviteResult,
+  type PendingInvite,
   type PlexSharingClient,
   type ShareableSection,
+  type SharedServerShare,
 } from "../plex/sharing";
+
+const RECONCILE_TTL_MS = 60_000;
+
+export type AccessRequestView = AccessRequest & {
+  /** Derived only: invite not found in Plex pending or shares. Not persisted. */
+  plexInviteMissing?: boolean;
+};
+
+export type AccessRequestsListResponse = {
+  requests: AccessRequestView[];
+  /** Epoch seconds when Plex was successfully consulted; null if unreachable. */
+  reconciledAt: number | null;
+};
 
 export type AdminAccessRequestsRouterDeps = {
   store: Pick<
     AccessRequestStore,
-    "list" | "findById" | "markInvited" | "markDenied"
+    "list" | "findById" | "markInvited" | "markDenied" | "markAccepted"
   >;
-  sharing: Pick<PlexSharingClient, "listShareableSections" | "inviteToServer">;
+  sharing: Pick<
+    PlexSharingClient,
+    | "listShareableSections"
+    | "inviteToServer"
+    | "listPendingInvites"
+    | "listShares"
+  >;
   sessionSecret: string;
+};
+
+type PlexReconcileSnapshot = {
+  pendingEmails: Set<string>;
+  /** normalized email → acceptedAt from shared_servers (null if attribute missing) */
+  acceptedByEmail: Map<string, number | null>;
 };
 
 export function createAdminAccessRequestsRouter(
@@ -27,8 +56,29 @@ export function createAdminAccessRequestsRouter(
   const router = Router();
   const admin = requireAdmin(sessionSecret);
 
-  router.get("/", admin, (_req, res) => {
-    res.json(store.list());
+  let plexCache: {
+    expiresAt: number;
+    value: PlexReconcileSnapshot;
+  } | null = null;
+
+  async function loadPlexSnapshot(): Promise<PlexReconcileSnapshot> {
+    const now = Date.now();
+    if (plexCache !== null && plexCache.expiresAt > now) {
+      return plexCache.value;
+    }
+
+    const [pending, shares] = await Promise.all([
+      sharing.listPendingInvites(),
+      sharing.listShares(),
+    ]);
+
+    const value = buildSnapshot(pending, shares);
+    plexCache = { value, expiresAt: now + RECONCILE_TTL_MS };
+    return value;
+  }
+
+  router.get("/", admin, async (_req, res) => {
+    res.json(await listWithReconciliation());
   });
 
   router.get("/sections", admin, async (_req, res) => {
@@ -90,11 +140,15 @@ export function createAdminAccessRequestsRouter(
       return;
     }
 
+    // Invite changed plex.tv state (or alreadyShared means our snapshot was
+    // stale). Drop the reconcile cache so the next list read re-fetches.
+    plexCache = null;
+
     const invitedAt = Math.floor(Date.now() / 1000);
     const alreadyShared = inviteResult.ok === false;
     // Dual-write limitation: if Plex accepted the invite and markInvited then
-    // fails, an invite exists that we did not record. Log loudly; 28.6's
-    // reconciliation against listShares/listPendingInvites is the recovery.
+    // fails, an invite exists that we did not record. Log loudly; reconciliation
+    // against listShares/listPendingInvites is the recovery.
     try {
       const updated = await store.markInvited(id, {
         sectionIds,
@@ -156,7 +210,95 @@ export function createAdminAccessRequestsRouter(
     }
   });
 
+  async function listWithReconciliation(): Promise<AccessRequestsListResponse> {
+    const rows = store.list();
+    const invited = rows.filter((r) => r.status === "invited");
+
+    // Nothing to reconcile — do not pay for Plex calls.
+    if (invited.length === 0) {
+      return {
+        requests: rows.map((r) => toView(r)),
+        reconciledAt: Math.floor(Date.now() / 1000),
+      };
+    }
+
+    let snapshot: PlexReconcileSnapshot;
+    try {
+      snapshot = await loadPlexSnapshot();
+    } catch (err) {
+      // Fail soft: never treat a Plex blip as "email not found".
+      console.error(
+        err instanceof Error
+          ? err.message
+          : "access-request reconciliation failed",
+      );
+      return {
+        requests: rows.map((r) => toView(r)),
+        reconciledAt: null,
+      };
+    }
+
+    const views: AccessRequestView[] = [];
+    for (const row of rows) {
+      if (row.status !== "invited") {
+        views.push(toView(row));
+        continue;
+      }
+
+      const email = normalizeEmail(row.email);
+      if (snapshot.acceptedByEmail.has(email)) {
+        const acceptedAt =
+          snapshot.acceptedByEmail.get(email) ??
+          Math.floor(Date.now() / 1000);
+        try {
+          const updated = await store.markAccepted(row.id, { acceptedAt });
+          views.push(toView(updated));
+        } catch (err) {
+          console.error(
+            `access request ${row.id}: markAccepted failed during reconcile`,
+            err instanceof Error ? err.message : err,
+          );
+          views.push(toView(row));
+        }
+        continue;
+      }
+
+      if (snapshot.pendingEmails.has(email)) {
+        views.push(toView(row));
+        continue;
+      }
+
+      views.push({ ...toView(row), plexInviteMissing: true });
+    }
+
+    return {
+      requests: views,
+      reconciledAt: Math.floor(Date.now() / 1000),
+    };
+  }
+
   return router;
+}
+
+function buildSnapshot(
+  pending: PendingInvite[],
+  shares: SharedServerShare[],
+): PlexReconcileSnapshot {
+  const pendingEmails = new Set<string>();
+  for (const invite of pending) {
+    pendingEmails.add(normalizeEmail(invite.email));
+  }
+
+  const acceptedByEmail = new Map<string, number | null>();
+  for (const share of shares) {
+    acceptedByEmail.set(normalizeEmail(share.email), share.acceptedAt);
+  }
+
+  return { pendingEmails, acceptedByEmail };
+}
+
+function toView(row: AccessRequest): AccessRequestView {
+  return { ...row };
 }
 
 function parseSectionIdsBody(

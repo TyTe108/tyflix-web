@@ -207,4 +207,37 @@ describe("createAccessRequestStore", () => {
         err.attempted === "denied",
     );
   });
+
+  it("markAccepted transitions invited → accepted only", async () => {
+    const filePath = await tempStorePath();
+    const store = await createAccessRequestStore(filePath);
+    const created = await store.add({
+      email: "accept@example.com",
+      name: "Accept",
+      note: "hi",
+      hasPlexAccount: true,
+      sourceIp: null,
+    });
+
+    await assert.rejects(
+      () => store.markAccepted(created.id, { acceptedAt: 1_785_000_200 }),
+      (err: unknown) =>
+        err instanceof AccessRequestTransitionError &&
+        err.attempted === "accepted" &&
+        err.currentStatus === "pending",
+    );
+
+    await store.markInvited(created.id, {
+      sectionIds: [122223622],
+      invitedAt: 1_785_000_100,
+    });
+    const accepted = await store.markAccepted(created.id, {
+      acceptedAt: 1_785_000_200,
+    });
+    assert.equal(accepted.status, "accepted");
+    assert.equal(accepted.acceptedAt, 1_785_000_200);
+
+    const reloaded = await createAccessRequestStore(filePath);
+    assert.equal(reloaded.findById(created.id)?.status, "accepted");
+  });
 });

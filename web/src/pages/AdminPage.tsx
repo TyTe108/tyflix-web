@@ -6,7 +6,7 @@ import {
   denyAccessRequest,
   fetchAccessRequestSections,
   fetchAccessRequests,
-  type AccessRequest,
+  type AccessRequestView,
   type ShareableSection,
 } from "../api/accessRequests";
 import {
@@ -398,7 +398,7 @@ function AccessPanel() {
   }, []);
 
   const sorted = useMemo(() => {
-    const rows = data ?? [];
+    const rows = data?.requests ?? [];
     return [...rows].sort((a, b) => {
       if (a.status === "pending" && b.status !== "pending") {
         return -1;
@@ -501,6 +501,12 @@ function AccessPanel() {
       {status === "ready" ? (
         <>
           <UpdatedLine lastUpdated={lastUpdated} refreshError={error} />
+          {data?.reconciledAt === null ? (
+            <p className="muted admin-access-reconcile-note">
+              Plex could not be reached. Statuses shown are from the last known
+              store state.
+            </p>
+          ) : null}
           {sorted.length === 0 ? (
             <p className="muted">No access requests</p>
           ) : (
@@ -569,7 +575,7 @@ function AccessRequestRow({
   onApproveClick,
   onDenyClick,
 }: {
-  request: AccessRequest;
+  request: AccessRequestView;
   sections: ShareableSection[] | null;
   selectedIds: number[];
   sectionTitleById: Map<number, string>;
@@ -597,6 +603,11 @@ function AccessRequestRow({
         <span className={accessRequestStatusBadgeClass(request.status)}>
           {request.status}
         </span>
+        {request.plexInviteMissing ? (
+          <span className="stats-tag admin-access-missing-tag">
+            invite not on Plex
+          </span>
+        ) : null}
         <span className="stats-tag">
           {request.hasPlexAccount ? "Has Plex account" : "No Plex account"}
         </span>

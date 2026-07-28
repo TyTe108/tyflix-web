@@ -3389,6 +3389,15 @@ a.library-detail-title:hover {
   word-break: break-word;
 }
 
+.admin-access-reconcile-note {
+  margin: 0 0 0.75rem;
+}
+
+.admin-access-missing-tag {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+
 .admin-access-granted,
 .admin-access-admin-note,
 .admin-access-ip {

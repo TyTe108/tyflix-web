@@ -44,16 +44,20 @@ export type MarkDeniedInput = {
   adminNote?: string;
 };
 
-/** Thrown when a status transition is not pending → invited/denied. */
+export type MarkAcceptedInput = {
+  acceptedAt: number;
+};
+
+/** Thrown when a status transition is not legal for the current row. */
 export class AccessRequestTransitionError extends Error {
   readonly id: string;
   readonly currentStatus: AccessRequestStatus;
-  readonly attempted: "invited" | "denied";
+  readonly attempted: "invited" | "denied" | "accepted";
 
   constructor(
     id: string,
     currentStatus: AccessRequestStatus,
-    attempted: "invited" | "denied",
+    attempted: "invited" | "denied" | "accepted",
   ) {
     super(
       `cannot transition access request ${id} from ${currentStatus} to ${attempted}`,
@@ -72,6 +76,7 @@ export type AccessRequestStore = {
   add(input: NewAccessRequestInput): Promise<AccessRequest>;
   markInvited(id: string, input: MarkInvitedInput): Promise<AccessRequest>;
   markDenied(id: string, input?: MarkDeniedInput): Promise<AccessRequest>;
+  markAccepted(id: string, input: MarkAcceptedInput): Promise<AccessRequest>;
 };
 
 export function normalizeEmail(email: string): string {
@@ -224,7 +229,46 @@ export async function createAccessRequestStore(
     });
   }
 
-  return { list, findByEmail, findById, add, markInvited, markDenied };
+  async function markAccepted(
+    id: string,
+    input: MarkAcceptedInput,
+  ): Promise<AccessRequest> {
+    return enqueueWrite(async () => {
+      const index = records.findIndex((r) => r.id === id);
+      if (index < 0) {
+        throw new Error(`access request not found: ${id}`);
+      }
+      const current = records[index]!;
+      if (current.status !== "invited") {
+        throw new AccessRequestTransitionError(
+          id,
+          current.status,
+          "accepted",
+        );
+      }
+
+      const updated: AccessRequest = {
+        ...current,
+        status: "accepted",
+        acceptedAt: input.acceptedAt,
+      };
+      const next = records.slice();
+      next[index] = updated;
+      await atomicWrite(filePath, next);
+      records = next;
+      return updated;
+    });
+  }
+
+  return {
+    list,
+    findByEmail,
+    findById,
+    add,
+    markInvited,
+    markDenied,
+    markAccepted,
+  };
 }
 
 async function loadRecords(filePath: string): Promise<AccessRequest[]> {
