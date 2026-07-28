@@ -2003,6 +2003,33 @@ a:hover {
   margin-bottom: 1.75rem;
 }
 
+.library-search {
+  display: block;
+  flex: 1 1 12rem;
+  min-width: 10rem;
+  max-width: 18rem;
+}
+
+.library-search input {
+  width: 100%;
+  font: inherit;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.library-search input::placeholder {
+  color: var(--text-muted);
+}
+
+.library-search input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .library-control {
   display: flex;
   flex-direction: column;

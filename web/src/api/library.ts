@@ -32,6 +32,7 @@ export type LibraryItemsResponse = {
   genre: string | null;
   unwatched: boolean;
   firstCharacter: string | null;
+  query: string | null;
 };
 
 export type LibrarySortKey = "title" | "added" | "year" | "rating";
@@ -69,6 +70,7 @@ export async function fetchLibraryItems(options: {
   genre?: string;
   unwatched?: boolean;
   firstCharacter?: string;
+  query?: string;
 }): Promise<LibraryItemsResponse> {
   const params = new URLSearchParams();
   params.set("sort", options.sort ?? "title");
@@ -86,6 +88,9 @@ export async function fetchLibraryItems(options: {
   }
   if (options.firstCharacter !== undefined) {
     params.set("firstCharacter", options.firstCharacter);
+  }
+  if (options.query !== undefined) {
+    params.set("query", options.query);
   }
   return getJson<LibraryItemsResponse>(
     `/api/library/sections/${options.sectionKey}/items?${params}`,

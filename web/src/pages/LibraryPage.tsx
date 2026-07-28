@@ -21,6 +21,7 @@ type LoadStatus = "loading" | "ready" | "error";
 type LibraryView = "grid" | "detail";
 
 const PAGE_SIZE = 48;
+const SEARCH_DEBOUNCE_MS = 400;
 const CARD_SIZE_STORAGE_KEY = "tyflix.librarycardsize";
 const CARD_SIZE_DEFAULT = 8.5;
 const CARD_SIZE_MIN = 6;
@@ -96,6 +97,8 @@ export function LibraryPage() {
   const [genres, setGenres] = useState<LibraryGenre[]>([]);
   const [firstChar, setFirstChar] = useState<string | null>(null);
   const [firstChars, setFirstChars] = useState<LibraryFirstCharacter[]>([]);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [cardSize, setCardSize] = useState(readStoredCardSize);
   const [view, setView] = useState<LibraryView>(readStoredView);
 
@@ -115,7 +118,18 @@ export function LibraryPage() {
 
   const activeType = mediaType === "tv" ? "show" : "movie";
   const activeSection = sections.find((s) => s.type === activeType) ?? null;
-  const showAzRail = sort === "title" && firstChars.length > 0;
+  const searchActive = debouncedSearch !== "";
+  const showAzRail =
+    sort === "title" && firstChars.length > 0 && !searchActive;
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [search]);
 
   useEffect(() => {
     let cancelled = false;
@@ -147,6 +161,13 @@ export function LibraryPage() {
   useEffect(() => {
     setPage(1);
   }, [activeType]);
+
+  useEffect(() => {
+    setPage(1);
+    if (debouncedSearch !== "") {
+      setFirstChar(null);
+    }
+  }, [debouncedSearch]);
 
   useEffect(() => {
     if (!activeSection) {
@@ -205,7 +226,10 @@ export function LibraryPage() {
       genre: genreId ?? undefined,
       unwatched,
       firstCharacter:
-        sort === "title" && firstChar !== null ? firstChar : undefined,
+        sort === "title" && firstChar !== null && !searchActive
+          ? firstChar
+          : undefined,
+      ...(searchActive ? { query: debouncedSearch } : {}),
     })
       .then((result) => {
         if (!cancelled) {
@@ -228,7 +252,17 @@ export function LibraryPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeSection, page, sort, genreId, unwatched, firstChar, reloadKey]);
+  }, [
+    activeSection,
+    page,
+    sort,
+    genreId,
+    unwatched,
+    firstChar,
+    debouncedSearch,
+    searchActive,
+    reloadKey,
+  ]);
 
   const retry = useCallback(() => {
     setReloadKey((n) => n + 1);
@@ -361,6 +395,21 @@ export function LibraryPage() {
       </div>
 
       <div className="library-controls" aria-label="Library filters">
+        <label className="library-search">
+          <span className="visually-hidden">
+            {activeType === "movie" ? "Search Movies" : "Search TV Shows"}
+          </span>
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={
+              activeType === "movie" ? "Search Movies…" : "Search TV Shows…"
+            }
+            autoComplete="off"
+          />
+        </label>
+
         <label className="library-control">
           <span>Sort</span>
           <Dropdown
@@ -416,7 +465,23 @@ export function LibraryPage() {
       ) : null}
 
       {itemsStatus === "ready" && items.length === 0 ? (
-        <p className="muted">No items in this section.</p>
+        searchActive ? (
+          <div className="stats-error">
+            <p className="muted">No results for &quot;{debouncedSearch}&quot;.</p>
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => {
+                setSearch("");
+                setDebouncedSearch("");
+              }}
+            >
+              Clear search
+            </button>
+          </div>
+        ) : (
+          <p className="muted">No items in this section.</p>
+        )
       ) : null}
 
       {itemsStatus === "ready" && items.length > 0 ? (
