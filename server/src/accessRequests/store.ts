@@ -79,12 +79,39 @@ export type AccessRequestStore = {
   markAccepted(id: string, input: MarkAcceptedInput): Promise<AccessRequest>;
 };
 
+/** Denied rows stop blocking resubmits after this many seconds. */
+export const DENIED_RESUBMIT_AFTER_SECONDS = 90 * 24 * 60 * 60;
+
+export type AccessRequestStoreOptions = {
+  /** Epoch seconds. Injected in tests so denial expiry can be asserted without sleeping. */
+  now?: () => number;
+};
+
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+/**
+ * Whether an existing row prevents a new submission for the same email.
+ * Denied rows with a decidedAt older than 90 days do not block; a null
+ * decidedAt on a denied row is treated as still blocking (fail-loud).
+ */
+export function blocksEmailResubmit(
+  record: AccessRequest,
+  nowSeconds: number,
+): boolean {
+  if (record.status !== "denied") {
+    return true;
+  }
+  if (record.decidedAt === null) {
+    return true;
+  }
+  return nowSeconds - record.decidedAt <= DENIED_RESUBMIT_AFTER_SECONDS;
+}
+
 export async function createAccessRequestStore(
   filePath: string,
+  options: AccessRequestStoreOptions = {},
 ): Promise<AccessRequestStore> {
   const parentDir = path.dirname(filePath);
   try {
@@ -95,6 +122,7 @@ export async function createAccessRequestStore(
     );
   }
 
+  const now = options.now ?? (() => Math.floor(Date.now() / 1000));
   let records = await loadRecords(filePath);
   let writeChain: Promise<void> = Promise.resolve();
 
@@ -104,7 +132,12 @@ export async function createAccessRequestStore(
 
   function findByEmail(email: string): AccessRequest | undefined {
     const normalized = normalizeEmail(email);
-    return records.find((r) => r.email === normalized);
+    const nowSeconds = now();
+    // Same blocking rule as add(): expired denials are invisible here so the
+    // public route's short-circuit does not permanently suppress resubmits.
+    return records.find(
+      (r) => r.email === normalized && blocksEmailResubmit(r, nowSeconds),
+    );
   }
 
   function findById(id: string): AccessRequest | undefined {
@@ -124,6 +157,7 @@ export async function createAccessRequestStore(
 
   async function add(input: NewAccessRequestInput): Promise<AccessRequest> {
     const email = normalizeEmail(input.email);
+    const createdAt = now();
     const record: AccessRequest = {
       id: randomUUID(),
       email,
@@ -135,7 +169,7 @@ export async function createAccessRequestStore(
       note: input.note.trim(),
       hasPlexAccount: input.hasPlexAccount,
       status: "pending",
-      createdAt: Math.floor(Date.now() / 1000),
+      createdAt,
       decidedAt: null,
       invitedAt: null,
       acceptedAt: null,
@@ -148,7 +182,10 @@ export async function createAccessRequestStore(
     // Email uniqueness is enforced here (not by the caller): re-check inside
     // the chain so two same-email adds both resolve to the same record.
     return enqueueWrite(async () => {
-      const existing = records.find((r) => r.email === email);
+      const nowSeconds = now();
+      const existing = records.find(
+        (r) => r.email === email && blocksEmailResubmit(r, nowSeconds),
+      );
       if (existing !== undefined) {
         return existing;
       }

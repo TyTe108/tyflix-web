@@ -240,4 +240,164 @@ describe("createAccessRequestStore", () => {
     const reloaded = await createAccessRequestStore(filePath);
     assert.equal(reloaded.findById(created.id)?.status, "accepted");
   });
+
+  it("denied row decided 89 days ago still blocks resubmit", async () => {
+    const filePath = await tempStorePath();
+    const now = 1_700_000_000;
+    const denied = deniedRecord({
+      email: "retry@example.com",
+      decidedAt: now - 89 * DAY,
+    });
+    await writeFile(filePath, `${JSON.stringify([denied], null, 2)}\n`, "utf8");
+
+    const store = await createAccessRequestStore(filePath, {
+      now: () => now,
+    });
+    const result = await store.add({
+      email: "retry@example.com",
+      name: "Retry",
+      note: "again",
+      hasPlexAccount: false,
+      sourceIp: null,
+    });
+
+    assert.equal(result.id, denied.id);
+    assert.equal(store.list().length, 1);
+    assert.equal(store.findByEmail("retry@example.com")?.id, denied.id);
+  });
+
+  it("denied row decided 91 days ago allows a new pending row and keeps history", async () => {
+    const filePath = await tempStorePath();
+    const now = 1_700_000_000;
+    const denied = deniedRecord({
+      id: "old-denied",
+      email: "retry@example.com",
+      decidedAt: now - 91 * DAY,
+    });
+    await writeFile(filePath, `${JSON.stringify([denied], null, 2)}\n`, "utf8");
+
+    const store = await createAccessRequestStore(filePath, {
+      now: () => now,
+    });
+    assert.equal(store.findByEmail("retry@example.com"), undefined);
+
+    const created = await store.add({
+      email: "  RETRY@Example.com ",
+      name: "Retry",
+      note: "again",
+      hasPlexAccount: true,
+      sourceIp: "203.0.113.50",
+    });
+
+    assert.equal(created.status, "pending");
+    assert.notEqual(created.id, denied.id);
+    assert.equal(created.createdAt, now);
+    assert.equal(store.list().length, 2);
+    assert.equal(store.list()[0]?.id, "old-denied");
+    assert.equal(store.list()[0]?.status, "denied");
+    assert.equal(store.findByEmail("retry@example.com")?.id, created.id);
+  });
+
+  it("denied row with null decidedAt still blocks (fail-loud)", async () => {
+    const filePath = await tempStorePath();
+    const now = 1_700_000_000;
+    const denied = deniedRecord({
+      email: "null-decided@example.com",
+      decidedAt: null,
+    });
+    await writeFile(filePath, `${JSON.stringify([denied], null, 2)}\n`, "utf8");
+
+    const store = await createAccessRequestStore(filePath, {
+      now: () => now,
+    });
+    const result = await store.add({
+      email: "null-decided@example.com",
+      name: "Nope",
+      note: "hi",
+      hasPlexAccount: false,
+      sourceIp: null,
+    });
+
+    assert.equal(result.id, denied.id);
+    assert.equal(store.list().length, 1);
+  });
+
+  it("pending, invited, and accepted rows block resubmit at any age", async () => {
+    const filePath = await tempStorePath();
+    const now = 1_700_000_000;
+    const ancient = now - 400 * DAY;
+    const rows: AccessRequest[] = [
+      {
+        ...deniedRecord({
+          id: "pending-old",
+          email: "pending@example.com",
+          decidedAt: null,
+        }),
+        status: "pending",
+        createdAt: ancient,
+        adminNote: null,
+      },
+      {
+        ...deniedRecord({
+          id: "invited-old",
+          email: "invited@example.com",
+          decidedAt: ancient,
+        }),
+        status: "invited",
+        invitedAt: ancient,
+        sectionIds: [1],
+      },
+      {
+        ...deniedRecord({
+          id: "accepted-old",
+          email: "accepted@example.com",
+          decidedAt: ancient,
+        }),
+        status: "accepted",
+        invitedAt: ancient,
+        acceptedAt: ancient,
+        sectionIds: [1],
+      },
+    ];
+    await writeFile(filePath, `${JSON.stringify(rows, null, 2)}\n`, "utf8");
+
+    const store = await createAccessRequestStore(filePath, {
+      now: () => now,
+    });
+
+    for (const row of rows) {
+      const result = await store.add({
+        email: row.email,
+        name: "Again",
+        note: "hi",
+        hasPlexAccount: false,
+        sourceIp: null,
+      });
+      assert.equal(result.id, row.id);
+    }
+    assert.equal(store.list().length, 3);
+  });
 });
+
+const DAY = 24 * 60 * 60;
+
+function deniedRecord(
+  overrides: Partial<AccessRequest> & Pick<AccessRequest, "email">,
+): AccessRequest {
+  return {
+    id: "denied-1",
+    plexUsername: null,
+    name: "Denied",
+    note: "nope",
+    hasPlexAccount: false,
+    status: "denied",
+    createdAt: 1_600_000_000,
+    decidedAt: 1_600_000_100,
+    invitedAt: null,
+    acceptedAt: null,
+    sectionIds: null,
+    adminNote: "denied",
+    sourceIp: null,
+    ...overrides,
+  };
+}
