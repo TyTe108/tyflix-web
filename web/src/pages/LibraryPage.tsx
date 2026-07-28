@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   fetchLibraryItems,
@@ -99,6 +99,7 @@ export function LibraryPage() {
   const [firstChars, setFirstChars] = useState<LibraryFirstCharacter[]>([]);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const appliedSearchRef = useRef("");
   const [cardSize, setCardSize] = useState(readStoredCardSize);
   const [view, setView] = useState<LibraryView>(readStoredView);
 
@@ -124,7 +125,16 @@ export function LibraryPage() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setDebouncedSearch(search.trim());
+      const trimmed = search.trim();
+      if (trimmed === appliedSearchRef.current) {
+        return;
+      }
+      appliedSearchRef.current = trimmed;
+      setDebouncedSearch(trimmed);
+      setPage(1);
+      if (trimmed !== "") {
+        setFirstChar(null);
+      }
     }, SEARCH_DEBOUNCE_MS);
     return () => {
       window.clearTimeout(timer);
@@ -161,13 +171,6 @@ export function LibraryPage() {
   useEffect(() => {
     setPage(1);
   }, [activeType]);
-
-  useEffect(() => {
-    setPage(1);
-    if (debouncedSearch !== "") {
-      setFirstChar(null);
-    }
-  }, [debouncedSearch]);
 
   useEffect(() => {
     if (!activeSection) {
@@ -472,8 +475,10 @@ export function LibraryPage() {
               type="button"
               className="btn secondary"
               onClick={() => {
+                appliedSearchRef.current = "";
                 setSearch("");
                 setDebouncedSearch("");
+                setPage(1);
               }}
             >
               Clear search
