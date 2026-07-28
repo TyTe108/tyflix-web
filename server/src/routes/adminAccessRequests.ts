@@ -199,11 +199,17 @@ export function createAdminAccessRequestsRouter(
       return;
     }
 
-    const adminNote = parseAdminNote(req.body);
+    const parsedNote = parseAdminNote(req.body);
+    if ("error" in parsedNote) {
+      res.status(400).json({ error: parsedNote.error });
+      return;
+    }
 
     try {
       const updated = await store.markDenied(id, {
-        ...(adminNote !== undefined ? { adminNote } : {}),
+        ...(parsedNote.adminNote !== undefined
+          ? { adminNote: parsedNote.adminNote }
+          : {}),
       });
       res.json(updated);
     } catch (err) {
@@ -336,18 +342,27 @@ function parseSectionIdsBody(
   return { sectionIds };
 }
 
-function parseAdminNote(body: unknown): string | undefined {
+const ADMIN_NOTE_MAX = 280;
+
+function parseAdminNote(
+  body: unknown,
+): { adminNote?: string } | { error: string } {
   if (body === null || typeof body !== "object") {
-    return undefined;
+    return {};
   }
   const raw = (body as { adminNote?: unknown }).adminNote;
   if (raw === undefined) {
-    return undefined;
+    return {};
   }
   if (typeof raw !== "string") {
-    return undefined;
+    return { error: "adminNote must be a string" };
   }
-  return raw;
+  if (raw.length > ADMIN_NOTE_MAX) {
+    return {
+      error: `adminNote must be at most ${ADMIN_NOTE_MAX} characters`,
+    };
+  }
+  return { adminNote: raw };
 }
 
 function respondSharingError(

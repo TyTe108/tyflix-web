@@ -3423,6 +3423,10 @@ a.library-detail-title:hover {
   font-size: 0.875rem;
 }
 
+.admin-access-admin-note {
+  overflow-wrap: anywhere;
+}
+
 .admin-access-ip {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.8rem;
@@ -3458,6 +3462,31 @@ a.library-detail-title:hover {
 
 .admin-access-confirm:hover {
   background: color-mix(in srgb, var(--warn) 85%, var(--text));
+}
+
+.admin-access-deny-note {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.75rem 0 0;
+  max-width: 28rem;
+}
+
+.admin-access-deny-note input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.admin-access-deny-note input:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+  border-color: var(--accent);
 }
 
 .btn:disabled {

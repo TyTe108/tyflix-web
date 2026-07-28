@@ -371,6 +371,10 @@ function AccessPanel() {
     {},
   );
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [confirmKind, setConfirmKind] = useState<"approve" | "deny" | null>(
+    null,
+  );
+  const [denyNote, setDenyNote] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -426,8 +430,14 @@ function AccessPanel() {
     return (sections ?? []).map((s) => s.id);
   }
 
-  function toggleSection(requestId: string, sectionId: number) {
+  function clearConfirm() {
     setConfirmId(null);
+    setConfirmKind(null);
+    setDenyNote("");
+  }
+
+  function toggleSection(requestId: string, sectionId: number) {
+    clearConfirm();
     const current = selectedIdsFor(requestId);
     const next = current.includes(sectionId)
       ? current.filter((id) => id !== sectionId)
@@ -439,7 +449,7 @@ function AccessPanel() {
     async (id: string, sectionIds: number[] | undefined) => {
       setActiveId(id);
       setActionError(null);
-      setConfirmId(null);
+      clearConfirm();
       try {
         if (sectionIds === undefined) {
           await approveAccessRequest(id);
@@ -459,12 +469,12 @@ function AccessPanel() {
   );
 
   const runDeny = useCallback(
-    async (id: string) => {
+    async (id: string, note: string) => {
       setActiveId(id);
       setActionError(null);
-      setConfirmId(null);
+      clearConfirm();
       try {
-        await denyAccessRequest(id);
+        await denyAccessRequest(id, note);
       } catch (err: unknown) {
         setActionError(
           err instanceof Error ? err.message : "Failed to deny request",
@@ -529,7 +539,13 @@ function AccessPanel() {
                     sections={showPicker ? sections : null}
                     selectedIds={selectedIds}
                     sectionTitleById={sectionTitleById}
-                    confirming={confirmId === request.id}
+                    confirmingApprove={
+                      confirmId === request.id && confirmKind === "approve"
+                    }
+                    confirmingDeny={
+                      confirmId === request.id && confirmKind === "deny"
+                    }
+                    denyNote={confirmId === request.id ? denyNote : ""}
                     inFlight={activeId === request.id}
                     canApprove={canApprove}
                     onToggleSection={(sectionId) =>
@@ -537,11 +553,15 @@ function AccessPanel() {
                     }
                     onRowClick={() => {
                       if (confirmId === request.id) {
-                        setConfirmId(null);
+                        clearConfirm();
                       }
                     }}
+                    onDenyNoteChange={setDenyNote}
                     onApproveClick={() => {
-                      if (confirmId === request.id) {
+                      if (
+                        confirmId === request.id &&
+                        confirmKind === "approve"
+                      ) {
                         void runApprove(
                           request.id,
                           sectionsFailed ? undefined : selectedIds,
@@ -549,8 +569,18 @@ function AccessPanel() {
                         return;
                       }
                       setConfirmId(request.id);
+                      setConfirmKind("approve");
+                      setDenyNote("");
                     }}
-                    onDenyClick={() => void runDeny(request.id)}
+                    onDenyClick={() => {
+                      if (confirmId === request.id && confirmKind === "deny") {
+                        void runDeny(request.id, denyNote);
+                        return;
+                      }
+                      setConfirmId(request.id);
+                      setConfirmKind("deny");
+                      setDenyNote("");
+                    }}
                   />
                 );
               })}
@@ -567,11 +597,14 @@ function AccessRequestRow({
   sections,
   selectedIds,
   sectionTitleById,
-  confirming,
+  confirmingApprove,
+  confirmingDeny,
+  denyNote,
   inFlight,
   canApprove,
   onToggleSection,
   onRowClick,
+  onDenyNoteChange,
   onApproveClick,
   onDenyClick,
 }: {
@@ -579,11 +612,14 @@ function AccessRequestRow({
   sections: ShareableSection[] | null;
   selectedIds: number[];
   sectionTitleById: Map<number, string>;
-  confirming: boolean;
+  confirmingApprove: boolean;
+  confirmingDeny: boolean;
+  denyNote: string;
   inFlight: boolean;
   canApprove: boolean;
   onToggleSection: (sectionId: number) => void;
   onRowClick: () => void;
+  onDenyNoteChange: (value: string) => void;
   onApproveClick: () => void;
   onDenyClick: () => void;
 }) {
@@ -662,6 +698,23 @@ function AccessRequestRow({
         </fieldset>
       ) : null}
 
+      {pending && confirmingDeny ? (
+        <label
+          className="admin-access-deny-note"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className="muted">Optional note</span>
+          <input
+            type="text"
+            value={denyNote}
+            maxLength={280}
+            disabled={inFlight}
+            placeholder="Why deny?"
+            onChange={(e) => onDenyNoteChange(e.target.value)}
+          />
+        </label>
+      ) : null}
+
       {pending ? (
         <div
           className="admin-request-actions"
@@ -669,23 +722,25 @@ function AccessRequestRow({
         >
           <button
             type="button"
-            className={confirming ? "btn admin-access-confirm" : "btn"}
+            className={confirmingApprove ? "btn admin-access-confirm" : "btn"}
             disabled={inFlight || !canApprove}
             onClick={onApproveClick}
           >
             {inFlight
               ? "Working…"
-              : confirming
+              : confirmingApprove
                 ? "Send invite?"
                 : "Approve"}
           </button>
           <button
             type="button"
-            className="btn secondary"
+            className={
+              confirmingDeny ? "btn secondary admin-access-confirm" : "btn secondary"
+            }
             disabled={inFlight}
             onClick={onDenyClick}
           >
-            Deny
+            {confirmingDeny ? "Confirm deny?" : "Deny"}
           </button>
         </div>
       ) : null}

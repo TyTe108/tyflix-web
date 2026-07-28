@@ -547,6 +547,68 @@ describe("admin access-requests routes", () => {
     assert.equal(sharing.inviteCalls.length, 0);
   });
 
+  it("deny without adminNote stores null", async () => {
+    const store = createFakeStore([pendingRecord()]);
+    const app = buildApp(store, createFakeSharing());
+
+    const response = await request(
+      app,
+      "/api/admin/access-requests/req-1/deny",
+      {
+        method: "POST",
+        cookie: sessionCookie(ADMIN_PERMISSION),
+        body: {},
+      },
+    );
+
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as AccessRequest;
+    assert.equal(body.status, "denied");
+    assert.equal(body.adminNote, null);
+  });
+
+  it("deny rejects a non-string adminNote with 400", async () => {
+    const store = createFakeStore([pendingRecord()]);
+    const app = buildApp(store, createFakeSharing());
+
+    const response = await request(
+      app,
+      "/api/admin/access-requests/req-1/deny",
+      {
+        method: "POST",
+        cookie: sessionCookie(ADMIN_PERMISSION),
+        body: { adminNote: 12 },
+      },
+    );
+
+    assert.equal(response.status, 400);
+    const body = (await response.json()) as { error: string };
+    assert.match(body.error, /adminNote must be a string/i);
+    assert.equal(store.records[0]?.status, "pending");
+  });
+
+  it("deny rejects an adminNote over 280 characters with 400", async () => {
+    const store = createFakeStore([pendingRecord()]);
+    const app = buildApp(store, createFakeSharing());
+    const adminNote = "x".repeat(281);
+
+    const response = await request(
+      app,
+      "/api/admin/access-requests/req-1/deny",
+      {
+        method: "POST",
+        cookie: sessionCookie(ADMIN_PERMISSION),
+        body: { adminNote },
+      },
+    );
+
+    assert.equal(response.status, 400);
+    const body = (await response.json()) as { error: string };
+    assert.match(body.error, /at most 280/i);
+    assert.equal(store.records[0]?.status, "pending");
+    assert.equal(store.records[0]?.adminNote, null);
+  });
+
   it("approve unknown id returns 404", async () => {
     const app = buildApp(createFakeStore(), createFakeSharing());
     const response = await request(

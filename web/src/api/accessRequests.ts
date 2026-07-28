@@ -173,13 +173,17 @@ export async function approveAccessRequest(
   return (await res.json()) as AccessRequest;
 }
 
-export async function denyAccessRequest(id: string): Promise<AccessRequest> {
+export async function denyAccessRequest(
+  id: string,
+  adminNote?: string,
+): Promise<AccessRequest> {
+  const trimmed = adminNote?.trim() ?? "";
   const res = await fetch(
     `/api/admin/access-requests/${encodeURIComponent(id)}/deny`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify(trimmed === "" ? {} : { adminNote: trimmed }),
     },
   );
   if (!res.ok) {
