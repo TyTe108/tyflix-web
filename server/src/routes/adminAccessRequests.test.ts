@@ -357,6 +357,51 @@ describe("admin access-requests routes", () => {
     assert.deepEqual(await response.json(), SECTIONS);
   });
 
+  it("GET /count returns pending count without calling Plex", async () => {
+    const store = createFakeStore([
+      pendingRecord({ id: "p1" }),
+      pendingRecord({ id: "p2", email: "two@example.com" }),
+      invitedRecord({ id: "i1", email: "invited@example.com" }),
+      pendingRecord({
+        id: "d1",
+        email: "denied@example.com",
+        status: "denied",
+        decidedAt: 1,
+      }),
+    ]);
+    const sharing = createFakeSharing();
+    const app = buildApp(store, sharing);
+
+    const response = await request(app, "/api/admin/access-requests/count", {
+      cookie: sessionCookie(ADMIN_PERMISSION),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { pending: 2 });
+    assert.equal(sharing.pendingCalls, 0);
+    assert.equal(sharing.sharesCalls, 0);
+    assert.equal(sharing.inviteCalls.length, 0);
+  });
+
+  it("GET /count returns 401/403 like other admin routes", async () => {
+    const app = buildApp(createFakeStore(), createFakeSharing());
+    assert.equal(
+      (
+        await request(app, "/api/admin/access-requests/count", {
+          cookie: null,
+        })
+      ).status,
+      401,
+    );
+    assert.equal(
+      (
+        await request(app, "/api/admin/access-requests/count", {
+          cookie: sessionCookie(0),
+        })
+      ).status,
+      403,
+    );
+  });
+
   it("approve with no sectionIds invites all shareable ids and marks invited", async () => {
     const store = createFakeStore([pendingRecord()]);
     const sharing = createFakeSharing();

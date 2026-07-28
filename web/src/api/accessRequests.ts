@@ -141,6 +141,18 @@ export async function fetchAccessRequestSections(): Promise<ShareableSection[]> 
   return (await res.json()) as ShareableSection[];
 }
 
+export async function fetchAccessRequestPendingCount(): Promise<{
+  pending: number;
+}> {
+  const res = await fetch("/api/admin/access-requests/count");
+  if (!res.ok) {
+    throw new Error(
+      await errorMessage(res, "Failed to load access request count"),
+    );
+  }
+  return (await res.json()) as { pending: number };
+}
+
 export async function approveAccessRequest(
   id: string,
   sectionIds?: number[],

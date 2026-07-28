@@ -134,8 +134,26 @@ body {
 }
 
 .sidebar-link-icon {
+  position: relative;
   display: inline-flex;
   flex-shrink: 0;
+}
+
+.sidebar-badge {
+  position: absolute;
+  top: -0.35rem;
+  right: -0.45rem;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding: 0 0.28rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1.1rem;
+  text-align: center;
+  pointer-events: none;
 }
 
 .sidebar-link-label {

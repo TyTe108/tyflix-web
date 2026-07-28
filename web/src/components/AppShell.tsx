@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, Outlet } from "react-router-dom";
+import { fetchAccessRequestPendingCount } from "../api/accessRequests";
 import { useAuth } from "../auth/AuthContext";
 
 type NavItem = {
@@ -92,8 +93,43 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/admin", label: "Admin", icon: AdminIcon, adminOnly: true },
 ];
 
+const PENDING_COUNT_POLL_MS = 60_000;
+
 export function AppShell() {
   const { user, isAdmin, logout } = useAuth();
+  const [pendingAccessCount, setPendingAccessCount] = useState<number | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setPendingAccessCount(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const { pending } = await fetchAccessRequestPendingCount();
+        if (!cancelled) {
+          setPendingAccessCount(pending);
+        }
+      } catch {
+        // Feature off (404) or transient failure: leave the nav looking normal.
+      }
+    };
+
+    void load();
+    const intervalId = window.setInterval(() => {
+      void load();
+    }, PENDING_COUNT_POLL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [isAdmin]);
 
   return (
     <div className="app-shell">
@@ -106,19 +142,37 @@ export function AppShell() {
         </div>
 
         <nav className="sidebar-nav" aria-label="Primary">
-          {NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin).map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                isActive ? "sidebar-link active" : "sidebar-link"
-              }
-            >
-              <span className="sidebar-link-icon">{item.icon}</span>
-              <span className="sidebar-link-label">{item.label}</span>
-            </NavLink>
-          ))}
+          {NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin).map((item) => {
+            const showBadge =
+              item.to === "/admin" &&
+              pendingAccessCount !== null &&
+              pendingAccessCount > 0;
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) =>
+                  isActive ? "sidebar-link active" : "sidebar-link"
+                }
+              >
+                <span className="sidebar-link-icon">
+                  {item.icon}
+                  {showBadge ? (
+                    <span
+                      className="sidebar-badge"
+                      aria-label={`${pendingAccessCount} pending access ${
+                        pendingAccessCount === 1 ? "request" : "requests"
+                      }`}
+                    >
+                      {pendingAccessCount > 99 ? "99+" : pendingAccessCount}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="sidebar-link-label">{item.label}</span>
+              </NavLink>
+            );
+          })}
         </nav>
 
         <div className="sidebar-footer">

@@ -81,6 +81,14 @@ export function createAdminAccessRequestsRouter(
     res.json(await listWithReconciliation());
   });
 
+  router.get("/count", admin, (_req, res) => {
+    // Cheap poll target for the Admin nav badge — store only, no Plex.
+    const pending = store
+      .list()
+      .filter((row) => row.status === "pending").length;
+    res.json({ pending });
+  });
+
   router.get("/sections", admin, async (_req, res) => {
     try {
       res.json(await sharing.listShareableSections());
