@@ -14,9 +14,13 @@ Deployed, in daily use, still being built. Roadmap's at the bottom.
 
 ![Discover page](docs/screenshots/discover.jpg)
 
-**Library.** What's actually on the server, Plex-style, opening on a Continue Watching rail. Sort, filter by genre or unwatched, jump with the A-Z rail, resize the posters. Progress bars and watched badges read live from Plex.
+**Library.** What's actually on the server, Plex-style, opening on a Continue Watching rail. Search by title, sort, filter by genre or unwatched, jump with the A-Z rail, resize the posters. Progress bars and watched badges read live from Plex.
 
 ![Library](docs/screenshots/library.jpg)
+
+**Search.** Type a few letters and the whole library filters, not just the page you happen to be looking at, because the filtering runs on Plex's side rather than in the browser. It matches anywhere in the title, so "dragon" pulls up every Dragon Ball film without me spelling one out.
+
+![Library search](docs/screenshots/search.jpg)
 
 **Title page.** Artwork, overview, cast and crew, availability, and one button that's either Play or Request depending on what the server already has.
 
@@ -54,6 +58,8 @@ Beyond what's in the screenshots:
 - Requests flow through Seerr into Radarr and Sonarr, which do the actual downloading and library management. Tyflix doesn't reimplement any of that.
 - Report a problem on a title, like bad audio or the wrong cut, and follow it through to resolution.
 - Plex Watchlist, per-user request quotas, and quality-profile selection at request time.
+- Cast to a Chromecast from the player. Playback moves to the TV and keeps reporting progress to Plex. Stop casting and the browser picks up wherever the TV got to.
+- People who don't have access yet can ask for it. A short form at `/request-access` lands in the admin area, and one approval sends a real Plex library invite.
 - The admin area also covers running jobs, container health, and user management.
 
 ## Architecture
@@ -64,7 +70,7 @@ Tyflix is one Node service. It serves a JSON API and the built React app from th
 - **Backend:** Node, Express, TypeScript. It holds every credential and talks to four upstreams: Plex for accounts and the library, Seerr for requests and media status and issues, TMDB for discovery metadata and images, and a small host-metrics service that feeds the admin dashboard.
 - **Auth:** users sign in with their Plex account over Plex's PIN flow. The browser only ever holds a signed, httpOnly session cookie. The Plex token stays on the server.
 - **Playback:** the server mints a short-lived Plex *transient* token from the user's stored token and hands the browser Plex's own `plex.direct` address, so video goes straight from Plex to the in-page player and never touches the tunnel. Plex transcodes on demand. The durable token never leaves the backend.
-- **Deployment:** the whole thing runs in Docker on a home server, on the same Docker network as Seerr, reachable from anywhere through a Cloudflare Tunnel. No inbound ports are open on the home network. TLS terminates at Cloudflare's edge.
+- **Deployment:** the whole thing runs in Docker on a home server, on the same Docker network as Seerr, reachable from anywhere through a Cloudflare Tunnel. No inbound ports are open on the home network. TLS terminates at Cloudflare's edge. Pushing to main runs the test suite and deploys only if it passes.
 
 ```
 Browser --https--> Cloudflare edge --tunnel--> cloudflared --> Tyflix (Node)
@@ -87,6 +93,8 @@ It's the same shape as an enterprise pattern like SAP Cloud Connector reaching S
 
 **Security that doesn't depend on the code being private.** Authorization all happens on the server. Every route checks the session, and admin routes check an admin permission bit that mirrors Seerr's model. The long-lived Plex token never leaves the backend. Security headers ship a Content-Security-Policy scoped to exactly what the app loads: posters from TMDB, fonts from Google, everything else same-origin. The one awkward exception is the Plex login popup, which needs a Cross-Origin-Opener-Policy loose enough that the opener keeps a handle on the popup and can close it once sign-in completes.
 
+**Letting strangers ask for access without opening anything up.** The request form is the only part of the app you can reach without an account, so it's the only part anyone can abuse. I skipped the CAPTCHA. An abusive submission is already inert, because approval gates everything behind it: no email goes out, no Plex call fires, no account gets made. It's a row that only I see. What's left is a crawler hammering the form, and a hidden honeypot field plus a per-IP hourly cap deals with that without asking real people to prove they're human. Approving calls Plex's sharing API to invite the email and grant whichever libraries I picked. Denials stop blocking a resubmission after 90 days, so a no isn't permanent. The queue also reconciles against Plex on every read, so a request that got accepted some other way doesn't sit there looking pending.
+
 **Joining two id systems.** Discovery is keyed by TMDB id. Plex is keyed by its own rating keys. Availability and playability come from matching the two through Seerr's media records, which is how the app shows accurate status instead of guessing by title.
 
 ## Tech stack
@@ -100,11 +108,11 @@ It's the same shape as an enterprise pattern like SAP Cloud Connector reaching S
 
 ## Status and roadmap
 
-Tyflix is deployed and in daily use on my home server, and it's still an active work in progress. It covers most of Seerr's user-facing surface plus a few things Seerr doesn't do, like the per-user watched-versus-requested analytics.
+Tyflix is deployed and in daily use on my home server, and it's still an active work in progress. It covers most of Seerr's user-facing surface plus a few things Seerr doesn't do, like the per-user watched-versus-requested analytics. The backend carries 328 tests.
 
-Recent work: the Plex-style Library, the full set of in-player controls, auto-advance with the Up Next card, hardware-accelerated transcoding on the server's Arc GPU, and progress sync back to Plex. That last one also made watch state per-user instead of owner-based, which is what makes the Continue Watching rail and the per-poster progress bars mean anything.
+Recent work: search in the Library. Before that, self-serve access requests, where a stranger's form submission becomes a real Plex invite once I approve it, and casting to a Chromecast. Earlier came the in-player control bar, auto-advance with the Up Next card, hardware-accelerated transcoding on the server's Arc GPU, and progress sync back to Plex. That last one made watch state per-user instead of owner-based, which is what makes the Continue Watching rail and the per-poster progress bars mean anything.
 
-Next up: an automatic bitrate cap for constrained connections, and casting to LAN devices (Chromecast and AirPlay).
+Next up: an automatic bitrate cap for constrained connections, and AirPlay, so casting also works from Safari and iOS.
 
 Wherever I can, I'd rather wire up a tool that already works than rebuild it. Tyflix is a layer over Plex and Seerr, not a second copy of either.
 
