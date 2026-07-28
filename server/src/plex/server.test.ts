@@ -852,6 +852,7 @@ describe("plexServer.sectionItems", () => {
     assert.equal(parsed.searchParams.get("X-Plex-Container-Size"), "25");
     assert.equal(parsed.searchParams.get("genre"), null);
     assert.equal(parsed.searchParams.get("unwatched"), null);
+    assert.equal(parsed.searchParams.get("title"), null);
 
     assert.equal(result.totalSize, 120);
     assert.deepEqual(result.items, [
@@ -985,6 +986,39 @@ describe("plexServer.sectionItems", () => {
     assert.equal(parsed.searchParams.get("includeGuids"), "1");
     assert.equal(parsed.searchParams.get("X-Plex-Container-Start"), "0");
     assert.equal(parsed.searchParams.get("X-Plex-Container-Size"), "50");
+    assert.equal(parsed.pathname, "/library/sections/1/all");
+  });
+
+  it("adds title to the Plex query when provided", async () => {
+    let requestedUrl: string | null = null;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      requestedUrl =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      return jsonResponse(200, {
+        MediaContainer: { totalSize: 0, Metadata: [] },
+      });
+    }) as typeof fetch;
+
+    await client().sectionItems({
+      sectionKey: "1",
+      sort: "year",
+      start: 0,
+      size: 50,
+      title: "dragon",
+      genre: "1131",
+      unwatched: true,
+    });
+
+    assert.ok(requestedUrl);
+    const parsed = new URL(requestedUrl);
+    assert.equal(parsed.searchParams.get("title"), "dragon");
+    assert.equal(parsed.searchParams.get("genre"), "1131");
+    assert.equal(parsed.searchParams.get("unwatched"), "1");
+    assert.equal(parsed.searchParams.get("sort"), "year:desc");
     assert.equal(parsed.pathname, "/library/sections/1/all");
   });
 

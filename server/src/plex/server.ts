@@ -541,6 +541,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     genre?: string;
     unwatched?: boolean;
     firstCharacter?: string;
+    title?: string;
     userToken?: string;
   }): Promise<{ items: LibraryItem[]; totalSize: number }> {
     const {
@@ -551,6 +552,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
       genre,
       unwatched,
       firstCharacter,
+      title,
       userToken,
     } = options;
     const query: Record<string, string> = {
@@ -564,6 +566,9 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     }
     if (unwatched) {
       query.unwatched = "1";
+    }
+    if (title !== undefined) {
+      query.title = title;
     }
 
     const path =

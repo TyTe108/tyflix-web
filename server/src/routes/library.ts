@@ -109,6 +109,12 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
       return;
     }
 
+    const queryResult = parseTitleQuery(req.query.query);
+    if (queryResult === null) {
+      res.status(400).json({ error: "invalid query" });
+      return;
+    }
+
     const session = res.locals.session as SessionPayload | undefined;
     if (!session) {
       res.status(401).json({ error: "not authenticated" });
@@ -143,6 +149,7 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
         ...(firstCharacterResult !== undefined
           ? { firstCharacter: firstCharacterResult }
           : {}),
+        ...(queryResult !== undefined ? { title: queryResult } : {}),
         ...(userToken !== undefined ? { userToken } : {}),
       });
       const items =
@@ -163,6 +170,7 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
         genre: genreResult ?? null,
         unwatched: unwatchedResult,
         firstCharacter: firstCharacterResult ?? null,
+        query: queryResult ?? null,
       });
     } catch (err) {
       respondUpstreamError(res, err);
@@ -257,6 +265,23 @@ function parseFirstCharacterQuery(raw: unknown): string | null | undefined {
     return null;
   }
   return raw;
+}
+
+function parseTitleQuery(raw: unknown): string | null | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  if (trimmed.length > 100) {
+    return null;
+  }
+  return trimmed;
 }
 
 function respondUpstreamError(

@@ -172,6 +172,7 @@ describe("library routes", () => {
       genre: null,
       unwatched: false,
       firstCharacter: null,
+      query: null,
     });
   });
 
@@ -226,6 +227,7 @@ describe("library routes", () => {
       genre: "1131",
       unwatched: true,
       firstCharacter: null,
+      query: null,
     });
   });
 
@@ -305,6 +307,7 @@ describe("library routes", () => {
       genre: null,
       unwatched: false,
       firstCharacter: "B",
+      query: null,
     });
   });
 
@@ -334,6 +337,106 @@ describe("library routes", () => {
     );
     assert.equal(badSymbol.status, 400);
     assert.deepEqual(await badSymbol.json(), { error: "invalid firstCharacter" });
+  });
+
+  it("GET /sections/:key/items passes query through as title and echoes it", async () => {
+    const calls: Array<{
+      sectionKey: string;
+      sort: string;
+      start: number;
+      size: number;
+      title?: string;
+    }> = [];
+    const app = createApp(baseDeps({
+      async sections() {
+        return [];
+      },
+      async sectionItems(options: {
+        sectionKey: string;
+        sort: LibrarySortKey;
+        start: number;
+        size: number;
+        title?: string;
+      }) {
+        calls.push(options);
+        return { items: [], totalSize: 3 };
+      },
+    } as unknown as PlexServerClient));
+
+    const response = await fetchLocal(
+      app,
+      "/api/library/sections/1/items?query=dragon&sort=year",
+      sessionCookie(),
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(calls, [
+      {
+        sectionKey: "1",
+        sort: "year",
+        start: 0,
+        size: 50,
+        title: "dragon",
+      },
+    ]);
+    assert.deepEqual(await response.json(), {
+      items: [],
+      totalSize: 3,
+      start: 0,
+      size: 50,
+      sort: "year",
+      genre: null,
+      unwatched: false,
+      firstCharacter: null,
+      query: "dragon",
+    });
+
+    const whitespace = await fetchLocal(
+      app,
+      "/api/library/sections/1/items?query=%20%20",
+      sessionCookie(),
+    );
+    assert.equal(whitespace.status, 200);
+    assert.deepEqual(await whitespace.json(), {
+      items: [],
+      totalSize: 3,
+      start: 0,
+      size: 50,
+      sort: "title",
+      genre: null,
+      unwatched: false,
+      firstCharacter: null,
+      query: null,
+    });
+    assert.equal(calls.at(-1)?.title, undefined);
+  });
+
+  it("GET /sections/:key/items rejects invalid query with 400", async () => {
+    const app = createApp(baseDeps({
+      async sections() {
+        return [];
+      },
+      async sectionItems() {
+        throw new Error("should not be called");
+      },
+    } as unknown as PlexServerClient));
+    const cookie = sessionCookie();
+
+    const badArray = await fetchLocal(
+      app,
+      "/api/library/sections/1/items?query=dragon&query=fire",
+      cookie,
+    );
+    assert.equal(badArray.status, 400);
+    assert.deepEqual(await badArray.json(), { error: "invalid query" });
+
+    const tooLong = "a".repeat(101);
+    const badLength = await fetchLocal(
+      app,
+      `/api/library/sections/1/items?query=${tooLong}`,
+      cookie,
+    );
+    assert.equal(badLength.status, 400);
+    assert.deepEqual(await badLength.json(), { error: "invalid query" });
   });
 
   it("GET /sections/:key/first-characters returns the character index", async () => {
@@ -460,6 +563,7 @@ describe("library routes", () => {
       genre: null,
       unwatched: false,
       firstCharacter: null,
+      query: null,
     });
   });
 
@@ -721,6 +825,7 @@ describe("library routes", () => {
       genre: null,
       unwatched: false,
       firstCharacter: null,
+      query: null,
     });
   });
 });
