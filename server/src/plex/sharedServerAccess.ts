@@ -156,8 +156,8 @@ function parseSharedServerAccess(xml: string): Map<number, string> {
   const tags = xml.match(/<SharedServer\b[^>]*>/g) ?? [];
 
   for (const tag of tags) {
-    const userID = tag.match(/userID="(\d+)"/)?.[1];
-    const accessToken = tag.match(/accessToken="([^"]+)"/)?.[1];
+    const userID = tag.match(/(?:\s|<)userID="(\d+)"/)?.[1];
+    const accessToken = tag.match(/(?:\s|<)accessToken="([^"]+)"/)?.[1];
     if (userID === undefined || accessToken === undefined) {
       continue;
     }

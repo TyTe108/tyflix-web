@@ -89,6 +89,38 @@ describe("createSharedServerAccessResolver", () => {
     assert.equal(token, "shared-token-allen");
   });
 
+  it("reads userID and accessToken at attribute boundaries when prefixes collide", async () => {
+    stubFetch({
+      sharedServers: () =>
+        textResponse(
+          200,
+          `<?xml version="1.0" encoding="UTF-8"?>
+<MediaContainer machineIdentifier="${MACHINE_ID}" size="1">
+  <SharedServer id="1" myuserID="666" xaccessToken="wrong" userID="777" accessToken="right"/>
+</MediaContainer>`,
+        ),
+    });
+
+    const token = await resolver().resolveAccessToken(777);
+    assert.equal(token, "right");
+  });
+
+  it("parses SharedServer tags with mixed-case attribute names", async () => {
+    stubFetch({
+      sharedServers: () =>
+        textResponse(
+          200,
+          `<?xml version="1.0" encoding="UTF-8"?>
+<MediaContainer machineIdentifier="${MACHINE_ID}" size="1">
+  <SharedServer id="99" serverAccessToken="wrong-token" userID="777" accessToken="right-token" name="Test"/>
+</MediaContainer>`,
+        ),
+    });
+
+    const token = await resolver().resolveAccessToken(777);
+    assert.equal(token, "right-token");
+  });
+
   it("returns null when the plexId is not a shared user", async () => {
     stubFetch();
 
