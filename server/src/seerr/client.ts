@@ -144,6 +144,7 @@ export function createSeerrClient(options: SeerrClientOptions) {
     path: string,
     query: Record<string, string> = {},
     body?: unknown,
+    extraHeaders: Record<string, string> = {},
   ): Promise<unknown> {
     const url = new URL(`${baseUrl}${path}`);
     for (const [key, value] of Object.entries(query)) {
@@ -158,6 +159,7 @@ export function createSeerrClient(options: SeerrClientOptions) {
           "X-Api-Key": apiKey,
           Accept: "application/json",
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+          ...extraHeaders,
         },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
@@ -184,8 +186,12 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return requestJson("GET", path, query);
   }
 
-  function postJson(path: string, body?: unknown): Promise<unknown> {
-    return requestJson("POST", path, {}, body);
+  function postJson(
+    path: string,
+    body?: unknown,
+    extraHeaders: Record<string, string> = {},
+  ): Promise<unknown> {
+    return requestJson("POST", path, {}, body, extraHeaders);
   }
 
   async function signInWithPlex(authToken: string): Promise<SeerrUser | null> {
@@ -602,16 +608,31 @@ export function createSeerrClient(options: SeerrClientOptions) {
   async function createRequest(
     input: CreateSeerrRequestInput,
   ): Promise<SeerrRequest> {
-    const body = await postJson("/api/v1/request", {
-      mediaType: input.mediaType,
-      mediaId: input.tmdbId,
-      ...(input.mediaType === "tv" && input.seasons !== undefined
-        ? { seasons: input.seasons }
-        : {}),
-      userId: input.userId,
-      ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
-      ...(input.serverId === undefined ? {} : { serverId: input.serverId }),
-    });
+    // Seerr resolves API-key auth to user ID 1 (the original admin) unless the
+    // caller also sends X-API-User. Auto-approve decisions and modifiedBy are
+    // based on that authenticated req.user — not on a body userId field, which
+    // Seerr only uses for attribution/quota when the caller already has
+    // MANAGE_USERS / MANAGE_REQUESTS. Relying on body userId alone (or omitting
+    // X-API-User) silently reverts every household request to admin auto-approve.
+    if (!Number.isInteger(input.userId) || input.userId <= 0) {
+      throw new Error(
+        `createRequest requires a positive integer userId (got ${String(input.userId)})`,
+      );
+    }
+
+    const body = await postJson(
+      "/api/v1/request",
+      {
+        mediaType: input.mediaType,
+        mediaId: input.tmdbId,
+        ...(input.mediaType === "tv" && input.seasons !== undefined
+          ? { seasons: input.seasons }
+          : {}),
+        ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
+        ...(input.serverId === undefined ? {} : { serverId: input.serverId }),
+      },
+      { "X-API-User": String(input.userId) },
+    );
     return requireSeerrRequest(body, "createRequest");
   }
 

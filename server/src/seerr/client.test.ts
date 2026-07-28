@@ -693,13 +693,19 @@ describe("Seerr requests client", () => {
 
   it("creates a TV request without profile overrides when none are provided", async () => {
     let call:
-      | { url: string; method: string | undefined; body: string | undefined }
+      | {
+          url: string;
+          method: string | undefined;
+          body: string | undefined;
+          headers: HeadersInit | undefined;
+        }
       | undefined;
     globalThis.fetch = async (input, init) => {
       call = {
         url: String(input),
         method: init?.method,
         body: typeof init?.body === "string" ? init.body : undefined,
+        headers: init?.headers,
       };
       return jsonResponse(
         201,
@@ -729,18 +735,20 @@ describe("Seerr requests client", () => {
     assert.ok(call);
     assert.equal(call.url, "http://seerr:5055/api/v1/request");
     assert.equal(call.method, "POST");
+    assert.equal(new Headers(call.headers).get("X-API-User"), "7");
     assert.deepEqual(JSON.parse(call.body ?? ""), {
       mediaType: "tv",
       mediaId: 1396,
       seasons: [1, 2],
-      userId: 7,
     });
   });
 
   it("includes profileId and serverId when provided", async () => {
     let body: Record<string, unknown> | undefined;
+    let headers: HeadersInit | undefined;
     globalThis.fetch = async (_input, init) => {
       body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      headers = init?.headers;
       return jsonResponse(201, requestRow());
     };
     const seerr = createSeerrClient({
@@ -756,10 +764,10 @@ describe("Seerr requests client", () => {
       serverId: 12,
     });
 
+    assert.equal(new Headers(headers).get("X-API-User"), "7");
     assert.deepEqual(body, {
       mediaType: "movie",
       mediaId: 603,
-      userId: 7,
       profileId: 4,
       serverId: 12,
     });
