@@ -6,6 +6,8 @@ It sits on top of Seerr, the request manager in the Overseerr and Jellyseerr fam
 
 **Live instance:** https://tyflix.tylerte.dev (you need a Plex account with access to the server to sign in)
 
+**Reading the code?** [docs/CODE_TOUR.md](docs/CODE_TOUR.md) is a guided way in: which ten files carry the architecture, what order to read them in, and the design decisions worth arguing with.
+
 Deployed, in daily use, still being built. Roadmap's at the bottom.
 
 ## Screenshots
