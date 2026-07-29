@@ -1,14 +1,28 @@
+// The Continue Watching rail at the top of the Library page: a horizontal strip
+// of half-finished titles, each a direct link back into the player.
+//
+// The list is Plex's own On Deck for the signed-in user, which is the same
+// state the TV app reads. Stop a film halfway through in the living room and it
+// turns up here. That works because playback anywhere reports its position back
+// to Plex, so watch progress is per-user rather than owner-wide.
+//
+// Renders nothing at all when the list is empty or hasn't loaded, so the
+// Library page doesn't reserve space for a rail that may never appear.
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { libraryImageUrl } from "../api/library";
 import { fetchContinueWatching, type ContinueItem } from "../api/watch";
 
+// Both routes take a Plex ratingKey. Movies use /watch/item because an On Deck
+// row carries no TMDB id, and /watch/item is the ratingKey-native movie route.
 function continueLink(item: ContinueItem): string {
   return item.type === "movie"
     ? `/watch/item/${item.ratingKey}`
     : `/watch/episode/${item.ratingKey}`;
 }
 
+// The bar across the bottom of a poster. Floors at 1% so a title you only just
+// started still shows a sliver rather than nothing.
 function ContinueProgressBar({
   viewOffset,
   duration,
@@ -49,9 +63,17 @@ function ContinueProgressBar({
   );
 }
 
+/**
+ * Continue Watching rail. Takes no props and fetches its own list on mount.
+ *
+ * Returns null when there's nothing to resume, so the caller can drop it in
+ * unconditionally. LibraryPage does exactly that.
+ */
 export function ContinueWatchingRail() {
   const [items, setItems] = useState<ContinueItem[] | null>(null);
 
+  // One fetch on mount, never refreshed. The fetch helper swallows its own
+  // errors and hands back an empty array, so there's no error branch here.
   useEffect(() => {
     let cancelled = false;
     void fetchContinueWatching().then((result) => {
@@ -64,6 +86,7 @@ export function ContinueWatchingRail() {
     };
   }, []);
 
+  // null is still-loading, empty is nothing to resume. Neither draws anything.
   if (items === null || items.length === 0) {
     return null;
   }

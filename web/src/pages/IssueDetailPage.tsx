@@ -1,3 +1,16 @@
+// One reported problem with its comment thread, plus the buttons to comment on
+// it or resolve it. Rendered at /issues/:id by App.tsx, inside ProtectedRoute
+// and AppShell. MyIssuesPage and the admin issues table both link here.
+//
+// Three calls, all through api/issues.ts and all Seerr underneath: GET
+// /api/issues/:id to load, POST /api/issues/:id/comment, and POST
+// /api/issues/:id/status. Both writes re-fetch the issue rather than patching
+// local state, so what you see is always Seerr's version.
+//
+// Authorization is per-issue, not per-role. The server lets you act on an
+// issue if you filed it or if you're an admin, which means a normal member can
+// resolve their own report. canAct below mirrors that same rule for the UI.
+
 import {
   useCallback,
   useEffect,
@@ -18,8 +31,11 @@ import {
 } from "../api/issues";
 import { useAuth } from "../auth/AuthContext";
 
+// Drives which of the three mutually exclusive body states renders below.
 type LoadStatus = "loading" | "ready" | "error";
 
+// Rejects anything that isn't a plain positive integer, so a junk URL segment
+// renders "not found" without firing a request.
 function parseIssueId(raw: string | undefined): number | null {
   if (raw === undefined || !/^\d+$/.test(raw)) {
     return null;
@@ -28,6 +44,13 @@ function parseIssueId(raw: string | undefined): number | null {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
+/**
+ * Detail view for one issue.
+ *
+ * The server answers 403 and 404 identically through fetchIssue, so a
+ * forbidden issue and a nonexistent one land in the same error state on
+ * purpose. Nothing here tells you which.
+ */
 export function IssueDetailPage() {
   const { id: rawId } = useParams<{ id: string }>();
   const id = parseIssueId(rawId);
@@ -37,6 +60,8 @@ export function IssueDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [comment, setComment] = useState("");
+  // Which write is in flight, if any. One shared value rather than two
+  // booleans, because both buttons disable together while either is running.
   const [action, setAction] = useState<"comment" | "status" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -44,6 +69,9 @@ export function IssueDetailPage() {
     setReloadKey((value) => value + 1);
   }, []);
 
+  // Owns the initial load. Re-runs on route id change or retry. The writes
+  // below refresh through refreshIssue instead of going through here, so a
+  // comment doesn't blank the page back to the loading state.
   useEffect(() => {
     if (id === null) {
       setIssue(null);
@@ -80,10 +108,15 @@ export function IssueDetailPage() {
     };
   }, [id, reloadKey]);
 
+  // Mirror of the server's canAccessIssue check. Getting it wrong here only
+  // shows or hides buttons; the real gate is on the route.
   const canAct =
     issue !== null &&
     (isAdmin || issue.createdBy.id === user?.seerrUserId);
 
+  // Oldest comment first so the thread reads top to bottom. Seerr's ordering
+  // isn't relied on. Comments posted in the same second tie on date, so id
+  // breaks the tie and keeps the sort stable.
   const comments = useMemo(
     () =>
       issue === null
@@ -99,6 +132,9 @@ export function IssueDetailPage() {
     [issue],
   );
 
+  // Re-reads the issue after a write. Deliberately doesn't touch `status`, so
+  // the thread stays on screen while it refreshes. Any throw here is caught by
+  // the caller and surfaced as an action error, not a page error.
   const refreshIssue = useCallback(async () => {
     if (id === null) {
       return;
@@ -106,6 +142,8 @@ export function IssueDetailPage() {
     setIssue(await fetchIssue(id));
   }, [id]);
 
+  // Posts a comment, then reloads the thread and clears the box. The textarea
+  // is only cleared on success, so a failed submit doesn't lose what was typed.
   const submitComment = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -130,6 +168,8 @@ export function IssueDetailPage() {
     [comment, id, refreshIssue],
   );
 
+  // Flips open to resolved and back. One button, both directions, driven off
+  // the issue's current status rather than a separate piece of state.
   const toggleStatus = useCallback(async () => {
     if (id === null || issue === null) {
       return;
@@ -173,6 +213,9 @@ export function IssueDetailPage() {
         </div>
       ) : null}
 
+      {/* Header: poster, type and status badges, the title linking back to the
+          media page, and who filed it. Seerr doesn't always resolve a title
+          for the media record, so that falls back to the raw TMDB id. */}
       {status === "ready" && issue !== null ? (
         <article className="issue-detail">
           <header className="issue-detail-header">
@@ -228,6 +271,12 @@ export function IssueDetailPage() {
             )}
           </section>
 
+          {/* Action panel, hidden entirely for anyone who can't act. The
+              "posts from the server account" note is honest rather than
+              decorative: Tyflix talks to Seerr with an admin API key, and
+              Seerr attributes comments to that key's owner instead of the
+              acting user. Issue creation does carry a userId, so only
+              comments are misattributed. */}
           {canAct ? (
             <section className="issue-actions" aria-label="Issue actions">
               <button

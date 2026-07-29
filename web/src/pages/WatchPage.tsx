@@ -1,3 +1,32 @@
+// The player page. Everything that happens after someone presses Play.
+//
+// Three routes in App.tsx render this same component, and whichever param is
+// present decides where the play descriptor comes from:
+//
+//   /watch/movie/:tmdbId        from a title page, TMDB id joined to a Plex
+//                               ratingKey by Seerr on the server
+//   /watch/episode/:ratingKey   an episode, already keyed on Plex's own id
+//   /watch/item/:itemRatingKey  anything in the Library, including the movies
+//                               that carry no TMDB id at all
+//
+// The play sequence: ask the backend for a descriptor (GET /api/watch/...), get
+// back a short-lived Plex transient token plus Plex's own plex.direct
+// addresses, then hand those URLs to hls.js. Video does not go through the
+// Cloudflare Tunnel. The browser streams straight from Plex, which is why the
+// transient token is in the query string of every media URL on this page.
+// Control plane through the tunnel, video direct.
+//
+// The rest of the screen hangs off that one descriptor. viewOffsetMs (read
+// under this user's own Plex token, so it's their position and not the owner's)
+// opens the resume dialog, creditsOffsetMs fires Up Next, streams.audio and
+// streams.subtitle fill the settings menu, and POST /api/watch/timeline reports
+// progress back so Plex and the TV in the other room agree on where you stopped.
+//
+// Casting is a second playback target rather than a second page. Once a Cast
+// session connects, local hls.js is torn down and the receiver plays Plex's
+// DASH instead, with a separate reporter driving the timeline off the receiver
+// clock. Disconnecting hands the position back to the local <video>.
+
 import Hls from "hls.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -28,28 +57,47 @@ import { subscribeSessionReady } from "../cast/subscribeSessionReady";
 import { useCastPlayer } from "../cast/useCastPlayer";
 import { useCastState } from "../cast/useCastState";
 
+// Auto-advance is a per-browser preference, so it lives in localStorage.
 const AUTO_PLAY_STORAGE_KEY = "tyflix.autoPlay";
+// Floor for the Up Next card. Plenty of episodes have no credits marker, and
+// this is what covers them.
 const UP_NEXT_WINDOW_SEC = 30;
+// How often a playing stream reports its position to Plex.
 const TIMELINE_HEARTBEAT_MS = 10_000;
+// Scrubbing emits a burst of "seeked" events; at most one report per second.
 const TIMELINE_SEEK_THROTTLE_MS = 1000;
 
+// Page-level load state. A quality or audio switch deliberately never returns
+// to "loading". See onStreamSettingsChange for why that matters.
 type LoadStatus = "loading" | "ready" | "error";
 
+// A seek waiting for the media element to be ready for it. Three things set
+// this: the resume dialog, an in-place transcode restart, and the handoff back
+// from a Cast session.
 type PendingResume = {
+  // Seconds into the item.
   position: number;
+  // Whether to resume playing once the seek lands, or hold it paused.
   wasPlaying: boolean;
 };
 
+// Mirror of the <video> clock in seconds, so rendering can react to time.
+// Fed by timeupdate / durationchange / loadedmetadata.
 type PlaybackClock = {
   currentTime: number;
   duration: number;
 };
 
+// What the resume dialog needs: where Plex says this user stopped, plus the
+// runtime when we know it (null just drops the "x minutes left" line).
 type ResumeDialogState = {
   positionSeconds: number;
   durationSeconds: number | null;
 };
 
+// Offer to resume when Plex has a real position for this user that isn't
+// effectively the end of the item. Past 95% counts as finished, so a title you
+// watched to the credits opens clean instead of asking.
 function shouldOfferResumeDialog(descriptor: WatchDescriptor): boolean {
   const { viewOffsetMs, durationMs } = descriptor;
   return (
@@ -59,6 +107,9 @@ function shouldOfferResumeDialog(descriptor: WatchDescriptor): boolean {
   );
 }
 
+// Descriptor milliseconds into dialog seconds. A missing or zero duration
+// becomes null rather than 0, so the dialog can tell "unknown" from "no time
+// left".
 function resumeDialogFromDescriptor(
   descriptor: WatchDescriptor,
 ): ResumeDialogState {
@@ -71,6 +122,7 @@ function resumeDialogFromDescriptor(
   };
 }
 
+// Auto-advance defaults to on, including when localStorage can't be read.
 function readStoredAutoPlay(): boolean {
   try {
     const raw = localStorage.getItem(AUTO_PLAY_STORAGE_KEY);
@@ -83,6 +135,8 @@ function readStoredAutoPlay(): boolean {
   }
 }
 
+// Best effort. A failed write costs the preference on the next load, nothing
+// more, so it isn't surfaced to the user.
 function writeStoredAutoPlay(value: boolean): void {
   try {
     localStorage.setItem(AUTO_PLAY_STORAGE_KEY, String(value));
@@ -91,6 +145,9 @@ function writeStoredAutoPlay(value: boolean): void {
   }
 }
 
+// Route params are whatever's in the URL bar. Anything that isn't a positive
+// integer comes back null and the page renders its error state instead of
+// firing a doomed request.
 function parseTmdbId(raw: string | undefined): number | null {
   if (raw === undefined || !/^\d+$/.test(raw)) {
     return null;
@@ -99,6 +156,9 @@ function parseTmdbId(raw: string | undefined): number | null {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
+// The Quality menu's presets, expressed as transcode tuning for the backend.
+// Bitrates are kbps. "original" sends nothing at all, which leaves Plex on the
+// fixed baseline the server builds.
 function tuningForQuality(quality: QualityId): WatchTuning {
   switch (quality) {
     case "original":
@@ -112,6 +172,12 @@ function tuningForQuality(quality: QualityId): WatchTuning {
   }
 }
 
+// Folds the quality preset and the chosen audio track into one tuning object.
+// Undefined when there's nothing to say, which keeps the descriptor request
+// byte-identical to the untuned one.
+//
+// Subtitles are absent here on purpose: they're a part-level PUT, not a URL
+// param. onStreamSettingsChange handles that separately.
 function buildWatchTuning(settings: StreamSettings): WatchTuning | undefined {
   const tuning: WatchTuning = {
     ...tuningForQuality(settings.quality),
@@ -122,6 +188,11 @@ function buildWatchTuning(settings: StreamSettings): WatchTuning | undefined {
   return Object.keys(tuning).length > 0 ? tuning : undefined;
 }
 
+// Up Next thumbnail, composed in the browser against Plex's photo transcoder.
+// Local address first and remote second; UpNextCard walks the list on an image
+// error, which is the same local-then-remote fallback the player itself does.
+// The transient token rides in the query string because this request goes
+// straight to Plex, not through our API.
 function buildThumbUrls(
   thumb: string | null,
   connections: WatchConnections,
@@ -142,6 +213,9 @@ function buildThumbUrls(
   });
 }
 
+// Duration for a timeline report. Prefer whatever the player (or the Cast
+// receiver) says, fall back to the descriptor's, and return 0 when neither is
+// usable so the caller can skip the report entirely.
 function resolveTimelineDurationMs(
   primarySeconds: number,
   fallbackMs: number | null | undefined,
@@ -160,6 +234,7 @@ function resolveTimelineDurationMs(
   return 0;
 }
 
+// Body of POST /api/watch/timeline. Both times are milliseconds.
 type TimelinePayload = {
   ratingKey: string;
   state: TimelineState;
@@ -167,6 +242,8 @@ type TimelinePayload = {
   duration: number;
 };
 
+// Null when there's no usable duration. The server validates duration > 0 and
+// answers 400 otherwise, so a report without one is wasted anyway.
 function buildTimelinePayload(
   ratingKey: string,
   state: TimelineState,
@@ -184,6 +261,8 @@ function buildTimelinePayload(
   };
 }
 
+// sendBeacon on the unload paths (pagehide, tab going hidden), plain fetch
+// otherwise. Both are fire-and-forget in api/watch.ts, so nothing here waits.
 function sendTimelinePayload(
   payload: TimelinePayload | null,
   useBeacon: boolean,
@@ -198,6 +277,14 @@ function sendTimelinePayload(
   }
 }
 
+/**
+ * The watch page: player, control bar, resume dialog, Up Next card and Cast
+ * status, shared by all three /watch routes.
+ *
+ * Holds exactly one descriptor at a time. Re-fetching that descriptor is how
+ * the page changes quality, audio track or subtitles, and the `<video>` element
+ * survives the swap on purpose.
+ */
 export function WatchPage() {
   const navigate = useNavigate();
   const {
@@ -220,9 +307,11 @@ export function WatchPage() {
     isItem && /^\d+$/.test(rawItemRatingKey) ? rawItemRatingKey : null;
   const tmdbId = parseTmdbId(rawTmdbId);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // A seek waiting for the element to be ready to take it.
   const pendingResumeRef = useRef<PendingResume | null>(null);
   // Last good Cast receiver position; survives disconnect so local HLS can resume.
   const lastRemotePositionRef = useRef<number | null>(null);
+  // Previous value of castUi.connected, so the true-to-false edge is detectable.
   const wasCastConnectedRef = useRef(false);
   // Last subtitleStreamId successfully applied via PUT. Avoids redundant
   // selects when only quality/audio change. Defaults to Off (null); we do not
@@ -241,6 +330,10 @@ export function WatchPage() {
   const [resumeDialog, setResumeDialog] = useState<ResumeDialogState | null>(
     null,
   );
+  // castUi is the session (available / connected / toggle); castRemote is the
+  // receiver's playback state and commands. They come from separate Cast SDK
+  // objects and don't flip at the same moment, which several effects below care
+  // about.
   const castUi = useCastState();
   const castRemote = useCastPlayer();
   const castRemoteRef = useRef(castRemote);
@@ -249,9 +342,15 @@ export function WatchPage() {
   // Inert local reporter whenever a cast session is connected — HLS tears the
   // <video> down on connected, which can precede RemotePlayer.isActive.
   castReportingRef.current = castUi.connected || castRemote.isActive;
+  // Filled in by the cast reporter effect. Lets the RemotePlayer subscription
+  // push play/pause into that reporter without tearing it down and rebuilding
+  // it every time the receiver changes state.
   const castTimelineBridgeRef = useRef<{
     onPlayingChange: (playing: boolean) => void;
   } | null>(null);
+  // Everything from here down mirrors state into a ref. The media listeners are
+  // bound once per descriptor and would otherwise close over stale values, and
+  // rebinding them on every timeupdate is not an option.
   const autoPlayRef = useRef(autoPlay);
   const nextEpisodeRef = useRef(nextEpisode);
   const upNextDismissedRef = useRef(upNextDismissed);
@@ -263,6 +362,10 @@ export function WatchPage() {
   timelineDurationMsRef.current = descriptor?.durationMs ?? null;
   resumeDialogOpenRef.current = resumeDialog !== null;
 
+  // Seek to a position and start playing. Only seeks straight away when the
+  // element already has metadata. Otherwise the seek is parked in
+  // pendingResumeRef, and applyPendingResume applies it once the manifest
+  // parses.
   const beginPlaybackAt = useCallback((position: number) => {
     const video = videoRef.current;
     if (video === null) {
@@ -288,6 +391,8 @@ export function WatchPage() {
     pendingResumeRef.current = { position, wasPlaying: true };
   }, []);
 
+  // "Resume" in the dialog, and also its close/Escape path: dismissing without
+  // choosing picks up where Plex said you stopped rather than starting over.
   const handleResumeFromSaved = useCallback(() => {
     if (resumeDialog === null) {
       return;
@@ -297,11 +402,25 @@ export function WatchPage() {
     beginPlaybackAt(position);
   }, [resumeDialog, beginPlaybackAt]);
 
+  // "Start over". No new descriptor: the stream was built with no offset, so it
+  // already begins at zero and this is only a seek.
   const handleStartOver = useCallback(() => {
     setResumeDialog(null);
     beginPlaybackAt(0);
   }, [beginPlaybackAt]);
 
+  // Load the play descriptor. Runs on mount and on any route-param change, so
+  // navigating from one episode to the next re-enters here.
+  //
+  // Picking the endpoint is the whole reason the three routes exist: an episode
+  // and a Library item are fetched by raw Plex ratingKey, a movie off a title
+  // page by TMDB id (the server asks Seerr for the ratingKey). A param that
+  // didn't validate leaves `load` null and the page goes straight to its error
+  // state without a round trip.
+  //
+  // Also the reset point for everything that's per-title: pending seeks, the
+  // latched Cast position, and the applied subtitle all get cleared, and the
+  // resume dialog is re-decided from the new descriptor's viewOffsetMs.
   useEffect(() => {
     let load: (() => Promise<WatchDescriptor>) | null = null;
     if (isEpisode) {
@@ -361,6 +480,7 @@ export function WatchPage() {
 
   // Prefetch the next episode so auto-advance can navigate without waiting.
   // Soft-fail: a null/failed result just disables advance for this episode.
+  // GET /api/watch/episode/:ratingKey/next, and only for the episode route.
   useEffect(() => {
     if (!isEpisode || ratingKey === null) {
       setNextEpisode(null);
@@ -382,12 +502,18 @@ export function WatchPage() {
 
   // Dismiss is per-episode; a new ratingKey brings the card back.
   // Also reset when navigating between item plays.
+  // Zeroing the clock matters as much: showUpNext requires duration > 0, so the
+  // card can't flash on the new title off the old title's remaining time.
   useEffect(() => {
     setUpNextDismissed(false);
     setPlaybackClock({ currentTime: 0, duration: 0 });
   }, [ratingKey, itemRatingKey]);
 
   // Drive the Up Next window from the video clock (no separate interval).
+  // Owns the timeupdate / durationchange / loadedmetadata listeners and drops
+  // them when the descriptor changes. Until the element reports a finite
+  // duration of its own, the descriptor's durationMs stands in, so the Up Next
+  // maths has something to work with from the first tick.
   useEffect(() => {
     if (descriptor === null) {
       return;
@@ -430,6 +556,13 @@ export function WatchPage() {
   // ratingKey only so quality/audio switches don't restart the heartbeat.
   // While casting, this local <video> reporter is inert — the torn-down element
   // reads currentTime 0 and must not overwrite a good resume point.
+  //
+  // Owns four media listeners, pagehide and visibilitychange, and one interval,
+  // and drops all of them on cleanup. Player events map onto the three states
+  // POST /api/watch/timeline accepts: playing on play and on a throttled seek,
+  // paused on pause and when the tab goes hidden, stopped on ended and on the
+  // way out. This is what makes the Continue Watching rail and the resume
+  // dialog agree with the TV.
   useEffect(() => {
     const ratingKey = descriptor?.ratingKey;
     if (ratingKey === undefined || ratingKey === "") {
@@ -473,6 +606,8 @@ export function WatchPage() {
       sendTimelinePayload(buildPayload(state), useBeacon);
     };
 
+    // Latched: pagehide and the effect cleanup can both fire on the way out,
+    // and Plex should hear "stopped" exactly once.
     const sendFinalStopped = (): void => {
       if (finalStoppedSent) {
         return;
@@ -499,6 +634,8 @@ export function WatchPage() {
       sendTimeline("paused");
     };
 
+    // Report the new position after a scrub, throttled, since dragging the
+    // scrubber lands a lot of these.
     const onSeeked = () => {
       const now = Date.now();
       if (now - lastSeekReportAt < TIMELINE_SEEK_THROTTLE_MS) {
@@ -517,6 +654,8 @@ export function WatchPage() {
       sendFinalStopped();
     };
 
+    // Backgrounding the tab banks the position with a beacon, because the page
+    // may not get another chance to talk to us.
     const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
         sendTimeline("paused", true);
@@ -548,6 +687,13 @@ export function WatchPage() {
 
   // Cast-session timeline reporter. Active only while castRemote.isActive; uses
   // the receiver clock so a cast viewing drives resume / watched like local play.
+  //
+  // Same shape as the local reporter above and mutually exclusive with it, but
+  // there are no media events to hang off. State changes arrive through
+  // castTimelineBridgeRef instead, driven by the RemotePlayer subscription in
+  // the next effect. Every send is guarded against a zero position, because the
+  // receiver reports 0 both before it loads and after it disconnects, and
+  // writing that back would wipe out a real resume point.
   useEffect(() => {
     const ratingKey = descriptor?.ratingKey;
     if (ratingKey === undefined || ratingKey === "" || !castRemote.isActive) {
@@ -646,6 +792,7 @@ export function WatchPage() {
       }
     };
 
+    // Publish the bridge before anything else can call it.
     castTimelineBridgeRef.current = {
       onPlayingChange: (playing) => {
         if (playing) {
@@ -656,6 +803,8 @@ export function WatchPage() {
       },
     };
 
+    // Rejoining a session that's already rolling (page refresh, late subscribe)
+    // gets no state-change event, so start the heartbeat here.
     if (castRemoteRef.current.playing) {
       onPlaying();
     }
@@ -681,6 +830,11 @@ export function WatchPage() {
 
   // Auto-advance on ended. Refs keep the listener current without rebinding
   // on every autoPlay / nextEpisode change.
+  //
+  // Three separate ways to not advance: the preference is off, the user hit
+  // Dismiss on the Up Next card, or there's no next episode (last of the
+  // series, or the prefetch failed). Navigating to the next ratingKey restarts
+  // the whole page flow from the descriptor fetch.
   useEffect(() => {
     if (descriptor === null) {
       return;
@@ -725,6 +879,11 @@ export function WatchPage() {
   // Must run BEFORE the hls effect below: when castUi.connected flips
   // true → false, seed pendingResumeRef so applyPendingResume seeks there
   // once the re-attached manifest parses.
+  //
+  // This is the "stop casting and the browser picks up where the TV got to"
+  // half of the handoff. Effect order in the file is what makes it work, since
+  // both effects wake on the same castUi.connected change. The latch is clamped
+  // to the runtime so a receiver overshoot can't seek past the end.
   useEffect(() => {
     const connected = castUi.connected;
     if (wasCastConnectedRef.current && !connected) {
@@ -757,11 +916,20 @@ export function WatchPage() {
   // the <video> stays mounted; pendingResumeRef carries position across rebuilds.
   // While casting, tear down local hls.js so only the receiver consumes the
   // transcode session (one X-Plex-Session-Identifier).
+  //
+  // This effect owns the hls.js instance and destroys it on cleanup. It's the
+  // point where the descriptor stops being data and becomes a video stream:
+  // hls.js loads a plex.direct URL that already carries the transient token, so
+  // segments come from Plex over the LAN or over Plex's own remote address, not
+  // through our origin.
   useEffect(() => {
     if (descriptor === null) {
       return;
     }
 
+    // A Cast session is up, so the browser shouldn't be pulling segments at
+    // all. Dropping the src (rather than just pausing) is what actually stops
+    // the fetching; the receiver plays the DASH URLs from the same descriptor.
     if (castUi.connected) {
       const video = videoRef.current;
       if (video !== null) {
@@ -777,10 +945,15 @@ export function WatchPage() {
       return;
     }
 
+    // Plex advertises a LAN address only sometimes, so local can be null and
+    // remote is the one that's always there.
     const localUrl = descriptor.hls.local;
     const remoteUrl = descriptor.hls.remote;
     const primaryUrl = localUrl ?? remoteUrl;
 
+    // Single decision point for "the stream is ready, now what". Either apply a
+    // parked seek (resume, settings restart, cast handoff), or sit still
+    // because the resume dialog is asking the user, or just play.
     const applyPendingResume = () => {
       const pending = pendingResumeRef.current;
       if (pending !== null) {
@@ -809,6 +982,9 @@ export function WatchPage() {
     };
 
     // Safari (and other native HLS players) can play the manifest directly.
+    // Note there's no local-to-remote fallback on this path: whatever primaryUrl
+    // resolved to is what plays, and a browser with neither hls.js support nor
+    // native HLS gets the error state.
     if (!Hls.isSupported()) {
       if (video.canPlayType("application/vnd.apple.mpegurl") !== "") {
         if (pendingResumeRef.current !== null || resumeDialogOpenRef.current) {
@@ -905,6 +1081,12 @@ export function WatchPage() {
   // Hand the current title to the receiver once the Cast *session* is ready
   // (SESSION_STARTED / SESSION_RESUMED). CAST_STATE_CHANGED=CONNECTED can fire
   // before the Default Media Receiver accepts loadMedia.
+  //
+  // Owns the session subscription and any pending retry timers, and cancels
+  // both on cleanup. The receiver gets DASH, not the HLS the browser plays, and
+  // loadMediaOnCast does Plex's required /decision handshake first. A load that
+  // throws ends the Cast session rather than leaving a connected device staring
+  // at nothing.
   useEffect(() => {
     if (descriptor === null) {
       return;
@@ -943,6 +1125,9 @@ export function WatchPage() {
       timers.add(id);
     };
 
+    // Same URL on the same session means the receiver already has it. Both
+    // halves matter: subscribeSessionReady can fire again for a resumed
+    // session, and a settings change produces a new URL for the same session.
     const alreadyLoadedFor = (
       session: cast.framework.CastSession | null,
     ): boolean =>
@@ -1025,11 +1210,16 @@ export function WatchPage() {
     };
   }, [descriptor]);
 
+  // The control bar's auto-advance toggle. Sticks for next time.
   const onAutoPlayChange = (value: boolean) => {
     setAutoPlay(value);
     writeStoredAutoPlay(value);
   };
 
+  // When the Up Next card is allowed to appear. Plex's credits marker fires it
+  // early on shows that have one, and the last 30 seconds cover everything
+  // else. Either way it needs a real duration and some runtime left, and it's
+  // episodes only, with auto-advance on and Dismiss not already pressed.
   const remainingSec = playbackClock.duration - playbackClock.currentTime;
   const creditsOffsetMs = descriptor?.creditsOffsetMs ?? null;
   const atCredits =
@@ -1066,6 +1256,9 @@ export function WatchPage() {
     ],
   );
 
+  // Up Next card. The countdown only appears inside the 30s window, so a
+  // marker-triggered card sits there without a number until the clock catches
+  // up. Play now jumps immediately; Dismiss also cancels the advance on ended.
   const upNextOverlay =
     showUpNext && nextEpisode !== null && descriptor !== null ? (
       <UpNextCard
@@ -1087,6 +1280,8 @@ export function WatchPage() {
       />
     ) : null;
 
+  // Resume dialog, shown over a paused player when Plex had a position for this
+  // user. Closing it counts as Resume, not Start over.
   const resumeOverlay =
     resumeDialog !== null ? (
       <ResumeDialog
@@ -1119,6 +1314,8 @@ export function WatchPage() {
       />
     ) : null;
 
+  // All three overlays go to PlayerControls as one node so they sit inside the
+  // player frame and above the control bar.
   const playerOverlay = (
     <>
       {castOverlay}
@@ -1127,6 +1324,20 @@ export function WatchPage() {
     </>
   );
 
+  /**
+   * Applies a change from the settings menu: quality, audio track, subtitles.
+   *
+   * This is the in-place transcode restart, and it's the reason the page never
+   * drops back to "loading" here. Tuning lives in the Plex transcode URL, so
+   * changing it means a whole new descriptor and a new session, but `status`
+   * stays "ready" and the old descriptor holds until the new one lands.
+   * The `<video>` element is never unmounted, which keeps PlayerControls'
+   * listeners attached, and pendingResumeRef carries the position across the
+   * rebuild so the switch looks like a short buffer instead of a restart.
+   *
+   * @throws whatever the fetch or the subtitle PUT threw. PlayerControls awaits
+   * this and leaves its highlights on the old selection when it rejects.
+   */
   const onStreamSettingsChange = async (
     settings: StreamSettings,
   ): Promise<void> => {
@@ -1136,6 +1347,8 @@ export function WatchPage() {
       throw new Error("Player not ready");
     }
 
+    // Bank where we are before anything tears down, including whether it was
+    // playing, so a switch made while paused doesn't start playback.
     pendingResumeRef.current = {
       position: video.currentTime,
       wasPlaying: !video.paused,
@@ -1152,6 +1365,8 @@ export function WatchPage() {
         appliedSubtitleIdRef.current = settings.subtitleStreamId;
       }
 
+      // Re-enter the same endpoint this page loaded from, now with tuning. The
+      // route decides which one, exactly as it did on mount.
       const tuning = buildWatchTuning(settings);
       let result: WatchDescriptor;
       if (isEpisode) {
@@ -1174,6 +1389,9 @@ export function WatchPage() {
       // arrives so the <video> (and PlayerControls listeners) stay mounted.
       setDescriptor(result);
     } catch (err: unknown) {
+      // A failed switch drops the parked seek and takes the whole page to the
+      // error state. Rethrowing is what leaves the settings panel highlighting
+      // the setting that's actually playing.
       pendingResumeRef.current = null;
       setStatus("error");
       setError(
@@ -1185,6 +1403,10 @@ export function WatchPage() {
 
   return (
     <main className="page page-wide">
+      {/* Header: back out to "/" (which redirects to the Library), plus the
+          display strings the server already shaped. For an episode the title is
+          the show and the subheading is "S1E1 · Pilot"; for a movie it's the
+          title and the year. */}
       <header className="watch-header">
         <Link to="/" className="watch-back-link">
           ← Back
@@ -1199,10 +1421,14 @@ export function WatchPage() {
         ) : null}
       </header>
 
+      {/* Waiting on the descriptor. Only the first load lands here; a settings
+          switch stays in the "ready" branch below. */}
       {status === "loading" ? (
         <p className="muted">Loading stream…</p>
       ) : null}
 
+      {/* The backend's own message where there is one, so "not playable" or
+          "re-login required" reaches the user instead of a generic failure. */}
       {status === "error" ? (
         <div className="stats-error">
           <p className="error">{error ?? "Failed to load stream"}</p>
@@ -1212,6 +1438,11 @@ export function WatchPage() {
         </div>
       ) : null}
 
+      {/* The player. PlayerControls wraps the <video> rather than rendering it,
+          so the element below is the one videoRef points at and the one every
+          effect above attaches to. Audio and subtitle tracks come from the
+          descriptor, the auto-play toggle only exists for episodes, and
+          `remote` is what lets the same bar drive a Chromecast. */}
       {status === "ready" && descriptor !== null ? (
         <div className="watch-player-frame">
           <PlayerControls

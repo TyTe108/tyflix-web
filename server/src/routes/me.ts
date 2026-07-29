@@ -1,3 +1,15 @@
+// Per-user numbers for the Home page: what you asked for versus what you
+// actually watched, plus your Seerr request quota. Mounted at /api/me behind
+// requireAuth, with two endpoints, GET /stats and GET /quota.
+//
+// Both upstreams show up here. Plex supplies the account list and the watch
+// history; Seerr supplies the requests and the quota. The analytics module does
+// the GB-weighting once the two sides are joined.
+//
+// The Plex account list and history are shared across every user, so they're
+// cached for a minute at router scope. Without that, each dashboard poll would
+// re-pull the entire server history.
+
 import { Router } from "express";
 import { computeWatchedVsRequested } from "../analytics/watchedVsRequested";
 import {
@@ -16,7 +28,7 @@ export type MeRouterDeps = {
 };
 
 type CacheEntry<T> = {
-  at: number;
+  at: number; // epoch ms the value was stored, compared against SHARED_CACHE_TTL_MS
   value: T;
 };
 
@@ -24,9 +36,12 @@ export function createMeRouter(deps: MeRouterDeps): Router {
   const { plexServer, seerr } = deps;
   const router = Router();
 
+  // Server-wide data, not per-user, so one cache serves every caller. Lives for
+  // the process lifetime because the router is built once at boot.
   let accountsCache: CacheEntry<Map<number, string>> | null = null;
   let historyCache: CacheEntry<Map<number, PlexWatchedSets>> | null = null;
 
+  // Plex accountID to display name, for every account the PMS knows about.
   async function getAccountsCached(): Promise<Map<number, string>> {
     const now = Date.now();
     if (accountsCache && now - accountsCache.at < SHARED_CACHE_TTL_MS) {
@@ -37,6 +52,8 @@ export function createMeRouter(deps: MeRouterDeps): Router {
     return value;
   }
 
+  // Watched movie and episode ratingKeys, keyed by Plex account id. This is the
+  // expensive call of the two, which is most of why the cache exists.
   async function getHistoryCached(): Promise<Map<number, PlexWatchedSets>> {
     const now = Date.now();
     if (historyCache && now - historyCache.at < SHARED_CACHE_TTL_MS) {
@@ -47,6 +64,20 @@ export function createMeRouter(deps: MeRouterDeps): Router {
     return value;
   }
 
+  /**
+   * GET /api/me/stats
+   *
+   * Watched-versus-requested for the signed-in user. Returns `plexLinked`, a
+   * small `user` block, the computed stats, and a `watchedDefinition` string
+   * that spells out what "watched" counts as so the UI never has to guess.
+   * No query or body params.
+   *
+   * 401 without a session, 502 if Plex or Seerr fails.
+   *
+   * `plexLinked: false` means we couldn't match this session to a Plex account
+   * on the server. The response still comes back 200, with empty watch sets, so
+   * the page renders requests-only rather than erroring.
+   */
   router.get("/stats", async (_req, res) => {
     const session = res.locals.session as SessionPayload | undefined;
     if (!session) {
@@ -55,12 +86,16 @@ export function createMeRouter(deps: MeRouterDeps): Router {
     }
 
     try {
+      // Three independent reads, two of them usually cache hits. Nothing here
+      // depends on anything else, so fire them together.
       const [accounts, historyByAccount, requests] = await Promise.all([
         getAccountsCached(),
         getHistoryCached(),
         seerr.getRequestsByUser(session.seerrUserId),
       ]);
 
+      // Join the Seerr-side session to the Plex-side account, then pull that
+      // account's watch sets. An unmatched user gets empty sets, not an error.
       const accountId = resolvePlexAccountId(session, accounts);
       const watched =
         accountId !== null
@@ -70,6 +105,9 @@ export function createMeRouter(deps: MeRouterDeps): Router {
             })
           : { movies: new Set<string>(), episodes: new Set<string>() };
 
+      // The analytics module needs file sizes to weight by GB, so it gets a
+      // lookup callback rather than a preloaded list. plexServer.item caches
+      // internally, which keeps repeat titles from re-hitting Plex.
       const stats = await computeWatchedVsRequested(
         requests,
         watched,
@@ -91,6 +129,13 @@ export function createMeRouter(deps: MeRouterDeps): Router {
     }
   });
 
+  /**
+   * GET /api/me/quota
+   *
+   * Passes Seerr's quota record for the signed-in user straight through, which
+   * is what the request UI uses to say "3 of 5 movies left this week". No
+   * params. 401 without a session, 502 if Seerr fails.
+   */
   router.get("/quota", async (_req, res) => {
     const session = res.locals.session as SessionPayload | undefined;
     if (!session) {
@@ -108,6 +153,10 @@ export function createMeRouter(deps: MeRouterDeps): Router {
   return router;
 }
 
+// Finds the caller's Plex accountID, which is the key watch history is filed
+// under. The session's plexId usually is that id, but not always, so fall back
+// to a case-insensitive username match. Returns null when neither hits, and the
+// caller reports that as plexLinked: false.
 function resolvePlexAccountId(
   session: SessionPayload,
   accounts: Map<number, string>,
@@ -126,6 +175,8 @@ function resolvePlexAccountId(
   return null;
 }
 
+// Either upstream failing lands here as a 502. The typed errors only exist to
+// get a useful message into the log and the body.
 function respondUpstreamError(
   res: import("express").Response,
   err: unknown,

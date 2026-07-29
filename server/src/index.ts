@@ -1,3 +1,28 @@
+// Composition root and routing table for the Tyflix backend. Every upstream
+// client is constructed once here and handed to the routers that need it, so
+// this file is the one place that knows the whole dependency graph.
+//
+// Startup runs in a fixed order: load the local .env (dev only), loadConfig and
+// exit the process if anything's missing, then start() builds the clients,
+// mounts middleware, mounts routers, and listens. Middleware order is the real
+// contract. Helmet goes on first so its headers cover both JSON responses and
+// the SPA, then express.json, then the /api rate limiter, then the routers, and
+// finally a catch-all /api handler that returns a JSON 404 instead of letting
+// an unknown API path fall through to index.html.
+//
+// Two mount-order rules are load-bearing. Everything public (/api/auth,
+// /api/config, /api/access-requests) has to be registered before that /api 404
+// guard, and /api/admin/access-requests has to come before /api/admin because
+// Express matches prefixes in registration order. Note that most routers are
+// gated by requireAuth/requireAdmin right here at the mount, but the admin
+// access-requests router applies requireAdmin internally instead, which is why
+// it looks unguarded below.
+//
+// In production this same process serves the built React app from
+// ../../web/dist, with a splat route sending every unmatched path to index.html
+// so client-side routing survives a page refresh. In development Vite serves
+// the SPA and proxies /api here, so that block never runs.
+
 import express from "express";
 import helmet from "helmet";
 import path from "path";
@@ -34,6 +59,9 @@ import { createMediaEnrichment } from "./tmdb/enrichment";
 
 loadLocalEnvFile();
 
+// Config is validated before anything else is built, so a missing or malformed
+// env var kills the process at boot rather than showing up as a 500 on the
+// first request that happens to need it.
 let config: AppConfig;
 try {
   config = loadConfig();
@@ -42,19 +70,35 @@ try {
   process.exit(1);
 }
 
+// There's nothing to recover to if wiring or listen() fails, so log the message
+// and exit non-zero.
 void start().catch((err) => {
   console.error(err instanceof Error ? err.message : err);
   process.exit(1);
 });
 
+// Builds the upstream clients, mounts everything in order, then listens. Async
+// only because the access-request store reads its JSON file at construction.
 async function start(): Promise<void> {
+  // Self-serve access requests are off unless ACCESS_REQUESTS_FILE points at a
+  // real path. An undefined store here is the single feature flag: it gates the
+  // public submit route, gates the admin queue, and is what /api/config reports
+  // back to the SPA so the UI doesn't advertise a route that isn't mounted.
   const accessRequestStore =
     config.accessRequestsFile !== undefined
       ? await createAccessRequestStore(config.accessRequestsFile)
       : undefined;
 
+  // Session cookies only get the Secure flag in production. Dev runs over plain
+  // HTTP, where a Secure cookie wouldn't be sent back at all.
   const secureCookies = config.nodeEnv === "production";
 
+  // Five Plex-facing clients, split by which credential each one carries.
+  // `plex` talks to plex.tv with no token, since it's what drives the PIN
+  // sign-in flow. The next three hold the owner token from config. The
+  // transient minter holds no token either; callers pass the user's own token
+  // per call and get a short-lived one back. A sixth, the sharing client, gets
+  // built further down and only when access requests are turned on.
   const plex = createPlexClient({
     clientId: config.plexClientId,
     product: config.plexProduct,
@@ -82,16 +126,24 @@ async function start(): Promise<void> {
     clientId: config.plexClientId,
   });
 
+  // Seerr is both the request pipeline into Radarr/Sonarr and the join table
+  // between TMDB ids and Plex rating keys. mediaStatus wraps it with a cached
+  // lookup so the discovery grids can ask "is this on the server already?"
+  // without a round trip per poster.
   const seerr = createSeerrClient({
     baseUrl: config.seerrUrl,
     apiKey: config.seerrApiKey,
   });
   const mediaStatus = createMediaStatusProvider(seerr);
 
+  // Host metrics service behind the admin dashboard: CPU, memory, storage, GPU.
   const dashboard = createDashboardClient({
     baseUrl: config.dashboardUrl,
   });
 
+  // TMDB supplies discovery metadata and poster art. mediaEnrichment is the
+  // reverse direction: hydrating a bare TMDB id from Seerr into something with
+  // a title and artwork.
   const tmdb = createTmdbClient({
     apiKey: config.tmdbApiKey,
   });
@@ -137,14 +189,23 @@ async function start(): Promise<void> {
     }),
   );
 
+  // JSON bodies only. There's deliberately no cookie-parser: session.ts reads
+  // the Cookie header itself, so the session format stays in one file.
   app.use(express.json());
 
+  // Liveness probe, outside /api so the rate limiter never counts it. Vite
+  // proxies this path in dev alongside /api.
   app.get("/healthz", (_req, res) => {
     res.json({ ok: true });
   });
 
+  // Blanket limiter for the API surface, keyed on the real client IP rather
+  // than the tunnel's. Mounted before any router so a flood can't reach an
+  // upstream. See middleware/rateLimit.ts for why the key isn't req.ip.
   app.use("/api", apiRateLimiter);
 
+  // Unauthenticated by definition: this router runs the Plex PIN handshake and
+  // is what mints the session cookie in the first place.
   app.use(
     "/api/auth",
     createAuthRouter({
@@ -174,6 +235,8 @@ async function start(): Promise<void> {
     );
   }
 
+  // First guarded mount. Everything from here down reads the caller's identity
+  // out of res.locals.session, which requireAuth puts there.
   app.use(
     "/api/me",
     requireAuth(config.sessionSecret),
@@ -182,6 +245,9 @@ async function start(): Promise<void> {
 
   // More specific than /api/admin — mount first. Same ACCESS_REQUESTS_FILE gate
   // as the public submit route.
+  //
+  // No requireAdmin here on purpose: createAdminAccessRequestsRouter builds its
+  // own requireAdmin from sessionSecret and applies it per route.
   if (accessRequestStore !== undefined) {
     const sharing = createPlexSharingClient({
       baseUrl: config.plexBaseUrl,
@@ -198,18 +264,26 @@ async function start(): Promise<void> {
     );
   }
 
+  // requireAdmin, not requireAuth: it checks the Seerr admin permission bit on
+  // top of a valid session.
   app.use(
     "/api/admin",
     requireAdmin(config.sessionSecret),
     createAdminRouter({ dashboard }),
   );
 
+  // Discovery is TMDB data with Plex availability layered over it, which is the
+  // TMDB-id-to-rating-key join happening in mediaStatus.
   app.use(
     "/api/discover",
     requireAuth(config.sessionSecret),
     createDiscoverRouter({ tmdb, mediaStatus }),
   );
 
+  // Library browses the Plex sections directly, no TMDB involved. It takes
+  // sessionSecret because it needs to decrypt the caller's own Plex token to
+  // read per-user watch state, and sharedServerAccess to swap in the per-server
+  // token for shared accounts.
   app.use(
     "/api/library",
     requireAuth(config.sessionSecret),
@@ -220,6 +294,9 @@ async function start(): Promise<void> {
     }),
   );
 
+  // Watchlist and issues are both Seerr-backed lists of bare TMDB ids, so they
+  // take the same pair: mediaStatus for availability, mediaEnrichment for the
+  // title and poster.
   app.use(
     "/api/watchlist",
     requireAuth(config.sessionSecret),
@@ -242,6 +319,9 @@ async function start(): Promise<void> {
     }),
   );
 
+  // Playback. This is the widest dependency set in the file because a play
+  // decision needs the right token for this user on this server, a browser
+  // reachable plex.direct address, and the rating key behind a TMDB id.
   app.use(
     "/api/watch",
     requireAuth(config.sessionSecret),
@@ -256,13 +336,24 @@ async function start(): Promise<void> {
     }),
   );
 
+  // Terminal guard for the API namespace. Without it, an unknown /api path
+  // would fall through to the SPA fallback below and answer a fetch() with a
+  // 200 and a page of HTML, which is a miserable thing to debug.
   app.use("/api", (_req, res) => {
     res.status(404).json({ error: "not found" });
   });
 
+  // Production only: serve the built React app from the same origin. __dirname
+  // is server/dist at runtime, so this lands on web/dist next to it, both in
+  // the container image and in a local build. In dev, Vite serves the SPA and
+  // proxies /api back here, so none of this is mounted.
   if (config.nodeEnv === "production") {
     const webDistPath = path.resolve(__dirname, "../../web/dist");
 
+    // Static assets first, then the splat route hands every remaining path
+    // index.html so a deep link like /library/movies survives a refresh. The
+    // "/{*path}" spelling is Express 5's named splat, which replaced the bare
+    // "*" that worked in Express 4.
     app.use(express.static(webDistPath));
     app.get("/{*path}", (_req, res) => {
       res.sendFile(path.join(webDistPath, "index.html"));
@@ -274,6 +365,9 @@ async function start(): Promise<void> {
   });
 }
 
+// Dev convenience: pull the repo-root .env into process.env before loadConfig
+// reads it. Production gets its env from the container instead, so this bails
+// out before touching the filesystem at all.
 function loadLocalEnvFile(): void {
   if (process.env.NODE_ENV === "production") {
     return;

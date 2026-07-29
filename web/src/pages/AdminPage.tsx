@@ -1,3 +1,40 @@
+// The admin console at /admin. One page, seven tabs, everything behind the
+// admin permission bit: AdminRoute gates the route on the client, and on the
+// server most of these endpoints sit behind requireAdmin. GET /api/issues/all
+// is the exception, mounted behind plain requireAuth with an inline admin check
+// in routes/issues.ts. Same 403 either way.
+//
+// Each tab is its own component with its own poller, and only the active one is
+// mounted, so at most one of these is running at a time:
+//
+//   Requests    every user's Seerr requests, with approve and decline
+//               GET /api/requests/all, every 30s
+//   Issues      problem reports on titles, read-only from here
+//               GET /api/issues/all, every 60s
+//   Access      the self-serve access queue. Approving sends a real Plex invite
+//               GET /api/admin/access-requests, every 30s
+//   Users       per-user watched-versus-requested analytics
+//               GET /api/admin/users, every 60s
+//   System      host CPU, memory, load, temperatures, GPU, storage, services
+//               GET /api/admin/system, every 5s
+//   Jobs        scheduled jobs on the host and how they last went
+//               GET /api/admin/jobs, every 30s
+//   Containers  Docker containers and native systemd units
+//               GET /api/admin/containers, every 5s
+//
+// Everything under /api/admin is a pass-through proxy to a small host-metrics
+// service. Tyflix itself has no idea how to read a CPU temperature; it
+// re-serves that service's JSON behind an admin check and nothing more.
+//
+// The intervals are load-bearing, not decoration. The API's rate limiter keys
+// on CF-Connecting-IP, and an early budget of 200 requests per 15 minutes was
+// small enough that the 5s pollers on this page locked the admin out of their
+// own dashboard inside one window. It's 1000 now. Speeding up a poll here, or
+// mounting several panels at once, spends that budget.
+//
+// The active tab lives in ?tab= (replace, not push), so a refresh comes back
+// where you were and the browser Back button still leaves the page.
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
@@ -60,6 +97,7 @@ import {
 import { usePolledResource } from "../hooks/usePolledResource";
 import { usePagination } from "../hooks/usePagination";
 
+// Tab order as rendered. Also the allowlist for ?tab=, via isAdminTab.
 const ADMIN_TABS = [
   { id: "requests", label: "Requests" },
   { id: "issues", label: "Issues" },
@@ -74,15 +112,26 @@ type AdminTab = (typeof ADMIN_TABS)[number]["id"];
 
 const DEFAULT_TAB: AdminTab = "requests";
 
+// Anything else in ?tab= falls back to DEFAULT_TAB rather than rendering an
+// empty panel.
 function isAdminTab(value: string | null): value is AdminTab {
   return ADMIN_TABS.some((tab) => tab.id === value);
 }
 
+/**
+ * The admin console. Renders the tab strip and exactly one panel.
+ *
+ * Holds no data of its own. Every panel below fetches and polls for itself,
+ * which is what keeps the unmounted tabs off the network.
+ */
 export function AdminPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const rawTab = searchParams.get("tab");
   const activeTab: AdminTab = isAdminTab(rawTab) ? rawTab : DEFAULT_TAB;
 
+  // Switching tabs replaces the history entry instead of pushing one, so seven
+  // clicks around the console don't turn Back into seven presses. Other query
+  // params are carried through.
   const selectTab = useCallback(
     (tab: AdminTab) => {
       setSearchParams(
@@ -101,6 +150,8 @@ export function AdminPage() {
     <main className="page page-wide">
       <h1>Admin</h1>
 
+      {/* Tab strip. Wired up as a real ARIA tablist so the ids here line up
+          with the panel's aria-labelledby below. */}
       <div className="admin-tabs" role="tablist" aria-label="Admin sections">
         {ADMIN_TABS.map((tab) => {
           const selected = activeTab === tab.id;
@@ -127,6 +178,8 @@ export function AdminPage() {
         id={`admin-tabpanel-${activeTab}`}
         aria-labelledby={`admin-tab-${activeTab}`}
       >
+        {/* One panel at a time, mounted fresh. Leaving a tab stops its poller
+            and throws away its data; coming back re-fetches. */}
         {activeTab === "requests" ? <RequestsPanel /> : null}
         {activeTab === "issues" ? <IssuesPanel /> : null}
         {activeTab === "access" ? <AccessPanel /> : null}
@@ -139,6 +192,15 @@ export function AdminPage() {
   );
 }
 
+// System / Storage: host CPU, memory, load, temperatures, GPU and per-volume
+// storage, five seconds apart. The fastest poller on the page.
+//
+// Every panel here follows the same shape, so this is the one place it's
+// spelled out. usePolledResource fetches once on mount, then on an interval,
+// and holds the last good payload when a refresh fails. That's why "error" only
+// renders before the first success, and why a later failure shows up as the
+// "couldn't refresh" note on UpdatedLine with stale-but-real numbers still on
+// screen.
 function SystemPanel() {
   const {
     data: system,
@@ -175,6 +237,10 @@ function SystemPanel() {
   );
 }
 
+// Requests: every user's Seerr requests, 30s poll, with the approve and
+// decline buttons that write back to Seerr. Filtering and sorting are shared
+// with the user-facing /requests page (applyRequestControls), then paginated at
+// 20 a page. Default landing tab.
 function RequestsPanel() {
   const { data, status, error, lastUpdated, refresh } = usePolledResource(
     fetchAllRequests,
@@ -201,6 +267,13 @@ function RequestsPanel() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [activeRequestId, setActiveRequestId] = useState<number | null>(null);
 
+  // Approve or decline one request. POSTs to /api/requests/:id/approve or
+  // /decline, which hands off to Seerr (and from there to Radarr or Sonarr).
+  //
+  // activeRequestId disables the buttons on every row while one is in flight,
+  // not just the row being acted on, so a double-click can't fire two writes.
+  // The refresh in `finally` runs either way, so what's on screen after an
+  // action is Seerr's answer rather than an optimistic guess.
   const runAction = useCallback(
     async (id: number, action: "approve" | "decline") => {
       setActiveRequestId(id);
@@ -244,6 +317,9 @@ function RequestsPanel() {
         <p className="error admin-requests-action-error">{actionError}</p>
       ) : null}
 
+      {/* Two different empty states below: nothing requested at all, versus
+          nothing matching the current filters. Worth keeping separate, since
+          the second one is the admin's own doing. */}
       {status === "ready" ? (
         <>
           <UpdatedLine lastUpdated={lastUpdated} refreshError={error} />
@@ -299,6 +375,9 @@ function RequestsPanel() {
   );
 }
 
+// Issues: every problem report on a title, from everyone, 60s poll. Read-only
+// here on purpose. Each row links to /issues/:id, which is where comments and
+// status changes happen.
 function IssuesPanel() {
   const { data, status, error, lastUpdated, refresh } = usePolledResource(
     fetchAllIssues,
@@ -359,6 +438,19 @@ function IssuesPanel() {
   );
 }
 
+// Access: the self-serve access-request queue, 30s poll. The one panel that can
+// reach outside the house, since approving here calls Plex's sharing API and a
+// real invitation email goes to whoever filled in the form at /request-access.
+//
+// Two data sources. The queue itself is polled, and the server reconciles it
+// against plex.tv on every read: invites that were accepted out of band get
+// promoted, and rows plex.tv has never heard of come back flagged
+// plexInviteMissing. The library checkboxes come from a separate one-shot fetch
+// at mount, because the shareable list only changes when a library is added.
+//
+// Both writes are deliberately two-click. The first press arms the button ("Send
+// invite?" / "Confirm deny?") and the second one commits, which is the only
+// thing standing between a stray click and an invitation.
 function AccessPanel() {
   const { data, status, error, lastUpdated, refresh } = usePolledResource(
     fetchAccessRequests,
@@ -378,6 +470,11 @@ function AccessPanel() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Fetch the shareable libraries once, on mount. Failing isn't fatal: approve
+  // stays available and falls back to sending no sectionIds at all, which the
+  // server reads as "share everything currently shareable". sectionsLoaded is
+  // what keeps the button disabled until we know which of those two worlds
+  // we're in.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -401,6 +498,8 @@ function AccessPanel() {
     };
   }, []);
 
+  // Pending first, then newest. Anything already decided is history and can
+  // sink to the bottom.
   const sorted = useMemo(() => {
     const rows = data?.requests ?? [];
     return [...rows].sort((a, b) => {
@@ -414,6 +513,7 @@ function AccessPanel() {
     });
   }, [data]);
 
+  // Lets a decided row show "Libraries: Movies, TV" instead of the stored ids.
   const sectionTitleById = useMemo(() => {
     const map = new Map<number, string>();
     for (const section of sections ?? []) {
@@ -422,6 +522,9 @@ function AccessPanel() {
     return map;
   }, [sections]);
 
+  // Which libraries are ticked for one row. Untouched rows default to every
+  // library, so approving without thinking about it grants the same access
+  // everyone else has.
   function selectedIdsFor(requestId: string): number[] {
     const explicit = selectedById[requestId];
     if (explicit !== undefined) {
@@ -430,12 +533,15 @@ function AccessPanel() {
     return (sections ?? []).map((s) => s.id);
   }
 
+  // Disarms whichever button was armed and drops any typed deny note.
   function clearConfirm() {
     setConfirmId(null);
     setConfirmKind(null);
     setDenyNote("");
   }
 
+  // Changing the library selection disarms the confirm, so the second click
+  // can't send an invite for a set of libraries the admin just changed.
   function toggleSection(requestId: string, sectionId: number) {
     clearConfirm();
     const current = selectedIdsFor(requestId);
@@ -445,6 +551,13 @@ function AccessPanel() {
     setSelectedById((prev) => ({ ...prev, [requestId]: next }));
   }
 
+  // The irreversible one. POST .../:id/approve invites the applicant's email to
+  // the Plex server and shares the chosen libraries, and Plex mails them.
+  //
+  // Passing sectionIds undefined is not the same as passing an empty array: the
+  // server treats undefined as "everything shareable" and rejects an empty
+  // array outright. Undefined is only used when the sections fetch failed and
+  // there's nothing sensible to pick from.
   const runApprove = useCallback(
     async (id: string, sectionIds: number[] | undefined) => {
       setActiveId(id);
@@ -468,6 +581,9 @@ function AccessPanel() {
     [refresh],
   );
 
+  // Deny is local. Plex is never contacted, the applicant isn't told, and the
+  // optional note is for the admin's own benefit. The store lets the same email
+  // apply again after 90 days.
   const runDeny = useCallback(
     async (id: string, note: string) => {
       setActiveId(id);
@@ -511,6 +627,9 @@ function AccessPanel() {
       {status === "ready" ? (
         <>
           <UpdatedLine lastUpdated={lastUpdated} refreshError={error} />
+          {/* reconciledAt null means the server got the queue out of its own
+              store but couldn't check plex.tv, so an "invited" row here might
+              already have been accepted. Say so rather than imply it's live. */}
           {data?.reconciledAt === null ? (
             <p className="muted admin-access-reconcile-note">
               Plex could not be reached. Statuses shown are from the last known
@@ -522,6 +641,10 @@ function AccessPanel() {
           ) : (
             <ul className="admin-requests-list">
               {sorted.map((request) => {
+                // Per-row gating. The picker only renders when we actually have
+                // a section list, and approve stays disabled until the sections
+                // fetch has settled one way or the other and there's at least
+                // one library ticked (or nothing to tick).
                 const selectedIds = selectedIdsFor(request.id);
                 const showPicker =
                   !sectionsFailed &&
@@ -551,12 +674,16 @@ function AccessPanel() {
                     onToggleSection={(sectionId) =>
                       toggleSection(request.id, sectionId)
                     }
+                    // Clicking anywhere else on an armed row disarms it. The
+                    // controls inside stop propagation so they don't trip this.
                     onRowClick={() => {
                       if (confirmId === request.id) {
                         clearConfirm();
                       }
                     }}
                     onDenyNoteChange={setDenyNote}
+                    // First click arms, second click sends the invite. Only one
+                    // row can be armed at a time, since confirmId is a single id.
                     onApproveClick={() => {
                       if (
                         confirmId === request.id &&
@@ -592,6 +719,13 @@ function AccessPanel() {
   );
 }
 
+// One row in the access queue. Presentational: every decision (armed or not,
+// which libraries are ticked, whether approve is allowed) is made by AccessPanel
+// and passed down, so this only renders and reports clicks.
+//
+// Pending rows get the library checkboxes and the action buttons. Decided rows
+// keep the note, the granted libraries and any admin note, which is the record
+// of what was handed out and why.
 function AccessRequestRow({
   request,
   sections,
@@ -625,6 +759,8 @@ function AccessRequestRow({
 }) {
   const pending = request.status === "pending";
 
+  // Stored ids resolved back to library names. A section that's since been
+  // removed from sharing falls back to "Section 3" rather than disappearing.
   const grantedTitles =
     request.sectionIds === null
       ? []
@@ -634,6 +770,10 @@ function AccessRequestRow({
 
   return (
     <li className="admin-request-row admin-access-row" onClick={onRowClick}>
+      {/* Identity line: who asked, where the row stands, and whether they told
+          us they already have a Plex account. "invite not on Plex" is the
+          reconcile flag, and it means we think we invited them but plex.tv
+          shows neither a pending invite nor a share. */}
       <div className="admin-request-main">
         <span className="admin-request-title">{request.name}</span>
         <span className={accessRequestStatusBadgeClass(request.status)}>
@@ -660,6 +800,8 @@ function AccessRequestRow({
         ) : null}
       </div>
 
+      {/* What they typed into the form. Then the audit trail: which libraries
+          were granted, any private admin note, and the IP the form came from. */}
       <p className="admin-access-note">{request.note}</p>
 
       {grantedTitles.length > 0 ? (
@@ -678,6 +820,9 @@ function AccessRequestRow({
         <p className="admin-access-ip muted">{request.sourceIp}</p>
       ) : null}
 
+      {/* Libraries to share. Pending rows only, and the whole fieldset goes
+          disabled while a write is in flight. stopPropagation keeps ticking a
+          box from counting as a click on the row. */}
       {pending && sections !== null ? (
         <fieldset
           className="admin-access-sections"
@@ -698,6 +843,8 @@ function AccessRequestRow({
         </fieldset>
       ) : null}
 
+      {/* The deny note only appears once Deny is armed. 280 characters, matching
+          the server's cap, and it's private to the admin. */}
       {pending && confirmingDeny ? (
         <label
           className="admin-access-deny-note"
@@ -715,6 +862,8 @@ function AccessRequestRow({
         </label>
       ) : null}
 
+      {/* Actions. The label is the confirmation state: "Approve" arms, "Send
+          invite?" is the click that actually emails someone. */}
       {pending ? (
         <div
           className="admin-request-actions"
@@ -748,6 +897,13 @@ function AccessRequestRow({
   );
 }
 
+// Users: watched-versus-requested for every account, 60s poll. How much each
+// person asked for, how much of it they actually watched, and how many GB are
+// sitting on disk untouched.
+//
+// These numbers arrive precomputed from the host-metrics service through the
+// /api/admin proxy. They're not the same code path as the Home page's own
+// stats, which the app computes itself in analytics/watchedVsRequested.ts.
 function UsersPanel() {
   const { data, status, error, lastUpdated, refresh } = usePolledResource(
     fetchAdminUsers,
@@ -781,6 +937,8 @@ function UsersPanel() {
   );
 }
 
+// The sortable table. Opens on unwatched GB, largest first, because that's the
+// column worth looking at: who's sitting on the most storage they never played.
 function UsersBody({ data }: { data: AdminUsersResponse }) {
   const { users, totals, watched_definition } = data;
   const [sortKey, setSortKey] = useState<UserSortKey>("gb_unwatched");
@@ -791,6 +949,9 @@ function UsersBody({ data }: { data: AdminUsersResponse }) {
     [users, sortKey, sortDir],
   );
 
+  // Clicking the active column flips direction. Switching columns picks the
+  // direction that's useful first: A to Z for the text columns, biggest first
+  // for the numbers.
   const onSort = useCallback(
     (key: UserSortKey) => {
       if (key === sortKey) {
@@ -805,6 +966,8 @@ function UsersBody({ data }: { data: AdminUsersResponse }) {
 
   return (
     <div className="admin-users">
+      {/* House totals across every account, with the same inline rate bar the
+          per-user rows use. */}
       <p className="admin-users-totals muted">
         {totals.users} user{totals.users === 1 ? "" : "s"} ·{" "}
         {totals.requesters} requester{totals.requesters === 1 ? "" : "s"} ·{" "}
@@ -819,6 +982,8 @@ function UsersBody({ data }: { data: AdminUsersResponse }) {
         {formatRate(totals.rate)}
       </p>
 
+      {/* Not a <table>. It's a CSS grid with ARIA table roles, so the header
+          cells and the row cells have to stay in the same order by hand. */}
       <div className="admin-users-scroll">
         <div className="admin-users-list" role="table">
           <div className="admin-users-row admin-users-header" role="row">
@@ -840,11 +1005,16 @@ function UsersBody({ data }: { data: AdminUsersResponse }) {
         </div>
       </div>
 
+      {/* The metrics service ships its own definition of "watched" as a string.
+          Printing it beats hardcoding a caption that could drift from whatever
+          rule that service is applying. */}
       <p className="stats-caption muted">{watched_definition}</p>
     </div>
   );
 }
 
+// Sortable columns. Each key is a field on AdminUser, which is what lets
+// sortFieldValue index straight into the row.
 type UserSortKey =
   | "user"
   | "total_requests"
@@ -854,8 +1024,10 @@ type UserSortKey =
   | "rate"
   | "posture";
 
+// 1 ascending, -1 descending. Multiplied into the comparison result.
 type SortDir = 1 | -1;
 
+// Column order for the header row. Must match the cell order in UserRowCells.
 const USER_SORT_HEADERS: { key: UserSortKey; label: string }[] = [
   { key: "user", label: "User" },
   { key: "total_requests", label: "Requests" },
@@ -866,6 +1038,8 @@ const USER_SORT_HEADERS: { key: UserSortKey; label: string }[] = [
   { key: "posture", label: "Posture" },
 ];
 
+// Missing values sort as negative infinity, so a user with no watch rate lands
+// at the bottom of a descending sort instead of jumping to the top.
 function sortFieldValue(
   user: AdminUser,
   key: UserSortKey,
@@ -880,6 +1054,10 @@ function sortFieldValue(
   return value;
 }
 
+// localeCompare for the two text columns, plain numeric ordering for the rest.
+// A mismatched pair (shouldn't happen, since a key is one type across all rows)
+// takes the numeric branch, where the non-numeric side reads as negative
+// infinity.
 function compareUsers(
   a: AdminUser,
   b: AdminUser,
@@ -901,6 +1079,8 @@ function compareUsers(
   return cmp * dir;
 }
 
+// One column header. Carries aria-sort so the sort state isn't only in the
+// caret glyph.
 function UsersSortHeader({
   label,
   sortKey,
@@ -945,6 +1125,9 @@ function UsersSortHeader({
   );
 }
 
+// A user row, expandable into their unwatched titles. Someone with nothing
+// unwatched renders as a plain row, since there'd be nothing behind the
+// disclosure triangle.
 function UserListRow({ user }: { user: AdminUser }) {
   if (user.unwatched_titles.length === 0) {
     return (
@@ -964,6 +1147,12 @@ function UserListRow({ user }: { user: AdminUser }) {
   );
 }
 
+// The seven cells, in USER_SORT_HEADERS order. Shared by the plain row and the
+// expandable <summary> so both stay aligned to the same grid.
+//
+// The "unlinked" badge is the row's plex_linked flag, meaning no Plex account
+// was matched behind these numbers. The requests cell reads available over
+// total, with anything still pending called out separately.
 function UserRowCells({ user }: { user: AdminUser }) {
   return (
     <>
@@ -1009,6 +1198,8 @@ function UserRowCells({ user }: { user: AdminUser }) {
   );
 }
 
+// What one user requested and never played, with size on disk. The key is
+// composed from type, title and request date because these rows carry no id.
 function UnwatchedTitlesList({ titles }: { titles: AdminUnwatchedTitle[] }) {
   return (
     <ul className="admin-unwatched-list">
@@ -1029,6 +1220,9 @@ function UnwatchedTitlesList({ titles }: { titles: AdminUnwatchedTitle[] }) {
   );
 }
 
+// Jobs: the scheduled work running on the host, 30s poll. Read-only. Nothing
+// here starts or stops a job; it's a window onto the schedule, when each one
+// last ran and what it said.
 function JobsPanel() {
   const { data, status, error, lastUpdated, refresh } = usePolledResource(
     fetchAdminJobs,
@@ -1062,6 +1256,9 @@ function JobsPanel() {
   );
 }
 
+// Job table. Same hand-rolled grid as the users table. Each entry can carry a
+// last_line, the tail of that job's own output, printed under its row when
+// there's something to show.
 function JobsBody({ jobs }: { jobs: AdminJob[] }) {
   return (
     <div className="admin-jobs">
@@ -1119,6 +1316,8 @@ function JobsBody({ jobs }: { jobs: AdminJob[] }) {
   );
 }
 
+// Containers: Docker containers and native systemd services, five seconds
+// apart. The other fast poller. Read-only, like Jobs.
 function ContainersPanel() {
   const { data, status, error, lastUpdated, refresh } = usePolledResource(
     fetchAdminContainers,
@@ -1152,6 +1351,12 @@ function ContainersPanel() {
   );
 }
 
+// The "Updated 14:32" line every panel prints above its data. Renders nothing
+// until the first successful fetch.
+//
+// The "couldn't refresh" suffix is the only place a failed poll shows up once a
+// panel has data. Without it a dead metrics service looks identical to a very
+// quiet one.
 function UpdatedLine({
   lastUpdated,
   refreshError,
@@ -1171,6 +1376,9 @@ function UpdatedLine({
   );
 }
 
+// Two tables, because the server runs both. The Docker half can come back
+// ok:false with its own error message while the native systemd half is fine, so
+// each degrades independently.
 function ContainersBody({ data }: { data: AdminContainersResponse }) {
   return (
     <div className="admin-containers">
@@ -1187,6 +1395,9 @@ function ContainersBody({ data }: { data: AdminContainersResponse }) {
   );
 }
 
+// Per-container stats: state and health badges, CPU and memory with inline
+// bars, network totals, uptime. The image, pid count, restart count and block
+// IO ride along under the container name instead of getting columns.
 function DockerTable({ rows }: { rows: AdminDockerRow[] }) {
   return (
     <div className="admin-containers-scroll">
@@ -1265,6 +1476,9 @@ function DockerTable({ rows }: { rows: AdminDockerRow[] }) {
   );
 }
 
+// The same shape for the host's native systemd units. These rows carry no
+// health status and no memory limit, so those columns drop out and the unit
+// name sits under the service name instead.
 function NativeTable({ rows }: { rows: AdminNativeRow[] }) {
   return (
     <div className="admin-containers-scroll">
@@ -1324,6 +1538,9 @@ function NativeTable({ rows }: { rows: AdminNativeRow[] }) {
   );
 }
 
+// Percentage clamped to 0-100 for a bar's inline width. Null, undefined and
+// NaN all collapse to an empty bar, which is what keeps a missing sensor from
+// rendering a nonsense stripe.
 function barWidth(value: number | null | undefined): number {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return 0;
@@ -1331,6 +1548,12 @@ function barWidth(value: number | null | undefined): number {
   return Math.min(100, Math.max(0, value));
 }
 
+// The system tab's contents: six tiles across the top, then the GPU engine
+// breakdown, per-volume storage, and a service up/down list.
+//
+// GPU data is optional all the way down. `gpu` can be null (no GPU reported)
+// and `gpu.usage` can be null on top of that, so every read of it is guarded
+// and the formatters print a dash placeholder instead.
 function SystemBody({ system }: { system: AdminSystem }) {
   const { cpu, mem, load, temps, gpu, storage, services } = system;
   const gpuUsage = gpu?.usage;
@@ -1351,6 +1574,10 @@ function SystemBody({ system }: { system: AdminSystem }) {
         <span className="muted"> · up {formatUptime(system.uptime_s)}</span>
       </p>
 
+      {/* Six tiles: CPU, memory, load, CPU temperature, GPU busy and the
+          transcoder. Same layout each time, a headline number over a bar, and
+          the bar's colour is a threshold class (usageBarClass, tempBarClass)
+          rather than anything computed here. */}
       <div className="admin-tiles">
         <div className="admin-tile">
           <p className="admin-tile-label">CPU</p>
@@ -1424,6 +1651,9 @@ function SystemBody({ system }: { system: AdminSystem }) {
           ) : null}
         </div>
 
+        {/* Transcoder count is the one tile with no bar: it's a count of live
+            Plex transcodes, with the GPU name, stream count and whether
+            hardware acceleration is in play underneath. */}
         <div className="admin-tile">
           <p className="admin-tile-label">Transcoder</p>
           <p className="admin-tile-value">{gpu?.transcodes ?? "—"}</p>
@@ -1437,6 +1667,8 @@ function SystemBody({ system }: { system: AdminSystem }) {
 
       <GpuBlock gpu={gpu} />
 
+      {/* Every volume the metrics service reports, including ones it can see
+          but not reach. */}
       <h3 className="admin-subheading">Storage</h3>
       <ul className="admin-storage-list">
         {storage.map((drive) => (
@@ -1444,6 +1676,8 @@ function SystemBody({ system }: { system: AdminSystem }) {
         ))}
       </ul>
 
+      {/* Plain up/down dots for the services the metrics service watches, with
+          whatever detail string it attached. */}
       <h3 className="admin-subheading">Services</h3>
       <ul className="admin-services-list">
         {services.map((svc) => (
@@ -1466,6 +1700,12 @@ function SystemBody({ system }: { system: AdminSystem }) {
   );
 }
 
+// Per-engine GPU utilisation. The Video and Enhance engines are the ones that
+// move during a hardware transcode, which is what makes this block worth having
+// separately from the single "GPU busy" tile.
+//
+// Two levels of absence, handled differently: no GPU at all gets "No GPU data",
+// and a GPU with no usage sample still shows its name and transcode counts.
 function GpuBlock({ gpu }: { gpu: AdminSystemGpu }) {
   if (gpu === null) {
     return (
@@ -1520,6 +1760,9 @@ function GpuBlock({ gpu }: { gpu: AdminSystemGpu }) {
   );
 }
 
+// One volume. An offline drive keeps its row and its role, with an Offline tag
+// and no usage figures, so a disk that dropped off is visibly missing instead
+// of quietly gone from the list.
 function StorageRow({ drive }: { drive: AdminSystemStorage }) {
   if (!drive.online) {
     return (

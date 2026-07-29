@@ -1,3 +1,21 @@
+// The title page: hero art, overview, cast and crew, availability, and one
+// primary button that's either Play or Request depending on what the server
+// already has. Rendered at /media/:type/:id by App.tsx, inside ProtectedRoute
+// and AppShell, where :type is "movie" or "tv" and :id is a TMDB id. Nearly
+// every poster in the app links here.
+//
+// Six endpoints across three API modules. api/discover.ts supplies the detail
+// (/api/discover/movie/:id or /tv/:id), the credits and the recommendations.
+// api/requests.ts handles POST /api/requests and, for admins, the quality
+// profile list. api/issues.ts handles POST /api/issues. EpisodeBrowser fetches
+// its own episodes on top of that.
+//
+// Everything on this page hangs off `mediaStatus`, which is Seerr's answer to
+// "is this on the server". That field is the TMDB-to-Plex join in one value:
+// available or partially available means Play, anything else means Request,
+// and null means Seerr has never heard of the title, which is why the issue
+// reporter hides in that case. Nothing here guesses by title.
+
 import {
   useCallback,
   useEffect,
@@ -36,13 +54,21 @@ import { EpisodeBrowser } from "../components/EpisodeBrowser";
 import { MediaCard } from "../components/MediaCard";
 
 type LoadStatus = "loading" | "ready" | "error";
+// The two detail shapes differ enough to be worth discriminating on
+// `mediaType` rather than flattening. Movies have runtime and a collection,
+// shows have a season list and a tvdbId.
 type MediaDetail = MovieDetail | TvDetail;
+// Credits tagged with the title they belong to, so a click from one title to
+// another doesn't briefly show the previous cast under the new name.
 type LoadedCredits = {
   mediaType: MediaType;
   tmdbId: number;
   cast: CastCredit[];
   crew: CrewCredit[];
 };
+// "already" is its own outcome, not an error. createRequest turns Seerr's 409
+// into a result rather than a throw, because someone else asking first isn't a
+// failure the user needs to do anything about.
 type RequestUiState =
   | { kind: "idle" }
   | { kind: "submitting" }
@@ -55,6 +81,8 @@ type IssueUiState =
   | { kind: "submitted" }
   | { kind: "error"; message: string };
 
+// Both parsers return null on anything unexpected, which routes the page to
+// its error state instead of firing a request that can only 404.
 function parseType(raw: string | undefined): "movie" | "tv" | null {
   if (raw === "movie" || raw === "tv") {
     return raw;
@@ -69,6 +97,8 @@ function parseId(raw: string | undefined): number | null {
   return Number(raw);
 }
 
+// Defined once at module scope since it never changes and both back controls
+// below use it.
 const backIcon = (
   <svg
     aria-hidden="true"
@@ -83,12 +113,22 @@ const backIcon = (
   </svg>
 );
 
+/**
+ * Detail page for one TMDB title.
+ *
+ * Only owns the detail fetch and the three load states. Everything else, the
+ * credits, recommendations, request flow and issue reporter, lives in child
+ * components below so a failure in any of them can't take the page down.
+ */
 export function MediaDetailPage() {
   const params = useParams<{ type: string; id: string }>();
   const mediaType = parseType(params.type);
   const id = parseId(params.id);
   const navigate = useNavigate();
   const location = useLocation();
+  // react-router stamps location.key "default" on a first entry, meaning the
+  // user landed here directly and there's no history to pop. Going back in
+  // that case would leave the app, so it falls back to a link home.
   const canGoBack = location.key !== "default";
   const backControl = canGoBack ? (
     <button
@@ -115,6 +155,9 @@ export function MediaDetailPage() {
     setReloadKey((n) => n + 1);
   }, []);
 
+  // Owns the detail fetch. Re-runs when either route param changes or on
+  // retry. Movies and shows are separate TMDB endpoints, so the type in the
+  // URL picks which one before anything else happens.
   useEffect(() => {
     if (mediaType === null || id === null) {
       setDetail(null);
@@ -162,6 +205,8 @@ export function MediaDetailPage() {
         <p className="muted">Loading…</p>
       ) : null}
 
+      {/* Retry only helps if the params were valid and the request failed. A
+          malformed URL gets the back control again instead. */}
       {status === "error" ? (
         <div className="stats-error">
           <p className="error">{error ?? "Failed to load details"}</p>
@@ -182,17 +227,27 @@ export function MediaDetailPage() {
   );
 }
 
+// Everything below the fold once the detail has loaded. Split out from the
+// parent so credits and recommendations can load on their own clock without
+// the page sitting in a loading state waiting for them.
 function DetailBody({ detail }: { detail: MediaDetail }) {
+  // Wide backdrop for the hero, poster as the fallback, placeholder if TMDB
+  // has neither.
   const heroUrl = detail.backdropUrl ?? detail.posterUrl;
   const yearLabel = detail.year !== null ? ` (${detail.year})` : "";
   const [recommendations, setRecommendations] = useState<MediaSummary[]>([]);
   const [credits, setCredits] = useState<LoadedCredits | null>(null);
+  // Only use credits that belong to the title on screen. Navigating between
+  // two titles keeps this component mounted, so the old cast would otherwise
+  // linger for a frame under the new name.
   const currentCredits =
     credits?.mediaType === detail.mediaType &&
     credits.tmdbId === detail.tmdbId
       ? credits
       : null;
 
+  // Recommendations. Optional content, so a failure clears the list and the
+  // section simply doesn't render. Nothing about it is surfaced to the user.
   useEffect(() => {
     let cancelled = false;
     setRecommendations([]);
@@ -214,6 +269,9 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
     };
   }, [detail.mediaType, detail.tmdbId]);
 
+  // Cast and crew, one call feeding two separate regions: the "Directed by"
+  // line up top and the cast strip further down. Same failure treatment as
+  // recommendations, both blocks just disappear.
   useEffect(() => {
     let cancelled = false;
     setCredits(null);
@@ -252,6 +310,10 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
         )}
       </div>
 
+      {/* Tag row. Three separate things that read as one line: media type,
+          TMDB's production status ("Released", "Returning Series"), and
+          Seerr's availability. The last one is the only one that means
+          anything about this server. */}
       <div className="media-detail-meta">
         <p className="media-detail-tag-row">
           <span className="stats-tag">
@@ -302,6 +364,11 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
           <p className="muted">No overview available.</p>
         )}
 
+        {/* The primary button, movie case. Play appears only once Seerr says
+            the file is there, and the link is keyed by TMDB id because
+            WatchPage does the TMDB-to-Plex resolution itself. Shows get the
+            equivalent through EpisodeBrowser further down, since there's no
+            single thing to play. */}
         {detail.mediaType === "movie" &&
         (detail.mediaStatus === "available" ||
           detail.mediaStatus === "partially_available") ? (
@@ -312,12 +379,21 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
           </p>
         ) : null}
 
+        {/* The other half of the primary action. RequestControls decides for
+            itself whether to render a button or just a status badge. Note
+            this is the local component further down this file, not the
+            filter bar of the same name in components/. */}
         <RequestControls detail={detail} />
 
+        {/* A null mediaStatus means Seerr has no record of this title, and an
+            issue has to attach to a Seerr media row, so the reporter is
+            hidden rather than offered and then rejected. */}
         {detail.mediaStatus !== null ? (
           <ReportIssueControls detail={detail} />
         ) : null}
 
+        {/* Cast strip. Each card links to /person/:id, and a missing headshot
+            falls back to the actor's initial. */}
         {currentCredits !== null && currentCredits.cast.length > 0 ? (
           <section
             className="media-detail-cast"
@@ -358,6 +434,11 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
           </section>
         ) : null}
 
+        {/* Two mutually exclusive season blocks, and the split is the whole
+            TMDB-versus-Plex distinction in one place. A show that's on the
+            server gets EpisodeBrowser, which lists the episodes Plex actually
+            holds with real Play links. A show that isn't gets TMDB's season
+            summary, which is just names and counts with nothing to click. */}
         {detail.mediaType === "tv" &&
         (detail.mediaStatus === "available" ||
           detail.mediaStatus === "partially_available") ? (
@@ -390,6 +471,9 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
           </section>
         ) : null}
 
+        {/* "More like this". These carry their own availability from Seerr,
+            so the status corners here are as accurate as the ones on
+            Discover. */}
         {recommendations.length > 0 ? (
           <section
             className="media-detail-recommendations"
@@ -410,6 +494,10 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
   );
 }
 
+// Condenses a full crew list into the one "Directed by X · Written by Y" line
+// under the title. Group order here is the display order, and only groups with
+// somebody in them survive, so a movie with no credited creator doesn't leave
+// a gap.
 function CrewSummary({ crew }: { crew: CrewCredit[] }) {
   const groups = [
     { jobs: ["Director"], label: "Directed by" },
@@ -419,6 +507,9 @@ function CrewSummary({ crew }: { crew: CrewCredit[] }) {
     { jobs: ["Producer"], label: "Producers" },
   ];
   const parts = groups.flatMap(({ jobs, label }) => {
+    // One person can hold several jobs, and those arrive from TMDB collapsed
+    // into a single slash-separated string. Splitting on " / " is what lets a
+    // "Screenplay / Director" credit land in both buckets.
     const names = crew
       .filter((person) =>
         person.job.split(" / ").some((job) => jobs.includes(job)),
@@ -432,12 +523,22 @@ function CrewSummary({ crew }: { crew: CrewCredit[] }) {
   ) : null;
 }
 
+// "Report an issue": collapsed to a button until clicked, then a type picker
+// and a description box. The report lands in Seerr and shows up on
+// MyIssuesPage, where it can be followed through to resolution.
+//
+// The caller already hides this for titles Seerr doesn't track, so the
+// not-tracked branch below shouldn't normally fire. It's there because the
+// server can still answer 404 and that's not an error worth showing raw.
 function ReportIssueControls({ detail }: { detail: MediaDetail }) {
   const [expanded, setExpanded] = useState(false);
   const [issueType, setIssueType] = useState<IssueType>("video");
   const [message, setMessage] = useState("");
   const [issueState, setIssueState] = useState<IssueUiState>({ kind: "idle" });
 
+  // Files the issue. createIssue turns a 404 into `ok: false` rather than
+  // throwing, so an untracked title is a normal outcome to be phrased for a
+  // user, and only real transport or server failures reach the catch.
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIssueState({ kind: "submitting" });
@@ -468,6 +569,10 @@ function ReportIssueControls({ detail }: { detail: MediaDetail }) {
   return (
     <section className="issue-report" aria-labelledby="issue-report-heading">
       <h2 id="issue-report-heading">Report an issue</h2>
+      {/* Three states in one chain: collapsed, the form, or the thank-you.
+          Submitting is one-way, there's no path back to the form once it
+          succeeds. Reloading the page is the only way to file a second
+          report on the same title. */}
       {!expanded ? (
         <button
           type="button"
@@ -524,6 +629,16 @@ function ReportIssueControls({ detail }: { detail: MediaDetail }) {
   );
 }
 
+// The Request half of the primary action. Renders one of three things: a plain
+// status badge when there's nothing to ask for, a single Request button for a
+// movie, or a season checklist for a show.
+//
+// Name collision worth flagging: components/RequestControls.tsx is a different
+// thing entirely, the filter bar on MyRequestsPage. This one isn't imported
+// anywhere else.
+//
+// Requests go to Seerr, which hands them to Radarr or Sonarr. Tyflix doesn't
+// run any of that pipeline itself.
 function RequestControls({ detail }: { detail: MediaDetail }) {
   const { isAdmin } = useAuth();
   const [requestState, setRequestState] = useState<RequestUiState>({
@@ -536,10 +651,17 @@ function RequestControls({ detail }: { detail: MediaDetail }) {
     number | undefined
   >(undefined);
 
+  // "already" and "requested" both mean stop offering the button, so they
+  // collapse into one flag for the render.
   const done =
     requestState.kind === "requested" || requestState.kind === "already";
   const submitting = requestState.kind === "submitting";
 
+  // Quality profiles, admin only. The server rejects a profileId from a
+  // non-admin with a 403, so there's no point fetching the list for one. Also
+  // skipped when the title can't be requested anyway. Clearing both pieces of
+  // state up front is what stops a profile from a previous title leaking into
+  // the next request.
   useEffect(() => {
     setRequestProfiles(null);
     setSelectedProfileId(undefined);
@@ -567,6 +689,13 @@ function RequestControls({ detail }: { detail: MediaDetail }) {
     };
   }, [detail.mediaStatus, detail.mediaType, isAdmin]);
 
+  /**
+   * Creates the request. Shared by the movie button and the season button.
+   *
+   * Omitting `seasons` entirely is meaningful: the server reads that as the
+   * whole show. Movies pass nothing, shows always pass an explicit list.
+   * `profileId` is only ever set for admins, since the fetch above is gated.
+   */
   const submit = useCallback(
     async (seasons?: number[]) => {
       setRequestState({ kind: "submitting" });
@@ -595,6 +724,8 @@ function RequestControls({ detail }: { detail: MediaDetail }) {
     [detail.mediaType, detail.tmdbId, selectedProfileId],
   );
 
+  // Season checkbox toggle. Kept sorted so the list sent to Seerr is in season
+  // order regardless of the order the boxes were ticked.
   function toggleSeason(seasonNumber: number) {
     setSelectedSeasons((prev) =>
       prev.includes(seasonNumber)
@@ -603,6 +734,9 @@ function RequestControls({ detail }: { detail: MediaDetail }) {
     );
   }
 
+  // Nothing to request. canRequest treats available, processing and pending as
+  // "already handled", so the three collapse into two labels here: Available
+  // if it's on the server, Requested if it's still on its way.
   if (!canRequest(detail.mediaStatus)) {
     const label = detail.mediaStatus === "available" ? "Available" : "Requested";
     return (
@@ -616,6 +750,9 @@ function RequestControls({ detail }: { detail: MediaDetail }) {
     );
   }
 
+  // Partially available is the one status that's both playable and still worth
+  // requesting, typically a show with some seasons missing. It gets a line of
+  // explanation above whichever request control follows.
   const partialAvailabilityContext =
     detail.mediaStatus === "partially_available" ? (
       <p className="request-controls-status">
@@ -623,6 +760,9 @@ function RequestControls({ detail }: { detail: MediaDetail }) {
       </p>
     ) : null;
 
+  // Built once and dropped into both the movie and the TV branch below.
+  // requestProfiles stays null for non-admins and after a failed fetch, so
+  // this is null for them and the request just uses Seerr's default profile.
   const qualityProfilePicker =
     requestProfiles && requestProfiles.profiles.length > 0 ? (
       <label className="request-profile-picker">
@@ -642,6 +782,8 @@ function RequestControls({ detail }: { detail: MediaDetail }) {
       </label>
     ) : null;
 
+  // Movie branch. One button, nothing to choose, and calling submit with no
+  // argument is what tells the server there are no seasons involved.
   if (detail.mediaType === "movie") {
     return (
       <section className="request-controls" aria-label="Request movie">
@@ -672,6 +814,9 @@ function RequestControls({ detail }: { detail: MediaDetail }) {
     );
   }
 
+  // TV branch. Seasons are picked explicitly rather than defaulting to the
+  // whole show, so the submit button stays disabled until at least one box is
+  // ticked. Both branches share the same error line at the bottom.
   return (
     <section className="request-controls" aria-label="Request TV seasons">
       {partialAvailabilityContext}

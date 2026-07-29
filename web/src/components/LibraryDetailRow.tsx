@@ -1,3 +1,12 @@
+// The wide row used by the Library page's detail view: poster on the left, then
+// title, year, rating, runtime, genres and summary.
+//
+// It's the same data LibraryCard shows in grid mode, and it shares the same
+// WatchProgress overlay, so progress bars and watched ticks read identically in
+// either layout. LibraryPage is the only caller and picks between the two.
+//
+// A row isn't always a link. Plex items with no TMDB id and no direct play
+// route (shows, mostly) render as plain text instead.
 import { Link } from "react-router-dom";
 import { formatRuntime } from "../api/discover";
 import {
@@ -7,11 +16,20 @@ import {
 } from "../api/library";
 import { WatchProgress } from "./WatchProgress";
 
+/**
+ * One library item as a full-width row.
+ *
+ * `libraryItemTarget` decides where it goes: the TMDB detail page when the item
+ * has a TMDB id, the ratingKey-native watch route for a movie without one, and
+ * nowhere at all for a show with neither.
+ */
 export function LibraryDetailRow({ item }: { item: LibraryItem }) {
   const target = libraryItemTarget(item);
   const typeLabel = item.type === "show" ? "TV" : "Movie";
   const posterSrc = item.thumb ? libraryImageUrl(item.thumb) : null;
 
+  // Year, rating, runtime and content rating, joined with dots. Built as a list
+  // first so a missing field doesn't leave a stray separator behind.
   const metaParts: string[] = [];
   if (item.year !== null) {
     metaParts.push(String(item.year));
@@ -26,10 +44,13 @@ export function LibraryDetailRow({ item }: { item: LibraryItem }) {
     metaParts.push(item.contentRating);
   }
 
+  // Three genres is the cap. Plex will hand back plenty more.
   const genresLabel = item.genres.slice(0, 3).join(", ");
   const summary =
     item.summary !== null && item.summary.trim() !== "" ? item.summary : null;
 
+  // Built once and rendered into either the link or the plain wrapper below,
+  // so the two branches can't drift apart.
   const poster = (
     <>
       {posterSrc ? (
@@ -50,6 +71,7 @@ export function LibraryDetailRow({ item }: { item: LibraryItem }) {
 
   return (
     <div className="library-detail-row">
+      {/* Poster, linked or not depending on whether the item goes anywhere. */}
       {target !== null ? (
         <Link to={target} className="library-detail-poster">
           {poster}
@@ -58,6 +80,7 @@ export function LibraryDetailRow({ item }: { item: LibraryItem }) {
         <div className="library-detail-poster">{poster}</div>
       )}
 
+      {/* Text column. Meta, genres and summary each drop out when empty. */}
       <div className="library-detail-body">
         <div className="library-detail-title-row">
           {target !== null ? (

@@ -1,3 +1,28 @@
+// The custom control bar for the watch page, replacing the browser's native
+// <video controls>. Transport (play/pause, seek, volume, fullscreen), the
+// settings gear (speed, quality, audio track, subtitles, auto-play), and the
+// Cast button all live here.
+//
+// The <video> element itself is passed in as children and the parent owns the
+// ref, so this component reads and writes an element it doesn't render.
+// WatchPage is the only caller.
+//
+// Two things you can't guess from the code, and both cost real debugging time:
+//
+// 1. Quality and audio aren't client-side settings. Each change asks Plex for a
+//    fresh transcode through onStreamSettingsChange, and WatchPage swaps the
+//    descriptor in place so the <video> node stays mounted through the restart.
+//    Unmount it and playback breaks. Speed is the exception: a plain
+//    playbackRate write with no server round trip.
+//
+// 2. Plex burns subtitles into the video. They aren't a sidecar text track, so
+//    choosing one means a PUT that sets the subtitle stream on the media part
+//    followed by that same transcode restart. The Subtitles group looks
+//    identical to Quality up here, but the plumbing behind it is different.
+//
+// While a Cast session is live the bar reads and writes the receiver (the
+// `remote` prop) instead of the local element, and hides the controls that only
+// make sense on this machine.
 import {
   useEffect,
   useRef,
@@ -10,24 +35,37 @@ import type { AudioStream, SubtitleStream } from "../api/watch";
 import type { RemotePlaybackControl } from "../cast/useCastPlayer";
 import { useCastState } from "../cast/useCastState";
 
+// Labels for the Quality group. WatchPage turns each one into the bitrate and
+// resolution caps it sends to Plex; "original" means send no caps at all.
 export type QualityId = "original" | "1080p" | "720p" | "480p";
 
+// The full picked-stream state, sent to the parent as one object on every
+// change. It's a whole snapshot rather than a delta because switching any one
+// of these rebuilds the transcode, and the other two have to ride along.
 export type StreamSettings = {
   quality: QualityId;
-  audioStreamId: string | null;
-  subtitleStreamId: string | null;
+  audioStreamId: string | null; // null = let Plex pick its default track
+  subtitleStreamId: string | null; // null = subtitles off
 };
 
 type PlayerControlsProps = {
+  /** Points at the <video> passed in as children. The parent owns it. */
   videoRef: RefObject<HTMLVideoElement | null>;
+  /** Plex's runtime, used as the seek bar's total until the media reports one. */
   durationMs: number | null;
   audioTracks: AudioStream[];
   subtitleTracks: SubtitleStream[];
+  /**
+   * Applies a new stream selection. Rejecting leaves the current highlights
+   * alone, which is how a failed switch avoids lying about what's playing.
+   */
   onStreamSettingsChange: (settings: StreamSettings) => Promise<void>;
+  /** Both auto-play props are undefined for movies, so the toggle hides. */
   autoPlay?: boolean;
   onAutoPlayChange?: (value: boolean) => void;
   /** When active, the bar reads/writes the Cast receiver instead of <video>. */
   remote?: RemotePlaybackControl;
+  /** Cards drawn over the video: Up Next, resume prompt, cast status. */
   overlay?: ReactNode;
   children: ReactNode;
 };
@@ -41,8 +79,10 @@ type PlaybackTarget = {
   muted: boolean;
 };
 
+// Idle time before the bar fades out during local playback.
 const HIDE_DELAY_MS = 3000;
 
+// Speed is applied straight to video.playbackRate, so these never reach Plex.
 const SPEED_OPTIONS = [
   { value: 0.5, label: "0.5×" },
   { value: 0.75, label: "0.75×" },
@@ -65,6 +105,9 @@ type SettingsOption<T extends string | number> = {
   label: string;
 };
 
+// One labelled row of pick-one buttons in the settings panel. Every group in
+// the panel (Speed, Quality, Audio, Subtitles) is an instance of this, so the
+// visual weight of a choice says nothing about how much work it costs.
 function SettingsOptionGroup<T extends string | number>({
   label,
   options,
@@ -109,6 +152,19 @@ function SettingsOptionGroup<T extends string | number>({
   );
 }
 
+/**
+ * Wraps the player: renders the video (as children), any overlay cards, and the
+ * control bar underneath.
+ *
+ * Whichever target is live owns the readouts. Local playback comes from
+ * `<video>` events; a connected Cast receiver comes from `remote`. Everything
+ * the bar displays flows through the `target` object below so the JSX never has
+ * to ask which one it's talking to.
+ *
+ * Quality, audio and subtitle picks go out through `onStreamSettingsChange` and
+ * only update their highlight once that promise resolves, so the panel never
+ * shows a setting Plex refused.
+ */
 export function PlayerControls({
   videoRef,
   durationMs,
@@ -121,12 +177,16 @@ export function PlayerControls({
   overlay,
   children,
 }: PlayerControlsProps) {
+  // shell is the fullscreen target and the keyboard root; the other three back
+  // the outside-click logic that decides whether a pointerdown closes settings.
   const shellRef = useRef<HTMLDivElement | null>(null);
   const settingsRef = useRef<HTMLDivElement | null>(null);
   const gearRef = useRef<HTMLButtonElement | null>(null);
   const mediaRef = useRef<HTMLDivElement | null>(null);
   const scrubbingRef = useRef(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // These three mirror state into refs so the long-lived <video> listeners read
+  // current values without the effect rebinding on every change.
   const settingsOpenRef = useRef(false);
   const playbackRateRef = useRef(1);
   const remoteActiveRef = useRef(false);
@@ -173,6 +233,8 @@ export function PlayerControls({
         muted,
       };
 
+  // Plex's reported runtime in seconds. Stands in any time the media element
+  // has no finite duration of its own, which keeps the seek bar usable.
   const fallbackDuration =
     typeof durationMs === "number" &&
     Number.isFinite(durationMs) &&
@@ -189,6 +251,8 @@ export function PlayerControls({
     }
   };
 
+  // Arms the auto-hide countdown. Bails out and pins the bar whenever hiding it
+  // would be wrong: casting, paused, or the settings panel is open.
   const scheduleHide = () => {
     clearHideTimer();
     // While casting there is no local video to reveal — keep controls on screen.
@@ -211,6 +275,11 @@ export function PlayerControls({
     scheduleHide();
   };
 
+  // Mirrors the local <video> into component state: play/pause, clock, volume,
+  // rate. The dependency list is videoRef alone, so these listeners stay bound
+  // across a quality or audio restart. WatchPage holds the same element mounted
+  // through that swap, so there's nothing to rebind to. Every handler no-ops
+  // while a Cast session owns playback.
   useEffect(() => {
     const video = videoRef.current;
     if (video === null) {
@@ -237,6 +306,8 @@ export function PlayerControls({
         scheduleHide();
       }
     };
+    // While a drag is in flight, currentTime belongs to the thumb, not the
+    // element. Writing it here would yank the handle back under the cursor.
     const onTime = () => {
       if (remoteActiveRef.current) {
         return;
@@ -277,6 +348,8 @@ export function PlayerControls({
       onTime();
     };
 
+    // Seed from the element before subscribing. If it's already playing when
+    // this binds, no event is coming to tell us.
     onPlayback();
     onTime();
     onVolume();
@@ -341,6 +414,9 @@ export function PlayerControls({
     }
   }, [remoteActive, videoRef]);
 
+  // Track fullscreen from the document rather than from our own button, so
+  // Escape and the browser's own controls keep the icon honest. Only counts as
+  // fullscreen when it's our shell that went fullscreen, not some other element.
   useEffect(() => {
     const onFullscreenChange = () => {
       const shell = shellRef.current;
@@ -354,6 +430,8 @@ export function PlayerControls({
     };
   }, []);
 
+  // Dismiss the settings panel on an outside click, and hold the bar visible
+  // for as long as the panel is open. Runs on every open/close.
   useEffect(() => {
     if (!settingsOpen) {
       scheduleHide();
@@ -386,12 +464,15 @@ export function PlayerControls({
     };
   }, [settingsOpen]);
 
+  // Don't leave a hide timer running after unmount.
   useEffect(() => {
     return () => {
       clearHideTimer();
     };
   }, []);
 
+  // Null-guard for the local element, so every transport handler below is one
+  // branch (remote or local) instead of two nested checks.
   const withVideo = (fn: (video: HTMLVideoElement) => void) => {
     const video = videoRef.current;
     if (video === null) {
@@ -400,6 +481,8 @@ export function PlayerControls({
     fn(video);
   };
 
+  // The transport handlers all follow the same shape: hand off to the Cast
+  // receiver when one is connected, otherwise drive the local element.
   const togglePlay = () => {
     if (remoteActive && remote) {
       remote.playOrPause();
@@ -416,6 +499,8 @@ export function PlayerControls({
     });
   };
 
+  // Click on the picture. With settings open the first click only closes the
+  // panel, so you don't pause the film on your way out of the menu.
   const onMediaClick = () => {
     if (settingsOpenRef.current) {
       setSettingsOpen(false);
@@ -444,6 +529,8 @@ export function PlayerControls({
     });
   };
 
+  // Dragging the slider up off zero also unmutes, on either target. Otherwise
+  // you'd move the slider and still hear nothing.
   const setVolumeLevel = (level: number) => {
     if (remoteActive && remote) {
       if (level > 0 && remote.muted) {
@@ -460,6 +547,8 @@ export function PlayerControls({
     });
   };
 
+  // The one setting that stays entirely in the browser. No Plex round trip, no
+  // transcode restart. There's no remote equivalent, so it's a no-op casting.
   const setSpeed = (rate: number) => {
     if (remoteActive) {
       return;
@@ -470,12 +559,17 @@ export function PlayerControls({
     });
   };
 
+  // Nothing is selected until the user picks, so the highlighted audio row is
+  // whatever Plex flags as default, falling back to the first track listed.
   const defaultAudioId =
     audioTracks.find((track) => track.default)?.id ??
     audioTracks[0]?.id ??
     null;
   const activeAudioId = selectedAudioId ?? defaultAudioId;
 
+  // Shared path for the three settings that cost a transcode restart. The
+  // highlight only moves after the parent's promise resolves, so a stream that
+  // failed to switch keeps showing the setting that's actually playing.
   const applyStreamSettings = (
     next: StreamSettings,
     onSuccess: () => void,
@@ -489,6 +583,8 @@ export function PlayerControls({
       });
   };
 
+  // Resolution and bitrate cap. WatchPage turns the id into Plex tuning params
+  // and refetches the stream, keeping the <video> element mounted throughout.
   const selectQuality = (next: QualityId) => {
     if (next === selectedQuality) {
       return;
@@ -505,6 +601,8 @@ export function PlayerControls({
     );
   };
 
+  // Audio track, commentary included. Same restart cost as quality: Plex has to
+  // re-decide the stream, which means a new transcode session.
   const selectAudio = (next: string) => {
     if (next === activeAudioId) {
       return;
@@ -521,6 +619,10 @@ export function PlayerControls({
     );
   };
 
+  // Subtitles. The empty-string option is "Off", which the parent translates to
+  // Plex's clear-selection value. Underneath, this is the two-step one: a PUT
+  // that sets the subtitle stream on the media part, then the transcode restart
+  // that burns it into the picture. There's no sidecar track to toggle.
   const selectSubtitle = (next: string) => {
     const nextId = next === "" ? null : next;
     if (nextId === selectedSubtitleId) {
@@ -543,6 +645,8 @@ export function PlayerControls({
     label: formatAudioLabel(track),
   }));
 
+  // "Off" is prepended rather than coming from Plex, and carries the empty
+  // string that selectSubtitle reads as null.
   const subtitleOptions = [
     { value: "", label: "Off" },
     ...subtitleTracks.map((track) => ({
@@ -551,6 +655,8 @@ export function PlayerControls({
     })),
   ];
 
+  // Fullscreens the whole shell, not the <video>, so the bar and any overlay
+  // card come along instead of being clipped out by the native video view.
   const toggleFullscreen = () => {
     if (remoteActive) {
       return;
@@ -570,6 +676,8 @@ export function PlayerControls({
     });
   };
 
+  // Space toggles playback, but not when focus sits on a control that already
+  // means something by Space (buttons, the sliders, any input).
   const onShellKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== " " && event.code !== "Space") {
       return;
@@ -582,6 +690,8 @@ export function PlayerControls({
     togglePlay();
   };
 
+  // Seek bar geometry. The value gets clamped to the track so the thumb can't
+  // run past the end when the clock and the duration disagree.
   const total = target.duration > 0 ? target.duration : fallbackDuration;
   const progressMax = total > 0 ? total : 0;
   const progressValue = Math.min(
@@ -590,6 +700,8 @@ export function PlayerControls({
   );
 
   return (
+    // Shell: fullscreen target, keyboard root, and the surface whose idle class
+    // fades the bar out. tabIndex makes it focusable so Space reaches us.
     <div
       ref={shellRef}
       className={
@@ -601,6 +713,7 @@ export function PlayerControls({
       onPointerMove={revealControls}
       onKeyDown={onShellKeyDown}
     >
+      {/* The <video> the parent passed in. We never render it ourselves. */}
       <div
         ref={mediaRef}
         className="watch-player-media"
@@ -609,6 +722,7 @@ export function PlayerControls({
         {children}
       </div>
 
+      {/* Cast status, resume prompt, Up Next. Composed by WatchPage. */}
       {overlay}
 
       <div
@@ -618,12 +732,16 @@ export function PlayerControls({
             : "watch-controls watch-controls--hidden"
         }
       >
+        {/* Settings panel. Always in the tree, toggled with `hidden` rather
+            than unmounted. Each group only renders when it has something to
+            offer, so a title with no subtitle streams shows no Subtitles row. */}
         <div
           className="watch-settings"
           ref={settingsRef}
           hidden={!settingsOpen}
         >
           <h2 className="watch-settings-title">Settings</h2>
+          {/* Speed is a local-only setting, so it drops off while casting. */}
           {!remoteActive ? (
             <SettingsOptionGroup
               label="Speed"
@@ -654,6 +772,8 @@ export function PlayerControls({
               onChange={selectSubtitle}
             />
           ) : null}
+          {/* Auto Play drives the Up Next advance, so WatchPage only passes
+              these props for episodes. Movies have nothing to advance to. */}
           {autoPlay !== undefined && onAutoPlayChange !== undefined ? (
             <div className="watch-settings-group">
               <label className="watch-settings-toggle">
@@ -670,6 +790,7 @@ export function PlayerControls({
           ) : null}
         </div>
 
+        {/* The bar itself: play, clock, seek, volume, fullscreen, cast, gear. */}
         <div className="watch-controls-bar">
           <button
             type="button"
@@ -680,10 +801,16 @@ export function PlayerControls({
             {target.playing ? <IconPause /> : <IconPlay />}
           </button>
 
+          {/* Hidden from screen readers; the seek slider's aria-valuetext
+              already announces the same position. */}
           <span className="watch-time" aria-hidden="true">
             {formatTime(target.currentTime)} / {formatTime(total)}
           </span>
 
+          {/* Seek. onPointerDown latches scrubbingRef, which stops the clock
+              from writing over the thumb mid-drag, and the real seek only
+              fires on release. onChange still seeks directly for keyboard
+              users, who never set the latch. */}
           <label className="watch-seek">
             <span className="visually-hidden">Seek</span>
             <input
@@ -748,6 +875,7 @@ export function PlayerControls({
             />
           </label>
 
+          {/* Nothing to enlarge while the TV has the picture. */}
           {!remoteActive ? (
             <button
               type="button"
@@ -759,6 +887,8 @@ export function PlayerControls({
             </button>
           ) : null}
 
+          {/* Cast button. Hidden outright where the framework isn't there,
+              which is every non-Chromium browser. */}
           {cast.available ? (
             <button
               type="button"
@@ -793,6 +923,9 @@ export function PlayerControls({
   );
 }
 
+// Builds an audio row label like "English · Director's Commentary (ac3 6ch)".
+// Plex fills these fields in unevenly, so every piece is optional and the
+// language falls back to "Unknown" rather than leaving a blank button.
 function formatAudioLabel(stream: AudioStream): string {
   const language =
     typeof stream.language === "string" && stream.language.trim() !== ""
@@ -813,6 +946,8 @@ function formatAudioLabel(stream: AudioStream): string {
   return tech.length > 0 ? `${head} (${tech})` : head;
 }
 
+// Subtitle row label. Prefers the track's own title over its language, since a
+// title is usually the more specific of the two, and tags forced tracks.
 function formatSubtitleLabel(stream: SubtitleStream): string {
   const title =
     typeof stream.title === "string" && stream.title.trim() !== ""
@@ -826,6 +961,8 @@ function formatSubtitleLabel(stream: SubtitleStream): string {
   return stream.forced ? `${head} (forced)` : head;
 }
 
+// Clock readout, h:mm:ss once past an hour and m:ss below it. A NaN duration is
+// normal before metadata lands, so that reads as 0:00 instead of leaking through.
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) {
     return "0:00";
@@ -840,6 +977,8 @@ function formatTime(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+// Inline icons from here down, all filled with currentColor so they pick up
+// whatever the surrounding button is coloured. No icon library in the app.
 function IconPlay() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">

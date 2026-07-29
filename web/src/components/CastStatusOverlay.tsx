@@ -1,8 +1,20 @@
+// The banner over the player that says playback has moved to a Chromecast.
+//
+// WatchPage renders it whenever a Cast session is connected. The browser tears
+// down its own video at that point, so without this the player area would just
+// go black with no explanation. Two states: "starting" until the receiver
+// reports real media state, then "playing", which stays up for the rest of the
+// session including while paused.
+//
+// Up Next outranks it. When both could show, WatchPage suppresses this one.
 type CastStatusOverlayProps = {
+  /** "starting" while the receiver is still loading; "playing" once it has media. */
   mode: "starting" | "playing";
+  /** Chromecast's friendly name. Null falls back to "your TV". */
   deviceName: string | null;
 };
 
+// Treats a blank or whitespace-only device name as no name at all.
 function resolveDeviceLabel(deviceName: string | null): string | null {
   if (typeof deviceName !== "string") {
     return null;
@@ -11,11 +23,19 @@ function resolveDeviceLabel(deviceName: string | null): string | null {
   return trimmed !== "" ? trimmed : null;
 }
 
+/**
+ * Cast status banner. Purely a readout, no controls. Stopping the cast is the
+ * cast button's job over in PlayerControls.
+ *
+ * It's an aria-live region, so the announcement lands when the state changes
+ * rather than only for whoever happens to be looking at the screen.
+ */
 export function CastStatusOverlay({
   mode,
   deviceName,
 }: CastStatusOverlayProps) {
   const name = resolveDeviceLabel(deviceName);
+  // Four wordings: starting or playing, crossed with named device or not.
   const label =
     mode === "starting"
       ? name !== null
@@ -41,6 +61,7 @@ export function CastStatusOverlay({
   );
 }
 
+// Same glyph as the cast button in PlayerControls, copied rather than shared.
 function IconCast() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">

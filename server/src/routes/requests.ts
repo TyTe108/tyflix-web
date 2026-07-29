@@ -1,3 +1,21 @@
+// Media requests. Mounted at /api/requests behind requireAuth, with six
+// endpoints:
+//
+//   GET  /profiles              quality profiles for the request dialog (admin)
+//   POST /                      create a request
+//   GET  /                      the caller's own requests
+//   GET  /all                   everyone's requests (admin)
+//   POST /:id/approve           approve (admin)
+//   POST /:id/decline           decline (admin)
+//
+// requireAuth covers the mount; the four admin routes stack their own
+// requireAdmin on top, and POST / checks the admin bit inline because only the
+// optional profileId field needs it.
+//
+// Tyflix doesn't run the download pipeline. Seerr does, and Radarr and Sonarr
+// sit behind Seerr. Everything here is a thin pass to Seerr plus a TMDB lookup
+// for the title and poster, since Seerr's request rows only carry ids.
+
 import { Router } from "express";
 import { requireAdmin } from "../middleware/auth";
 import {
@@ -29,6 +47,13 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
   const router = Router();
   const admin = requireAdmin(sessionSecret);
 
+  /**
+   * GET /api/requests/profiles?mediaType=movie|tv
+   *
+   * Radarr or Sonarr quality profiles as Seerr reports them, so an admin can
+   * pick one when requesting. 400 if mediaType is missing or not movie/tv,
+   * 403 for non-admins, 502 if Seerr fails.
+   */
   router.get("/profiles", admin, async (req, res) => {
     const mediaType =
       typeof req.query.mediaType === "string" ? req.query.mediaType : undefined;
@@ -44,6 +69,20 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
     }
   });
 
+  /**
+   * POST /api/requests
+   *
+   * Body: `tmdbId` and `mediaType` (required), `seasons` (tv only, defaults to
+   * the whole show when omitted), and `profileId` for a quality override.
+   *
+   * 201 with the enriched request view on success. 400 for a malformed body,
+   * 401 without a session, 403 when a non-admin passes profileId, 409 when
+   * Seerr says it's already requested, 502 for anything else upstream.
+   *
+   * The request is attributed to the caller's Seerr user id, not to the API
+   * key's owner. That's what keeps quotas and auto-approve rules pointed at the
+   * right person; the client handles the header side of it.
+   */
   router.post("/", async (req, res) => {
     const session = res.locals.session as SessionPayload | undefined;
     if (!session) {
@@ -57,6 +96,8 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
       return;
     }
 
+    // Picking a quality profile is an admin-only power, so gate on the field
+    // rather than the route. Everyone else gets Seerr's default profile.
     if (
       parsed.profileId !== undefined &&
       !isAdmin(session.permissions)
@@ -66,6 +107,8 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
     }
 
     try {
+      // Seerr won't accept a profileId without the serverId it belongs to, and
+      // only the profile listing knows that pairing, so fetch it here.
       const profileOverride =
         parsed.profileId === undefined
           ? {}
@@ -87,6 +130,8 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
       const view = await enrichRequest(request, tmdb, new Map());
       res.status(201).json(view);
     } catch (err) {
+      // Seerr's 409 is a duplicate request, which is a normal thing for a user
+      // to do. Pass it through instead of flattening it into a 502.
       if (err instanceof SeerrUpstreamError && err.status === 409) {
         res.status(409).json({ error: "already requested" });
         return;
@@ -95,6 +140,13 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
     }
   });
 
+  /**
+   * GET /api/requests
+   *
+   * The caller's own requests, in whatever order Seerr returns them, each
+   * enriched with a TMDB title and poster. No params. 401 without a session,
+   * 502 if Seerr fails.
+   */
   router.get("/", async (_req, res) => {
     const session = res.locals.session as SessionPayload | undefined;
     if (!session) {
@@ -110,6 +162,12 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
     }
   });
 
+  /**
+   * GET /api/requests/all
+   *
+   * Every user's requests, for the admin queue. Same enriched shape as GET /.
+   * 403 for non-admins, 502 if Seerr fails.
+   */
   router.get("/all", admin, async (_req, res) => {
     try {
       const requests = await seerr.listAllRequests();
@@ -119,6 +177,16 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
     }
   });
 
+  /**
+   * POST /api/requests/:id/approve
+   *
+   * Approves a Seerr request, which is what actually releases it to Radarr or
+   * Sonarr. `:id` is Seerr's request id. Returns the updated, enriched request.
+   * 400 for a non-numeric id, 403 for non-admins, 502 if Seerr fails.
+   *
+   * An id Seerr doesn't recognise comes back as 502, not 404, because the
+   * client surfaces every Seerr error the same way.
+   */
   router.post("/:id/approve", admin, async (req, res) => {
     const id = parseNumericId(
       typeof req.params.id === "string" ? req.params.id : undefined,
@@ -136,6 +204,12 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
     }
   });
 
+  /**
+   * POST /api/requests/:id/decline
+   *
+   * Mirror of approve. Returns the updated, enriched request. 400 for a
+   * non-numeric id, 403 for non-admins, 502 if Seerr fails.
+   */
   router.post("/:id/decline", admin, async (req, res) => {
     const id = parseNumericId(
       typeof req.params.id === "string" ? req.params.id : undefined,
@@ -156,8 +230,11 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
   return router;
 }
 
+// The bit of TMDB metadata a request row is missing. Seerr gives us ids.
 type RequestDetail = { title: string; posterUrl: string | null };
 
+// Enriches a whole list in parallel, sharing one in-flight map so a season pack
+// or a repeated title only costs a single TMDB call.
 async function enrichRequests(
   requests: SeerrRequest[],
   tmdb: Pick<TmdbClient, "movieDetail" | "tvDetail">,
@@ -168,6 +245,9 @@ async function enrichRequests(
   );
 }
 
+// Attaches title and poster to one request. The `details` map is keyed by tmdbId
+// and holds promises, not values, so concurrent callers await the same lookup.
+// Single-request callers pass a throwaway map.
 async function enrichRequest(
   request: SeerrRequest,
   tmdb: Pick<TmdbClient, "movieDetail" | "tvDetail">,
@@ -190,6 +270,10 @@ async function enrichRequest(
   return toRequestView(request, await detail);
 }
 
+// Validates the POST / body. The return type is a discriminated union so a
+// `seasons` array can only ride along with mediaType "tv"; a movie body that
+// includes seasons just drops them. Optional fields are omitted rather than set
+// to undefined, which keeps them out of the JSON sent to Seerr.
 function parseCreateBody(
   body: unknown,
 ):
@@ -265,6 +349,7 @@ function parseCreateBody(
   };
 }
 
+// Seerr request ids: digits only, positive, inside the safe-integer range.
 function parseNumericId(raw: string | undefined): number | null {
   if (raw === undefined || !/^\d+$/.test(raw)) {
     return null;
@@ -273,6 +358,8 @@ function parseNumericId(raw: string | undefined): number | null {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
+// Everything Seerr or TMDB throws becomes a 502, except the 409 that POST /
+// intercepts before it gets here.
 function respondUpstreamError(
   res: import("express").Response,
   err: unknown,

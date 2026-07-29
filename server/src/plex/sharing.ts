@@ -8,7 +8,26 @@
 //
 // ⚠️ inviteToServer POSTs a real invitation email. Never call it against a
 // live plex.tv from tests or ad-hoc scripts — always inject a fake fetch.
+//
+// This is what makes self-serve access real. A stranger fills in the form at
+// /request-access, that lands as a pending row, and approving it calls
+// inviteToServer to turn the row into an actual Plex library invite.
+// routes/adminAccessRequests.ts is the only caller. It also reads
+// listPendingInvites and listShares on every list request to reconcile the
+// local queue against plex.tv, so someone who got access another way stops
+// showing up as pending.
+//
+// Everything here is owner-scoped and admin-gated. No user token, no session,
+// nothing a signed-in non-admin can reach.
 
+/**
+ * Thrown for any sharing failure.
+ *
+ * `status` is the upstream HTTP status where there was one, 400 for the local
+ * sectionIds guard, and 502 by default. routes/adminAccessRequests.ts answers
+ * with that status verbatim, so whatever goes in here is what the admin UI
+ * sees.
+ */
 export class PlexSharingError extends Error {
   readonly status: number;
 
@@ -19,6 +38,7 @@ export class PlexSharingError extends Error {
   }
 }
 
+// All from config. Sharing is an owner action, so there's no user token here.
 export type PlexSharingClientOptions = {
   // LAN URL of our PMS, e.g. http://10.0.0.10:32400 (config.plexBaseUrl).
   baseUrl: string;
@@ -62,23 +82,44 @@ export type PendingInvite = {
   createdAt: number;
 };
 
+/**
+ * An existing share on our server, from plex.tv's shared_servers list.
+ *
+ * A row here means the invite was sent. `acceptedAt` is what separates "they
+ * clicked the link" from "still waiting", and the reconciler in
+ * routes/adminAccessRequests.ts keys on exactly that.
+ */
 export type SharedServerShare = {
-  userId: number;
+  userId: number; // plexId, the same number sharedServerAccess.ts maps on
   username: string;
   email: string;
-  invitedAt: number | null;
-  acceptedAt: number | null;
-  allLibraries: boolean;
+  invitedAt: number | null; // epoch seconds, null when absent or "0"
+  acceptedAt: number | null; // epoch seconds; null means not accepted yet
+  allLibraries: boolean; // mirrors allLibraries="1" on the tag
 };
 
+/**
+ * Outcome of an invite attempt.
+ *
+ * alreadyShared isn't a failure. It comes back when plex.tv says this email is
+ * already on the server, which is a fine end state for an approval, so the
+ * admin route records the row as invited and notes it.
+ */
 export type InviteResult =
   | { ok: true }
   | { ok: false; reason: "alreadyShared" };
 
+/**
+ * Builds the sharing client. Created lazily in index.ts, and only when
+ * ACCESS_REQUESTS_FILE is set, so the whole feature is off by default.
+ */
 export function createPlexSharingClient(options: PlexSharingClientOptions) {
   const { baseUrl, ownerToken, clientId } = options;
+  // Cached for the life of the process, no TTL. The two resolvers next door
+  // expire theirs after ten minutes; this one is only read on admin actions.
   let cachedMachineId: string | null = null;
 
+  // Our server's plex.tv machine id, which every URL below is keyed on.
   async function resolveMachineId(): Promise<string> {
     if (cachedMachineId !== null) {
       return cachedMachineId;
@@ -108,6 +149,9 @@ export function createPlexSharingClient(options: PlexSharingClientOptions) {
     return machineIdentifier;
   }
 
+  // Libraries this server can share, as plex.tv numbers them. The admin UI
+  // renders these as checkboxes, and the approve route uses them as the
+  // allowlist for whatever the admin ticked.
   async function listShareableSections(): Promise<ShareableSection[]> {
     const machineId = await resolveMachineId();
     const url = `https://plex.tv/api/servers/${machineId}`;
@@ -115,10 +159,14 @@ export function createPlexSharingClient(options: PlexSharingClientOptions) {
     return parseShareableSections(xml);
   }
 
+  // Sends a real library invite. This is the one call in the file with a side
+  // effect a stranger can see, so treat it accordingly.
   async function inviteToServer(input: {
     email: string;
     sectionIds: number[];
   }): Promise<InviteResult> {
+    // Validate before anything hits the network. The tests assert that an empty
+    // or non-integer list never even resolves the machine id.
     validateSectionIds(input.sectionIds);
 
     const machineId = await resolveMachineId();
@@ -129,6 +177,9 @@ export function createPlexSharingClient(options: PlexSharingClientOptions) {
         library_section_ids: input.sectionIds,
         invited_email: input.email,
       },
+      // Least-privilege share: sync (downloads), camera upload, and channels
+      // all off, content filters sent empty. Same payload for every invite;
+      // the only thing the admin picks is which libraries.
       sharing_settings: {
         allowSync: "0",
         allowCameraUpload: "0",
@@ -157,6 +208,8 @@ export function createPlexSharingClient(options: PlexSharingClientOptions) {
       return { ok: true };
     }
 
+    // 422 is ambiguous on its own, so read the body before deciding. Only the
+    // 1999 code means "already shared"; any other 422 is a genuine failure.
     if (res.status === 422) {
       let text = "";
       try {
@@ -176,12 +229,16 @@ export function createPlexSharingClient(options: PlexSharingClientOptions) {
     );
   }
 
+  // Invites that have gone out and haven't been accepted yet. This URL carries
+  // no machine id, unlike everything else in the file.
   async function listPendingInvites(): Promise<PendingInvite[]> {
     const url = "https://plex.tv/api/invites/requested";
     const xml = await getText(url, plexTvHeaders());
     return parsePendingInvites(xml);
   }
 
+  // Everyone our server is shared with, accepted or not. Paired with
+  // listPendingInvites to work out which local rows plex.tv has moved on from.
   async function listShares(): Promise<SharedServerShare[]> {
     const machineId = await resolveMachineId();
     const url = `https://plex.tv/api/servers/${machineId}/shared_servers`;
@@ -189,6 +246,7 @@ export function createPlexSharingClient(options: PlexSharingClientOptions) {
     return parseShares(xml);
   }
 
+  // Owner auth for every plex.tv call in this file.
   function plexTvHeaders(): Record<string, string> {
     return {
       "X-Plex-Token": ownerToken,
@@ -196,6 +254,8 @@ export function createPlexSharingClient(options: PlexSharingClientOptions) {
     };
   }
 
+  // JSON reader, used only by /identity. Carries the upstream status onto the
+  // error so the admin route can answer with it.
   async function getJson(
     url: string,
     headers: Record<string, string>,
@@ -217,6 +277,8 @@ export function createPlexSharingClient(options: PlexSharingClientOptions) {
     return res.json();
   }
 
+  // Raw-body reader for the three plex.tv endpoints this file parses as XML.
+  // Same error handling as getJson, different body read.
   async function getText(
     url: string,
     headers: Record<string, string>,
@@ -247,14 +309,24 @@ export function createPlexSharingClient(options: PlexSharingClientOptions) {
   };
 }
 
+// routes/adminAccessRequests.ts takes a Pick<> of this, so its tests only have
+// to stub the four methods it actually calls.
 export type PlexSharingClient = ReturnType<typeof createPlexSharingClient>;
 
+// Wraps a thrown fetch (DNS, refused, TLS) as a 502-status PlexSharingError.
 function networkError(err: unknown): PlexSharingError {
   const message =
     err instanceof Error ? err.message : "Plex sharing request failed";
   return new PlexSharingError(message);
 }
 
+/**
+ * Guards the invite payload before it can leave the process.
+ *
+ * @throws PlexSharingError with status 400. An empty array is rejected because
+ * plex.tv reads empty `library_section_ids` as "share everything", so a
+ * dropped selection would quietly hand over the whole server.
+ */
 function validateSectionIds(sectionIds: number[]): void {
   if (!Array.isArray(sectionIds) || sectionIds.length === 0) {
     throw new PlexSharingError(
@@ -278,6 +350,8 @@ function parseShareableSections(xml: string): ShareableSection[] {
   const tags = xml.match(/<Section\b[^>]*>/g) ?? [];
 
   for (const tag of tags) {
+    // Both numbers are parsed, and both are kept. See ShareableSection: id is
+    // the sharing id that goes to plex.tv, key is the local section number.
     const id = attr(tag, "id");
     const key = attr(tag, "key");
     const title = attr(tag, "title");
@@ -304,6 +378,8 @@ function parseShareableSections(xml: string): ShareableSection[] {
   return sections;
 }
 
+// Match each <Invite ...> opening tag. Rows that can't be trusted are skipped,
+// not defaulted, so a malformed one never becomes a fake pending invite.
 function parsePendingInvites(xml: string): PendingInvite[] {
   const invites: PendingInvite[] = [];
   const tags = xml.match(/<Invite\b[^>]*>/g) ?? [];
@@ -340,6 +416,9 @@ function parsePendingInvites(xml: string): PendingInvite[] {
   return invites;
 }
 
+// Match each <SharedServer ...> opening tag. Same regex sharedServerAccess.ts
+// runs over the same endpoint, reading different attributes off it: that file
+// wants accessToken, this one wants who and when.
 function parseShares(xml: string): SharedServerShare[] {
   const shares: SharedServerShare[] = [];
   const tags = xml.match(/<SharedServer\b[^>]*>/g) ?? [];
@@ -375,6 +454,8 @@ function parseShares(xml: string): SharedServerShare[] {
   return shares;
 }
 
+// Epoch-seconds attribute to a number, with every "no value" spelling folded
+// into null: absent, empty, non-numeric, or a literal "0".
 function parseEpochOrNull(raw: string | undefined): number | null {
   if (raw === undefined || raw === "" || !/^\d+$/.test(raw)) {
     return null;

@@ -1,8 +1,22 @@
+// The persistent chrome around every signed-in page: sidebar on the left, the
+// routed page on the right.
+//
+// App.tsx mounts this as a layout route nested inside ProtectedRoute, so it
+// wraps everything from /library through /admin and never renders for /login or
+// /request-access. Pages come through <Outlet />. Nothing here knows or cares
+// which page is showing.
+//
+// The one piece of live data it owns is the pending access-request count, shown
+// as a badge on the Admin link. That endpoint is admin-only and can be switched
+// off, so a failure just leaves the badge absent.
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { fetchAccessRequestPendingCount } from "../api/accessRequests";
 import { useAuth } from "../auth/AuthContext";
 
+// One sidebar entry. `adminOnly` hides the row from non-admins. `end` is
+// react-router's exact-match flag for the active class, though no entry in
+// NAV_ITEMS sets it today, so it's always undefined.
 type NavItem = {
   to: string;
   label: string;
@@ -11,6 +25,7 @@ type NavItem = {
   adminOnly?: boolean;
 };
 
+// Shared stroke geometry so the nav glyphs below stay visually consistent.
 const iconProps = {
   width: 20,
   height: 20,
@@ -83,6 +98,8 @@ const LibraryIcon = (
   </svg>
 );
 
+// Sidebar order, top to bottom. Library leads because "/" redirects there, so
+// it's the first thing anyone sees after signing in.
 const NAV_ITEMS: NavItem[] = [
   { to: "/library", label: "Library", icon: LibraryIcon },
   { to: "/home", label: "Home", icon: HomeIcon },
@@ -95,12 +112,22 @@ const NAV_ITEMS: NavItem[] = [
 
 const PENDING_COUNT_POLL_MS = 60_000;
 
+/**
+ * Layout route for the whole authenticated app: sidebar, nav, signed-in user
+ * footer, and an <Outlet /> for the current page.
+ *
+ * Hiding the Admin link from non-admins is cosmetic. The real gate is
+ * AdminRoute on the client and the admin permission bit on the server.
+ */
 export function AppShell() {
   const { user, isAdmin, logout } = useAuth();
   const [pendingAccessCount, setPendingAccessCount] = useState<number | null>(
     null,
   );
 
+  // Poll the pending access-request count for the Admin badge, once a minute
+  // for as long as an admin is signed in. Re-runs when the admin flag changes,
+  // which covers a logout landing on a non-admin session.
   useEffect(() => {
     if (!isAdmin) {
       setPendingAccessCount(null);
@@ -134,6 +161,8 @@ export function AppShell() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
+        {/* Both brand marks are always in the DOM. A media query at 820px
+            narrows the sidebar to a 64px rail and swaps the word for the T. */}
         <div className="sidebar-brand">
           <span className="sidebar-brand-full">Tyflix</span>
           <span className="sidebar-brand-short" aria-hidden="true">
@@ -141,6 +170,8 @@ export function AppShell() {
           </span>
         </div>
 
+        {/* Primary nav. Admin-only rows are filtered out, and the Admin row
+            carries the pending-request badge when there's anything waiting. */}
         <nav className="sidebar-nav" aria-label="Primary">
           {NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin).map((item) => {
             const showBadge =
@@ -175,6 +206,7 @@ export function AppShell() {
           })}
         </nav>
 
+        {/* Footer: who's signed in, plus the way out. */}
         <div className="sidebar-footer">
           {user ? (
             <div className="sidebar-user">

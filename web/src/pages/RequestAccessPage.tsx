@@ -1,16 +1,46 @@
+// A four-step wizard for people who want into the server but don't have
+// access yet. Rendered at /request-access by App.tsx, outside ProtectedRoute
+// and outside AppShell. /login is the app's other unauthenticated route, but it
+// needs a Plex account already on the server to get anywhere, so this is the
+// only page a stranger without an account can actually use.
+//
+// Two endpoints, both public: GET /api/config through useAccessRequestsEnabled
+// to check the feature is on at all, and POST /api/access-requests through
+// api/accessRequests.ts to submit. Nothing else. Approving a request happens
+// on the admin page and is what actually calls Plex's sharing API.
+//
+// Being the only public write endpoint makes it the only thing anyone can
+// abuse, so a couple of things here are deliberate. There's no CAPTCHA. The
+// hidden `website` field is a honeypot that real browsers leave empty, and the
+// server answers 202 to a honeypot trip, a duplicate email, and a genuine new
+// request identically, so nothing about the response reveals who has already
+// applied or which check caught you. A per-IP hourly cap handles the rest and
+// surfaces here as the rateLimited branch.
+
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { submitAccessRequest } from "../api/accessRequests";
 import { useAccessRequestsEnabled } from "../hooks/useAccessRequestsEnabled";
 
+// Field caps, mirrored from the server's validator. These stop an obviously
+// bad submit before it costs a round trip; the server enforces them for real.
 const EMAIL_MAX = 254;
 const NAME_MAX = 80;
 const PLEX_USERNAME_MAX = 64;
 const NOTE_MAX = 280;
+// Shape check, not a validity check. Anything stricter rejects real addresses,
+// and the only address that matters is the one Plex's invite reaches.
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type Step = 1 | 2 | 3 | 4;
 
+/**
+ * Self-serve access request form.
+ *
+ * Renders three different pages depending on state: a message when access
+ * requests are switched off, the wizard, or the post-submit instructions.
+ * Submitting is one-way. There's no going back to edit and resend.
+ */
 export function RequestAccessPage() {
   const accessRequestsEnabled = useAccessRequestsEnabled();
   const [step, setStep] = useState<Step>(1);
@@ -19,12 +49,17 @@ export function RequestAccessPage() {
   const [plexUsername, setPlexUsername] = useState("");
   const [name, setName] = useState("");
   const [note, setNote] = useState("");
+  // The honeypot. Visually hidden and out of the tab order, so a person never
+  // touches it and a form-filling bot usually does. Submitted verbatim.
   const [website, setWebsite] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rateLimited, setRateLimited] = useState(false);
 
+  // Wipes the last submit's error before anything changes. Every edit and
+  // every step change calls this, so a stale "try again later" can't hang
+  // around next to a form the user has since fixed.
   function clearSubmitFeedback() {
     setError(null);
     setRateLimited(false);
@@ -40,6 +75,10 @@ export function RequestAccessPage() {
     setStep((s) => (s > 1 ? ((s - 1) as Step) : s));
   }
 
+  // Gates the Next and Submit buttons. Step 1 needs a yes or no, step 2 needs
+  // a plausible email, step 3 needs both a name and a note, and step 4 is the
+  // review so it's always valid on its own. Trimmed everywhere, because
+  // whitespace-only input passes a `required` attribute.
   function stepValid(s: Step): boolean {
     if (s === 1) {
       return hasPlexAccount !== null;
@@ -71,6 +110,14 @@ export function RequestAccessPage() {
     return true;
   }
 
+  /**
+   * Sends the request. The only network write this page makes.
+   *
+   * submitAccessRequest doesn't throw on 400 or 429, it returns a
+   * discriminated result, so each failure gets its own inline treatment
+   * instead of a generic catch. On success the whole wizard is replaced by
+   * the instructions screen and there's no route back into the form.
+   */
   async function handleSubmit() {
     if (hasPlexAccount === null || submitting) {
       return;
@@ -78,6 +125,8 @@ export function RequestAccessPage() {
     clearSubmitFeedback();
     setSubmitting(true);
 
+    // Only send plexUsername when there's something to send. It's optional,
+    // and step 1's No branch clears it anyway.
     const plexUser = plexUsername.trim();
     const result = await submitAccessRequest({
       email: email.trim(),
@@ -110,6 +159,8 @@ export function RequestAccessPage() {
     setError(result.message);
   }
 
+  // Feature gate. The hook returns null while the config probe is in flight,
+  // so hold the page rather than flashing a form that might be switched off.
   if (accessRequestsEnabled === null) {
     return (
       <main className="page login request-access">
@@ -118,6 +169,8 @@ export function RequestAccessPage() {
     );
   }
 
+  // Requests turned off server-side. The route still resolves, since someone
+  // may have the URL bookmarked, it just has nothing to submit to.
   if (accessRequestsEnabled === false) {
     return (
       <main className="page login request-access">
@@ -137,6 +190,9 @@ export function RequestAccessPage() {
     );
   }
 
+  // Post-submit. Worth being explicit about what happens next, because the
+  // invitation arrives from Plex rather than from Tyflix and an unexpected
+  // Plex email looks like phishing if nobody warned you.
   if (submitted) {
     return (
       <main className="page login request-access">
@@ -174,6 +230,9 @@ export function RequestAccessPage() {
         Step {step} of 4
       </p>
 
+      {/* One form across all four steps, so Enter advances instead of
+          submitting early. Only step 4 actually posts; the rest re-run their
+          own validity check and move on. */}
       <form
         className="request-access-form"
         onSubmit={(e) => {
@@ -187,6 +246,9 @@ export function RequestAccessPage() {
           void handleSubmit();
         }}
       >
+        {/* The honeypot, standing in for a CAPTCHA. Hidden from sight and
+            skipped by tabIndex -1, so anything in it came from a bot. Real
+            people never see this and never get asked to prove anything. */}
         <label className="visually-hidden">
           Website
           <input
@@ -199,6 +261,10 @@ export function RequestAccessPage() {
           />
         </label>
 
+        {/* Step 1. The answer is self-reported and only changes the wording on
+            the next two steps, since Plex has no public "does this account
+            exist" lookup. Answering No also clears any Plex username already
+            typed, so it can't be submitted alongside hasPlexAccount false. */}
         {step === 1 ? (
           <fieldset className="request-access-step">
             <legend>Do you already have a Plex account?</legend>
@@ -241,6 +307,10 @@ export function RequestAccessPage() {
           </fieldset>
         ) : null}
 
+        {/* Step 2. Email is the whole point of the form: it's what Plex's
+            sharing API gets called with on approval. The Plex username field
+            only appears for people who said Yes, and it's optional either
+            way. */}
         {step === 2 ? (
           <fieldset className="request-access-step">
             <legend>Email</legend>
@@ -292,6 +362,10 @@ export function RequestAccessPage() {
           </fieldset>
         ) : null}
 
+        {/* Step 3. Both fields are required because approval is a manual call
+            and there's nothing else to make it on. The note is the "how do I
+            know you" line, which is why the placeholder is a relationship
+            rather than a sales pitch. */}
         {step === 3 ? (
           <fieldset className="request-access-step">
             <legend>About you</legend>
@@ -332,6 +406,9 @@ export function RequestAccessPage() {
           </fieldset>
         ) : null}
 
+        {/* Step 4. Read-only echo of exactly what handleSubmit will send,
+            trimmed the same way, so nothing changes between what's shown here
+            and what goes on the wire. */}
         {step === 4 ? (
           <fieldset className="request-access-step">
             <legend>Review</legend>
@@ -362,6 +439,8 @@ export function RequestAccessPage() {
           </fieldset>
         ) : null}
 
+        {/* 429 from the per-IP hourly cap. Split out from the generic error so
+            the wording says "wait" rather than "something broke". */}
         {rateLimited ? (
           <p className="error" role="alert">
             You&rsquo;ve tried too many times. Please try again later.
@@ -374,6 +453,9 @@ export function RequestAccessPage() {
           </p>
         ) : null}
 
+        {/* Nav row. Back turns into Cancel on step 1, and Next turns into
+            Submit on step 4. Both right-hand buttons are type="submit" so the
+            form's own handler decides which one they mean. */}
         <div className="request-access-actions">
           {step > 1 ? (
             <button

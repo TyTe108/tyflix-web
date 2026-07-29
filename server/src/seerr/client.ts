@@ -1,3 +1,20 @@
+// Typed HTTP client for Seerr, the request manager in the Overseerr and
+// Jellyseerr family that feeds Radarr and Sonarr. Tyflix doesn't reimplement
+// any of the request pipeline, so this one file is the whole integration:
+// accounts, requests, quotas, quality profiles, the media table, watchlists,
+// and issues.
+//
+// createSeerrClient() runs once in server/src/index.ts and the result is
+// injected into the /api/auth, /api/me, /api/requests, /api/issues and
+// /api/watchlist routers. Every call authenticates with the admin API key, so
+// authorization is Tyflix's job and not Seerr's: routes check the session
+// first, then call in here.
+//
+// Seerr encodes request and media state as small integers. The two lookup
+// tables near the bottom of this file are the only place those numbers get
+// names, and a code nobody recognizes is treated as an upstream failure rather
+// than passed through as a mystery number.
+
 import {
   issueTypeToCode,
   mapSeerrIssue,
@@ -6,23 +23,29 @@ import {
   type IssueView,
 } from "./issues";
 
+// A Seerr account. Tyflix keys its own session off `id` (the Seerr user id) and
+// matches Plex logins by `plexId`.
 export type SeerrUser = {
   id: number;
   plexId: number;
   plexUsername: string;
   displayName: string;
   email: string | null;
-  permissions: number;
+  permissions: number; // Seerr's permission bitfield; bit 2 is admin (SEERR_ADMIN_BIT)
 };
 
+// The media record attached to a request. This is the join between the two id
+// systems in the app: `tmdbId` is how discovery is keyed, `ratingKey` is how
+// Plex is keyed, and Seerr is what holds them together.
 export type SeerrMedia = {
   tmdbId: number;
-  tvdbId: number | null;
-  status: number;
-  ratingKey: string | number | null;
+  tvdbId: number | null; // mapped for completeness; nothing downstream reads it yet
+  status: number; // MEDIA_STATUS code, not a label
+  ratingKey: string | number | null; // Plex ratingKey; null means Seerr has no Plex match
   mediaType: string | null;
 };
 
+// Seerr's numeric media status after mediaStatusFromCode() has named it.
 export type MediaAvailability =
   | "unknown"
   | "pending"
@@ -32,23 +55,28 @@ export type MediaAvailability =
   | "blocklisted"
   | "deleted";
 
+// A row from /api/v1/media, which is Seerr's table of everything it tracks.
+// mediaStatusProvider turns a page of these into the tmdbId to ratingKey map
+// that availability badges and playback both depend on.
 export type SeerrMediaListItem = {
-  id: number;
+  id: number; // Seerr's own media id, needed when filing an issue
   tmdbId: number;
   mediaType: "movie" | "tv";
-  status: number;
-  ratingKey: string | null;
+  status: number; // MEDIA_STATUS code
+  ratingKey: string | null; // normalized to a string even when Seerr sends a number
 };
 
+// One title on a user's Plex Watchlist, as Seerr mirrors it.
 export type SeerrWatchlistItem = {
   tmdbId: number;
   mediaType: "movie" | "tv";
   title: string;
 };
 
+// One half of a user's request quota. Movies and TV are counted separately.
 export type QuotaAxis = {
-  days: number;
-  limit: number;
+  days: number; // rolling window the limit applies over
+  limit: number; // 0 is unlimited; web/src/api/me.ts formatQuota() renders it that way
   used: number;
   restricted: boolean;
 };
@@ -62,6 +90,8 @@ export type SeerrRequestSeason = {
   seasonNumber: number;
 };
 
+// A request as Seerr stores it. `status` and `media.status` are separate: a
+// request can be approved while its media is still downloading.
 export type SeerrRequest = {
   id: number;
   status: number;
@@ -77,11 +107,13 @@ export type SeerrRequest = {
   };
 };
 
+// What the browser actually receives for a request: Seerr's row with the codes
+// named and TMDB's title and poster folded in. Built by toRequestView().
 export type RequestView = {
   id: number;
   tmdbId: number;
   mediaType: "movie" | "tv";
-  title: string;
+  title: string; // from TMDB, since Seerr's request row carries no title
   posterUrl: string | null;
   seasons: number[];
   requestStatus:
@@ -100,12 +132,14 @@ export type RequestView = {
 export type CreateSeerrRequestInput = {
   mediaType: "movie" | "tv";
   tmdbId: number;
-  seasons?: number[];
-  userId: number;
-  profileId?: number;
-  serverId?: number;
+  seasons?: number[]; // TV only; omitted means Seerr decides the scope
+  userId: number; // Seerr user id of the real requester, sent as X-API-User
+  profileId?: number; // quality profile override, admin-only at the route layer
+  serverId?: number; // required by Seerr whenever profileId is set
 };
 
+// The Radarr or Sonarr server Seerr will hand a request to, plus the quality
+// profiles that server offers. Backs the admin profile picker.
 export type ServiceProfiles = {
   serverId: number;
   defaultProfileId: number;
@@ -115,12 +149,20 @@ export type ServiceProfiles = {
 export type CreateSeerrIssueInput = {
   issueType: IssueType;
   message: string;
-  mediaId: number;
+  mediaId: number; // Seerr's media id, not a TMDB id
   userId: number;
   problemSeason?: number;
   problemEpisode?: number;
 };
 
+/**
+ * Any failure talking to Seerr, whether Seerr answered badly or never answered.
+ *
+ * `status` is Seerr's own status code when there was a response, and 502 when
+ * the fetch threw or the body didn't parse into the shape we expect. Routes
+ * read it to decide what to send the browser: /api/requests turns a 409 into
+ * "already requested", the auth router turns 401/403/422 into a 403.
+ */
 export class SeerrUpstreamError extends Error {
   readonly status: number;
 
@@ -132,13 +174,23 @@ export class SeerrUpstreamError extends Error {
 }
 
 export type SeerrClientOptions = {
-  baseUrl: string;
-  apiKey: string;
+  baseUrl: string; // no trailing slash; config strips it
+  apiKey: string; // Seerr admin API key, sent as X-Api-Key on every call
 };
 
+/**
+ * Builds the Seerr client. One instance is created at startup and shared by
+ * every router that needs Seerr.
+ *
+ * There's no retry and no cache in here on purpose. Caching lives one layer up
+ * in mediaStatusProvider and the enrichment helper, which know how stale their
+ * particular data is allowed to be.
+ */
 export function createSeerrClient(options: SeerrClientOptions) {
   const { baseUrl, apiKey } = options;
 
+  // Single fetch chokepoint. Every Seerr call funnels through here so the API
+  // key, JSON headers and error translation are written once.
   async function requestJson(
     method: "GET" | "POST",
     path: string,
@@ -164,11 +216,15 @@ export function createSeerrClient(options: SeerrClientOptions) {
         body: body === undefined ? undefined : JSON.stringify(body),
       });
     } catch (err) {
+      // Seerr never answered (DNS, connection refused, container down). There's
+      // no upstream status to forward, so call it a gateway failure.
       const message =
         err instanceof Error ? err.message : "Seerr request failed";
       throw new SeerrUpstreamError(message, 502);
     }
 
+    // Seerr answered but refused. Keep its status so callers can distinguish a
+    // 409 duplicate from a 403 permission problem from a 503 outage.
     if (!res.ok) {
       throw new SeerrUpstreamError(
         `Seerr ${path} failed (${res.status})`,
@@ -194,6 +250,17 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return requestJson("POST", path, {}, body, extraHeaders);
   }
 
+  /**
+   * Signs a Plex token in to Seerr, which is how a household member gets a
+   * Seerr account without me creating one by hand.
+   *
+   * Returns null on the normal path, because Seerr's success body isn't a
+   * complete user (see the note below). Callers treat null as "carry on" and
+   * look the account up with getUserByPlexId.
+   *
+   * @throws SeerrUpstreamError on any non-2xx. 401, 403 and 422 mean Seerr
+   * refused the account, which the auth router turns into a 403.
+   */
   async function signInWithPlex(authToken: string): Promise<SeerrUser | null> {
     // Seerr's own Plex sign-in (POST /api/v1/auth/plex). This onboards a
     // brand-new Plex-server member and, for existing users, refreshes their
@@ -216,9 +283,22 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return mapSeerrUser(body);
   }
 
+  /**
+   * Finds the Seerr account belonging to a Plex user id.
+   *
+   * This is the bridge from "who just logged in with Plex" to "which Seerr user
+   * am I acting as", and the answer goes straight into the session. There's no
+   * filter-by-plexId call in use here, so it walks the paged user list and
+   * matches locally, returning as soon as it hits.
+   *
+   * @returns null when no Seerr account carries that plexId.
+   * @throws SeerrUpstreamError on a bad status or a body that isn't a page.
+   */
   async function getUserByPlexId(plexId: number): Promise<SeerrUser | null> {
     const take = 100;
     let skip = 0;
+    // Start at infinity so the loop always makes its first call, then let
+    // pageInfo.results tell us where the real end is.
     let total = Number.POSITIVE_INFINITY;
 
     while (skip < total) {
@@ -258,6 +338,8 @@ export function createSeerrClient(options: SeerrClientOptions) {
         }
       }
 
+      // Guard against a page count that never lines up with what's actually
+      // returned. Without this an over-reported total spins forever.
       if (results.length === 0) {
         break;
       }
@@ -267,6 +349,9 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return null;
   }
 
+  // Shared pager for the two request endpoints (everyone's, and one user's).
+  // Both return the same {pageInfo, results} envelope, so the walking and the
+  // shape checks only need writing once.
   async function listRequests(
     path: string,
     query: Record<string, string> = {},
@@ -326,14 +411,31 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return requests;
   }
 
+  /**
+   * Every request on the server, oldest first. Admin surfaces only.
+   *
+   * @throws SeerrUpstreamError on a bad status or an unexpected page shape.
+   */
   function listAllRequests(): Promise<SeerrRequest[]> {
     return listRequests("/api/v1/request", { sort: "added" });
   }
 
+  /**
+   * One user's requests. Feeds both the user's own requests page and the
+   * watched-versus-requested analytics on Home.
+   *
+   * @throws SeerrUpstreamError on a bad status or an unexpected page shape.
+   */
   function listUserRequests(userId: number): Promise<SeerrRequest[]> {
     return listRequests(`/api/v1/user/${userId}/requests`);
   }
 
+  /**
+   * A user's remaining movie and TV request allowance.
+   *
+   * @throws SeerrUpstreamError when either axis is missing or malformed. Both
+   * have to be usable, since a half-known quota would be shown as a real one.
+   */
   async function getUserQuota(userId: number): Promise<UserQuota> {
     const body = await getJson(`/api/v1/user/${userId}/quota`);
     if (typeof body !== "object" || body === null) {
@@ -355,6 +457,17 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return { movie, tv };
   }
 
+  /**
+   * Quality profiles available for a media type, plus the server they belong
+   * to. Radarr handles movies, Sonarr handles TV.
+   *
+   * Two round trips: the server list doesn't carry profiles, so pick a server
+   * and then ask for its detail. Seerr requires a serverId alongside any
+   * profileId override, which is why the chosen id is returned too.
+   *
+   * @throws SeerrUpstreamError when the server list is empty or either
+   * response is shaped differently than expected.
+   */
   async function getServiceProfiles(
     mediaType: "movie" | "tv",
   ): Promise<ServiceProfiles> {
@@ -375,6 +488,9 @@ export function createSeerrClient(options: SeerrClientOptions) {
       );
     }
     const validServers = servers as Array<{ id: number; isDefault: boolean }>;
+    // Prefer whichever server Seerr marks default. Nothing marked? Take the
+    // first one rather than failing, which is what a single-server setup with
+    // isDefault unset looks like.
     const selected =
       validServers.find((server) => server.isDefault) ?? validServers[0];
 
@@ -401,6 +517,8 @@ export function createSeerrClient(options: SeerrClientOptions) {
       );
     }
 
+    // Seerr calls the currently selected profile activeProfileId; the UI shows
+    // it as the default choice.
     const defaultProfileId = (server as { activeProfileId?: unknown })
       .activeProfileId;
     const profiles = profilesBody.map(mapServiceProfile);
@@ -422,6 +540,16 @@ export function createSeerrClient(options: SeerrClientOptions) {
     };
   }
 
+  /**
+   * Everything Seerr tracks, one row per title. This is the raw material for
+   * the TMDB-id to Plex-ratingKey join that mediaStatusProvider caches.
+   *
+   * Rows that don't map cleanly are dropped rather than fatal, since one weird
+   * record shouldn't blank out availability for the whole library. The paging
+   * cost is why the caller caches instead of calling this per request.
+   *
+   * @throws SeerrUpstreamError on a bad status or an unexpected page shape.
+   */
   async function listMedia(): Promise<SeerrMediaListItem[]> {
     const take = 100;
     let skip = 0;
@@ -473,6 +601,15 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return media;
   }
 
+  /**
+   * A user's Plex Watchlist as Seerr mirrors it.
+   *
+   * Note the pagination here is page-based with a totalPages field, not the
+   * take/skip envelope the rest of the API uses, so this one gets its own loop.
+   *
+   * @param page first page to fetch; everything from there on is walked.
+   * @throws SeerrUpstreamError on a bad status or an unexpected page shape.
+   */
   async function listUserWatchlist(
     userId: number,
     page = 1,
@@ -511,6 +648,15 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return watchlist;
   }
 
+  /**
+   * Every issue on the server, open and resolved alike.
+   *
+   * There's no per-user variant: the issues router pulls the whole list and
+   * filters on createdBy, so a normal user sees only their own reports and an
+   * admin sees all of them.
+   *
+   * @throws SeerrUpstreamError on a bad status or an unexpected page shape.
+   */
   async function listIssues(): Promise<IssueView[]> {
     const take = 100;
     let skip = 0;
@@ -518,6 +664,9 @@ export function createSeerrClient(options: SeerrClientOptions) {
     const issues: IssueView[] = [];
 
     while (skip < total) {
+      // filter=all is explicit because the UI has to show a report through to
+      // its resolution, so resolved issues must come back too. The test pins
+      // both that param and the resolved row it returns.
       const body = await getJson("/api/v1/issue", {
         take: String(take),
         skip: String(skip),
@@ -564,11 +713,26 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return issues;
   }
 
+  /**
+   * One issue with its comment thread.
+   *
+   * @throws SeerrUpstreamError on a bad status, including the 404 for an id
+   * that doesn't exist, or when the body doesn't map to an issue.
+   */
   async function getIssue(id: number): Promise<IssueView> {
     const body = await getJson(`/api/v1/issue/${id}`);
     return requireSeerrIssue(body, "getIssue");
   }
 
+  /**
+   * Files a "report a problem" against a title.
+   *
+   * `mediaId` is Seerr's own media id rather than a TMDB id, which is why the
+   * issues router resolves it through mediaStatusProvider first and 404s when
+   * Seerr isn't tracking the title at all.
+   *
+   * @throws SeerrUpstreamError on a bad status or an unmappable body.
+   */
   async function createIssue(
     input: CreateSeerrIssueInput,
   ): Promise<IssueView> {
@@ -587,6 +751,16 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return requireSeerrIssue(body, "createIssue");
   }
 
+  /**
+   * Adds a comment to an issue thread and returns the updated issue.
+   *
+   * Unlike createIssue there's no requester field here, so the comment carries
+   * whatever identity the API key resolves to. routes/issues.ts already has a
+   * TODO on that attribution gap; the caller still does its own ownership check
+   * before letting anyone comment.
+   *
+   * @throws SeerrUpstreamError on a bad status or an unmappable body.
+   */
   async function addIssueComment(
     issueId: number,
     message: string,
@@ -597,6 +771,12 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return requireSeerrIssue(body, "addIssueComment");
   }
 
+  /**
+   * Opens or resolves an issue. The status is the last path segment, so
+   * "resolved" posts to /api/v1/issue/{id}/resolved.
+   *
+   * @throws SeerrUpstreamError on a bad status or an unmappable body.
+   */
   async function setIssueStatus(
     issueId: number,
     status: IssueStatus,
@@ -605,6 +785,24 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return requireSeerrIssue(body, "setIssueStatus");
   }
 
+  /**
+   * Creates a request, which is what actually sends a title down the Radarr or
+   * Sonarr pipeline.
+   *
+   * Read the note below before touching this. The X-API-User header is what
+   * makes the request belong to the person who clicked the button; drop it and
+   * every household request comes back approved as the admin. That bug shipped
+   * once (fixed in 51d06b3) and the tests now assert the header.
+   *
+   * Two naming traps in the request body: Seerr calls the TMDB id `mediaId`,
+   * and `seasons` only applies to TV.
+   *
+   * @throws Error when userId isn't a positive integer, before any network
+   * call, because a missing requester is a programming mistake and not an
+   * upstream problem.
+   * @throws SeerrUpstreamError on a bad status. 409 means Seerr already has
+   * this request and the route turns it into "already requested".
+   */
   async function createRequest(
     input: CreateSeerrRequestInput,
   ): Promise<SeerrRequest> {
@@ -636,11 +834,21 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return requireSeerrRequest(body, "createRequest");
   }
 
+  /**
+   * Approves a pending request. Admin-gated at the route.
+   *
+   * @throws SeerrUpstreamError on a bad status or an unmappable body.
+   */
   async function approveRequest(id: number): Promise<SeerrRequest> {
     const body = await postJson(`/api/v1/request/${id}/approve`);
     return requireSeerrRequest(body, "approveRequest");
   }
 
+  /**
+   * Declines a pending request. Admin-gated at the route.
+   *
+   * @throws SeerrUpstreamError on a bad status or an unmappable body.
+   */
   async function declineRequest(id: number): Promise<SeerrRequest> {
     const body = await postJson(`/api/v1/request/${id}/decline`);
     return requireSeerrRequest(body, "declineRequest");
@@ -651,6 +859,8 @@ export function createSeerrClient(options: SeerrClientOptions) {
     getUserByPlexId,
     listAllRequests,
     listUserRequests,
+    // Two names for one function: routes/me.ts reads it as getRequestsByUser,
+    // routes/requests.ts as listUserRequests.
     getRequestsByUser: listUserRequests,
     getUserQuota,
     getServiceProfiles,
@@ -669,6 +879,8 @@ export function createSeerrClient(options: SeerrClientOptions) {
 
 export type SeerrClient = ReturnType<typeof createSeerrClient>;
 
+// Seerr's numeric enums, named. Routers deal in these labels only, so if Seerr
+// ever renumbers, this is the single place that has to change.
 const REQUEST_STATUS = {
   1: "pending",
   2: "approved",
@@ -681,16 +893,32 @@ const MEDIA_STATUS = {
   1: "unknown",
   2: "pending",
   3: "processing",
-  4: "partially_available",
+  4: "partially_available", // some seasons or episodes present, the amber badge
   5: "available",
   6: "blocklisted",
   7: "deleted",
 } as const;
 
+/**
+ * Names a Seerr media status code.
+ *
+ * @returns null for a code that isn't in the table, which callers treat as an
+ * upstream problem rather than guessing at availability.
+ */
 export function mediaStatusFromCode(code: number): MediaAvailability | null {
   return MEDIA_STATUS[code as keyof typeof MEDIA_STATUS] ?? null;
 }
 
+/**
+ * Turns a Seerr request into the shape the browser gets: codes named, seasons
+ * flattened to plain numbers, and the title and poster supplied by the caller.
+ *
+ * Seerr's request rows carry no title, so the requests router looks each one up
+ * in TMDB and passes the result in as `details`.
+ *
+ * @throws SeerrUpstreamError when either status code is unrecognized. Failing
+ * beats rendering a request whose state nobody can name.
+ */
 export function toRequestView(
   req: SeerrRequest,
   details: { title: string; posterUrl: string | null },
@@ -711,6 +939,8 @@ export function toRequestView(
     requestStatus,
     mediaStatus,
     requestedById: req.requestedBy.id,
+    // An empty displayName falls back to the Plex username, so the requester
+    // column never renders blank.
     requestedByName:
       req.requestedBy.displayName || req.requestedBy.plexUsername,
     createdAt: req.createdAt,
@@ -718,6 +948,13 @@ export function toRequestView(
   };
 }
 
+// Everything below is defensive parsing. Seerr's responses arrive as `unknown`
+// and each mapper returns null instead of throwing, which lets the list callers
+// drop one bad row and keep the rest. The require* wrappers at the very bottom
+// are for single-object endpoints, where null really is a failure.
+
+// Validates a /api/v1/media row. Anything that isn't a movie or a show gets
+// dropped, so people rows never reach the status map.
 function mapSeerrMediaListItem(row: unknown): SeerrMediaListItem | null {
   if (typeof row !== "object" || row === null) {
     return null;
@@ -751,6 +988,8 @@ function mapSeerrMediaListItem(row: unknown): SeerrMediaListItem | null {
   return { id, tmdbId, mediaType, status, ratingKey };
 }
 
+// A watchlist row is only useful with a TMDB id and a media type we can browse,
+// so anything else is skipped.
 function mapSeerrWatchlistItem(row: unknown): SeerrWatchlistItem | null {
   if (typeof row !== "object" || row === null) {
     return null;
@@ -771,6 +1010,8 @@ function mapSeerrWatchlistItem(row: unknown): SeerrWatchlistItem | null {
   return { tmdbId, mediaType, title };
 }
 
+// One quota axis. Every field has to be present: a partially parsed quota would
+// be displayed as if it were real, so the caller escalates a null to a 502.
 function mapQuotaAxis(row: unknown): QuotaAxis | null {
   if (typeof row !== "object" || row === null) {
     return null;
@@ -795,6 +1036,8 @@ function mapQuotaAxis(row: unknown): QuotaAxis | null {
   return { days, limit, used, restricted };
 }
 
+// Just the two fields getServiceProfiles needs to choose a Radarr or Sonarr
+// server. The rest of the row is ignored.
 function mapServiceServer(
   row: unknown,
 ): { id: number; isDefault: boolean } | null {
@@ -813,6 +1056,7 @@ function mapServiceServer(
   return { id, isDefault };
 }
 
+// A quality profile is only an id and a label as far as Tyflix is concerned.
 function mapServiceProfile(
   row: unknown,
 ): { id: number; name: string } | null {
@@ -827,6 +1071,10 @@ function mapServiceProfile(
   return { id, name };
 }
 
+// Validates a Seerr account row. plexId is required, which is what makes
+// signInWithPlex return null: Seerr's sign-in body leaves plexId out, so it
+// can't produce a complete user and the caller has to look one up instead.
+// email is optional and normalized to null.
 function mapSeerrUser(row: unknown): SeerrUser | null {
   if (typeof row !== "object" || row === null) {
     return null;
@@ -859,6 +1107,12 @@ function mapSeerrUser(row: unknown): SeerrUser | null {
   };
 }
 
+// The biggest mapper here, because a request is the most nested thing Seerr
+// returns. Identity and status fields are mandatory; optional ones degrade to a
+// default, so a missing updatedAt falls back to createdAt and a missing seasons
+// array becomes empty. A ratingKey of some unexpected type rejects the whole
+// row, which is stricter than mapSeerrMediaListItem, where an odd ratingKey
+// only nulls that one field.
 function mapSeerrRequest(row: unknown): SeerrRequest | null {
   if (typeof row !== "object" || row === null) {
     return null;
@@ -964,6 +1218,8 @@ function mapSeerrRequest(row: unknown): SeerrRequest | null {
   };
 }
 
+// For the single-object endpoints. Nothing to skip past, so an unmappable body
+// is a 502 with the operation name baked into the message.
 function requireSeerrRequest(body: unknown, operation: string): SeerrRequest {
   const request = mapSeerrRequest(body);
   if (request === null) {
@@ -975,6 +1231,7 @@ function requireSeerrRequest(body: unknown, operation: string): SeerrRequest {
   return request;
 }
 
+// Same idea as requireSeerrRequest, for the four issue endpoints.
 function requireSeerrIssue(body: unknown, operation: string): IssueView {
   const issue = mapSeerrIssue(body);
   if (issue === null) {

@@ -1,3 +1,34 @@
+// Playback. This is the entrypoint for every "press play" in the app, mounted
+// at /api/watch behind requireAuth. Eight endpoints:
+//
+//   GET /continue                 the Continue Watching rail
+//   GET /movie/:tmdbId            play descriptor for a movie, by TMDB id
+//   GET /tv/:tmdbId/episodes      episode list for a show
+//   GET /episode/:ratingKey       play descriptor for an episode
+//   GET /episode/:ratingKey/next  what auto-advances after this one
+//   GET /item/:ratingKey          play descriptor for any Plex item
+//   PUT /subtitle/:ratingKey      pick or clear the burned-in subtitle
+//   POST /timeline                report progress back to Plex
+//
+// The important thing here is what a play descriptor is. Video does not go
+// through the Cloudflare Tunnel. Proxying a movie through the edge would be
+// slow and outside the terms for that path, so instead the server mints a
+// short-lived Plex TRANSIENT token from the user's stored token, resolves
+// Plex's own plex.direct addresses, and hands the browser URLs that point
+// straight at the Plex server. Control plane through the tunnel, video direct.
+//
+// That means the transient token is returned to the browser in full, which is
+// the one place in this codebase where a Plex credential crosses that line. It
+// has to be: the player authenticates to Plex itself. The durable token never
+// leaves the backend.
+//
+// Two id systems collide here. /movie/:tmdbId takes a TMDB id and asks Seerr
+// for the matching Plex ratingKey; the ratingKey routes skip that hop because
+// the browser already has one from the library or the episode list.
+//
+// Upstreams: Plex (metadata, connection resolve, transient mint, timeline
+// reporting) and Seerr, purely for the TMDB-to-ratingKey join.
+
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import {
@@ -28,30 +59,36 @@ export type WatchRouterDeps = {
   plexClientId: string;
 };
 
+// Everything the browser needs to start playing one item without asking again.
+// The `local` URLs are null when Plex advertises no LAN connection, so the
+// player tries local first and falls back to remote.
 type PlayDescriptor = {
   ratingKey: string;
   connections: Awaited<
     ReturnType<PlexConnectionResolver["resolveConnections"]>
   >;
-  transient: string;
-  hls: { local: string | null; remote: string };
-  dash: { local: string | null; remote: string };
-  dashDecision: { local: string | null; remote: string };
-  sessionId: string;
+  transient: string; // short-lived Plex token, deliberately sent in full
+  hls: { local: string | null; remote: string }; // in-browser player
+  dash: { local: string | null; remote: string }; // Chromecast receiver
+  dashDecision: { local: string | null; remote: string }; // Cast handshake, see below
+  sessionId: string; // the HLS transcode session, echoed for later control
   streams: { audio: AudioStream[]; subtitle: SubtitleStream[] };
   durationMs: number | null;
-  creditsOffsetMs: number | null;
-  partId: string | null;
+  creditsOffsetMs: number | null; // where the Up Next card fires, from Plex markers
+  partId: string | null; // needed to select a subtitle track
   title: string | null;
   subheading: string | null;
-  viewOffsetMs: number | null;
+  viewOffsetMs: number | null; // this user's resume position, null if unwatched
 };
 
+// Optional transcode tuning the player can pass as query params. Omitted keys
+// aren't emitted into the Plex URL at all, so the untuned case stays identical
+// to the fixed baseline.
 type PlayTuning = {
-  maxVideoBitrate?: number;
-  videoResolution?: string;
-  offset?: number;
-  audioStreamID?: string;
+  maxVideoBitrate?: number; // kbps
+  videoResolution?: string; // "WxH", e.g. "1280x720"
+  offset?: number; // seconds to start at
+  audioStreamID?: string; // Plex stream id, from streams.audio
 };
 
 export function createWatchRouter(deps: WatchRouterDeps): Router {
@@ -68,6 +105,9 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
 
   // Shared users need their per-server Plex token against our PMS; the owner
   // isn't in that list, so fall back to the session's durable token.
+  //
+  // Getting this wrong once broke every shared account at the same time. A
+  // shared user's general plex.tv token is not the token this server accepts.
   async function resolvePmsToken(
     plexId: number,
     durableToken: string,
@@ -80,12 +120,19 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
   // shared transcode session for a Plex ratingKey. Any mint/connection failure
   // throws (caught by the caller and turned into a 502) so we never emit a
   // partial descriptor.
+  //
+  // Three of the routes below are just param validation wrapped around this
+  // function, which is where the actual playback work happens.
   async function buildPlayDescriptor(
     ratingKey: string,
     userToken: string,
     tuning: PlayTuning = {},
   ): Promise<PlayDescriptor> {
     // Fail before minting if the ratingKey has no metadata document.
+    //
+    // Passing userToken matters: metadata read as this user carries their
+    // viewOffset, which is what the resume dialog runs on. Read as the owner it
+    // would carry the owner's.
     const meta = await plexServer.playbackMeta(ratingKey, userToken);
     const transient = await transientMinter.mint(userToken);
     const connections = await plexConnection.resolveConnections();
@@ -164,6 +211,16 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     };
   }
 
+  /**
+   * GET /api/watch/continue
+   *
+   * Plex's on-deck list for the signed-in user, as `{ items }`. This is the
+   * Continue Watching rail. No params.
+   *
+   * 401 without a session, 502 if Plex fails. A session with no stored Plex
+   * token gets an empty list rather than an error, because there's genuinely
+   * nothing to show and the rail should just not render.
+   */
   router.get("/continue", async (req, res) => {
     const session = res.locals.session as SessionPayload | undefined;
     if (!session) {
@@ -192,6 +249,22 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     }
   });
 
+  /**
+   * GET /api/watch/movie/:tmdbId
+   *
+   * The play descriptor for a movie the browser only knows by TMDB id, which is
+   * the case coming off a title page. Optional tuning query params:
+   * `maxVideoBitrate`, `videoResolution`, `offset`, `audioStreamID`.
+   * Returns `{ mediaType: "movie", tmdbId, ...descriptor }`.
+   *
+   * 400 for a non-numeric tmdbId or bad tuning, 401 without a session,
+   * 404 when Seerr has no Plex ratingKey for the title (it isn't on the server,
+   * so it isn't playable), 409 when the session carries no Plex token and the
+   * user has to log in again, 502 for any upstream failure.
+   *
+   * Library movies with no TMDB id can't come through here at all. That's what
+   * /item/:ratingKey is for.
+   */
   router.get("/movie/:tmdbId", async (req, res) => {
     const tmdbIdRaw = req.params.tmdbId;
     if (!/^\d+$/.test(tmdbIdRaw)) {
@@ -247,6 +320,20 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     }
   });
 
+  /**
+   * GET /api/watch/tv/:tmdbId/episodes
+   *
+   * Flat episode list for a show, as `{ tmdbId, showRatingKey, episodes }`.
+   * The browser holds onto those ratingKeys and plays them through
+   * /episode/:ratingKey, which is why episodes are keyed on ratingKey and not
+   * on season and episode numbers.
+   *
+   * 400 for a non-numeric tmdbId, 404 when Seerr has no show-level ratingKey,
+   * 502 if Plex fails.
+   *
+   * This one doesn't read the session. It lists with the server token, so the
+   * episode rows carry no per-user watch state.
+   */
   router.get("/tv/:tmdbId/episodes", async (req, res) => {
     const tmdbIdRaw = req.params.tmdbId;
     if (!/^\d+$/.test(tmdbIdRaw)) {
@@ -271,6 +358,16 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     }
   });
 
+  /**
+   * GET /api/watch/episode/:ratingKey/next
+   *
+   * `{ nextEpisode }`, the episode that follows this one in the same show, or
+   * null at the end of a series. The Up Next overlay calls this while the
+   * current episode is still playing so the card is ready before the credits.
+   *
+   * 400 for a non-numeric ratingKey, 502 if Plex fails. Reaching the last
+   * episode is a 200 with null, not a 404.
+   */
   router.get("/episode/:ratingKey/next", async (req, res) => {
     const ratingKey = req.params.ratingKey;
     if (!/^\d+$/.test(ratingKey)) {
@@ -286,8 +383,23 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     }
   });
 
-  // Reports one playback timeline event to Plex for the logged-in user so
-  // resume position / watched state update on their account.
+  /**
+   * POST /api/watch/timeline
+   *
+   * Reports one playback timeline event to Plex for the logged-in user so
+   * resume position / watched state update on their account.
+   *
+   * Body: `ratingKey` (numeric string), `state` ("playing" | "paused" |
+   * "stopped"), `time` and `duration` in milliseconds. Returns `{ ok: true }`.
+   *
+   * 400 for a malformed body, 401 without a session, 409 when the session has
+   * no Plex token, 502 if Plex fails.
+   *
+   * The player calls this on a ticker, so it's the hot path for the whole
+   * resume feature. It reports under the user's per-server token, which is what
+   * makes watch state per-user instead of owner-wide, and it's why progress
+   * from Tyflix shows up on the TV in the other room.
+   */
   router.post("/timeline", async (req, res) => {
     const parsed = parseTimelineBody(req.body);
     if (!parsed.ok) {
@@ -330,9 +442,25 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     }
   });
 
-  // Selects (or clears) the burned-in subtitle for the current user on a media
-  // item. The browser already has the ratingKey from a play descriptor; the
-  // part id is resolved server-side so the client never has to guess it.
+  /**
+   * PUT /api/watch/subtitle/:ratingKey
+   *
+   * Selects (or clears) the burned-in subtitle for the current user on a media
+   * item. The browser already has the ratingKey from a play descriptor; the
+   * part id is resolved server-side so the client never has to guess it.
+   *
+   * Body: `subtitleStreamID`, a numeric string. "0" clears the selection.
+   * Returns `{ ok: true }`.
+   *
+   * 400 for a bad ratingKey or subtitleStreamID, 401 without a session, 404
+   * when the item has no part id, 409 when the session has no Plex token, 502
+   * if Plex fails.
+   *
+   * Subtitles are burned into the transcode, and the URL parameter is not the
+   * selector. The recipe that actually works is this PUT against the part
+   * followed by restarting playback, which is why the client calls here and
+   * then re-fetches a descriptor.
+   */
   router.put("/subtitle/:ratingKey", async (req, res) => {
     const ratingKey = req.params.ratingKey;
     if (!/^\d+$/.test(ratingKey)) {
@@ -368,6 +496,9 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     try {
       const pmsToken = await resolvePmsToken(session.plexId, userToken);
 
+      // Read with the server token, not the user's. The part id is a property
+      // of the file, so it's the same for everyone, and the selection below is
+      // what gets applied per user.
       const meta = await plexServer.playbackMeta(ratingKey);
       if (meta.partId === null) {
         res.status(404).json({ error: "not playable" });
@@ -385,10 +516,21 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     }
   });
 
-  // This endpoint takes a RAW Plex episode ratingKey (the browser already has it
-  // from GET /tv/:tmdbId/episodes) and is intentionally gated only by the user's
-  // own Plex transient: Plex itself enforces what that account may stream, so we
-  // deliberately do NOT re-check Seerr availability or ownership here.
+  /**
+   * GET /api/watch/episode/:ratingKey
+   *
+   * Play descriptor for one episode, returned as
+   * `{ mediaType: "episode", ...descriptor }`. Takes the same optional tuning
+   * query params as /movie/:tmdbId.
+   *
+   * 400 for a non-numeric ratingKey or bad tuning, 401 without a session, 409
+   * when the session has no Plex token, 502 if Plex fails.
+   *
+   * This endpoint takes a RAW Plex episode ratingKey (the browser already has it
+   * from GET /tv/:tmdbId/episodes) and is intentionally gated only by the user's
+   * own Plex transient: Plex itself enforces what that account may stream, so we
+   * deliberately do NOT re-check Seerr availability or ownership here.
+   */
   router.get("/episode/:ratingKey", async (req, res) => {
     const ratingKey = req.params.ratingKey;
     // Plex ratingKeys are numeric strings.
@@ -436,9 +578,18 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     }
   });
 
-  // Plays any Plex item by raw ratingKey — used for library movies that have no
-  // tmdbId (so the tmdb-keyed /movie/:tmdbId route can't resolve them). Gated
-  // only by the user's own Plex transient, like /episode/:ratingKey.
+  /**
+   * GET /api/watch/item/:ratingKey
+   *
+   * Play descriptor for any Plex item by raw ratingKey, returned with
+   * `mediaType: "movie"`. Same optional tuning params as the other descriptor
+   * routes, and the same status codes as /episode/:ratingKey: 400, 401, 409,
+   * 502.
+   *
+   * This exists for library movies that have no tmdbId, which the tmdb-keyed
+   * /movie/:tmdbId route can't resolve. Gated only by the user's own Plex
+   * transient, like /episode/:ratingKey.
+   */
   router.get("/item/:ratingKey", async (req, res) => {
     const ratingKey = req.params.ratingKey;
     if (!/^\d+$/.test(ratingKey)) {
@@ -487,13 +638,17 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
   return router;
 }
 
+// One progress report from the player, after validation.
 type TimelineBody = {
   ratingKey: string;
   state: "playing" | "paused" | "stopped";
-  time: number;
-  duration: number;
+  time: number; // ms into the item
+  duration: number; // ms total
 };
 
+// Validates a timeline POST. Strict on purpose, since a bad value here writes
+// garbage into someone's Plex watch state. Note the non-object case reports the
+// ratingKey error rather than a body error.
 function parseTimelineBody(
   body: unknown,
 ): { ok: true; value: TimelineBody } | { ok: false; error: string } {
@@ -557,6 +712,10 @@ function readSubtitleStreamID(body: unknown): string | null {
   return raw;
 }
 
+// Validates the optional transcode-tuning query params. Absent keys stay absent
+// in the result, which is what keeps an untuned URL byte-identical to the
+// baseline. The same rules are enforced again in transcodeUrl.ts, but doing it
+// here means a typo comes back as a 400 instead of a 502.
 function parsePlayTuning(
   query: Record<string, unknown>,
 ): { ok: true; value: PlayTuning } | { ok: false; error: string } {
@@ -617,6 +776,8 @@ function parsePlayTuning(
   return { ok: true, value: tuning };
 }
 
+// Express hands back an array when a query key repeats, so take the first and
+// coerce the primitive cases to string. Undefined means "nothing usable here".
 function firstQueryValue(value: unknown): string | undefined {
   if (Array.isArray(value)) {
     value = value[0];
@@ -630,6 +791,10 @@ function firstQueryValue(value: unknown): string | undefined {
   return undefined;
 }
 
+// Every failure path in this router ends here as a 502, including a
+// TokenDecryptError from a tampered cookie. Playback has a lot of moving parts
+// (mint, connection resolve, metadata) and none of them get their own status
+// code; the message is the only thing that distinguishes them.
 function respondUpstreamError(
   res: import("express").Response,
   err: unknown,
