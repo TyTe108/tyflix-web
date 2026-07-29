@@ -76,10 +76,11 @@ Tyflix is one Node service. It serves a JSON API and the built React app from th
 
 ```
 Browser --https--> Cloudflare edge --tunnel--> cloudflared --> Tyflix (Node)
-                                                                 |-> Seerr --> Radarr / Sonarr
-                                                                 |-> Plex
-                                                                 |-> TMDB
-                                                                 |-> metrics
+  |                                                              |-> Seerr --> Radarr / Sonarr
+  |                                                              |-> Plex
+  |                                                              |-> TMDB
+  |                                                              |-> metrics
+  `-------------------- video, direct to Plex over HTTPS ---------------------------->
 ```
 
 Only the control plane goes through the tunnel. Video streams direct from the browser to Plex over HTTPS.
