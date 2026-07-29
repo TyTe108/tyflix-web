@@ -190,19 +190,9 @@ the code being secret.
 One Node process serves the JSON API and the built React app from the same
 origin.
 
-```
-Browser ──https──> Cloudflare edge ──tunnel──> cloudflared ──> Tyflix (Node/Express)
-   │                                                              ├─> Plex       accounts, library, playback
-   │                                                              ├─> Seerr      requests, media status, issues
-   │                                                              ├─> TMDB       discovery metadata, images
-   │                                                              └─> metrics    admin dashboard
-   │
-   └──────────────── video, direct to Plex over HTTPS ─────────────────────────>
-```
+![Tyflix system map: browser to Cloudflare edge to cloudflared to Tyflix, which calls Plex, Seerr, TMDB and a metrics service; video streams directly from Plex to the browser, bypassing the tunnel](diagrams/system-map.svg)
 
-The control plane goes through the tunnel. Video does not, and that exception is
-deliberate. See [Video does not go through the tunnel](#video-does-not-go-through-the-tunnel),
-above.
+The video bypass shown above is deliberate. See [Video does not go through the tunnel](#video-does-not-go-through-the-tunnel) for why.
 
 There's no database. The only thing Tyflix itself persists to disk is
 `accessRequests/store.ts`: a JSON file with serialized writes and an atomic
@@ -217,7 +207,7 @@ config.ts        env in, validated config out, exits the process if anything's m
    ↓
 index.ts         builds every client once, mounts every router  ← the map of the backend
    ↓
-routes/          12 routers, one per API surface, each behind requireAuth or requireAdmin
+routes/          one router per API surface, each behind requireAuth or requireAdmin
    ↓
 plex/ seerr/ tmdb/ dashboard/     typed clients for the four upstreams
 ```
@@ -239,9 +229,8 @@ They're the two tables of contents.
 
 ## The spine
 
-Ten files, in dependency order. The first five are enough to discuss the
-architecture, so stop there if you only have twenty minutes. Read all ten and
-you've seen everything load-bearing.
+Ten files, in dependency order. The first five cover the architecture; all ten
+cover everything load-bearing.
 
 | # | File | LOC | Why it's here |
 |---|---|---|---|
@@ -375,7 +364,7 @@ Grouped by concern. Open these when a path above leads you here.
 | File | LOC | What it is |
 |---|---|---|
 | `server/src/analytics/watchedVsRequested.ts` | 214 | The watched-versus-requested numbers, weighted by bytes rather than title count. Pure function. |
-| `server/src/accessRequests/store.ts` | 483 | The app's only durable state. JSON file, serialized writes, atomic rename. |
+| `server/src/accessRequests/store.ts` | 483 | Access-request records: pending, approved, denied. The durable state discussed above. |
 | `server/src/routes/adminAccessRequests.ts` | 513 | Approvals, which fire real Plex invites, plus reconciliation against Plex on read. |
 | `server/src/routes/accessRequests.ts` | 211 | The public submit endpoint. Honeypot, per-IP cap, identical responses either way. |
 | `server/src/routes/admin.ts` | 68 | Read-only proxy to the metrics service. |
