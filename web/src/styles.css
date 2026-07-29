@@ -1694,19 +1694,44 @@ a:hover {
   text-transform: lowercase;
 }
 
+.admin-jobs-no-heartbeat {
+  display: inline-block;
+  margin-top: 0.25rem;
+  margin-left: 0.35rem;
+  font-size: 0.75rem;
+}
+
+.admin-jobs-col-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: flex-start;
+}
+
 .admin-jobs-col-status .admin-status {
   max-width: 100%;
   overflow-wrap: anywhere;
   white-space: normal;
 }
 
-.admin-jobs-last-line {
+.admin-jobs-alerting-broken {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+}
+
+.admin-jobs-last-line,
+.admin-jobs-cause {
   margin: 0;
   padding: 0 0 0.15rem;
   font-size: 0.8rem;
   line-height: 1.35;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.admin-jobs-last-line + .admin-jobs-cause {
+  margin-top: 0.15rem;
 }
 
 .admin-status {

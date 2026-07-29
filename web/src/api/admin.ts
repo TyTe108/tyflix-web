@@ -186,6 +186,15 @@ export type AdminJob = {
   last_line: string; // tail of the job's log
   kind: string;
   running?: boolean;
+  // Cron wrapper's verdict on the last run ("exit code 0", "TIMED OUT after
+  // 3600s", "KILLED (SIGKILL/OOM, rc=137)", …). Only present on wrapper-backed jobs.
+  cause?: string;
+  // False when the wrapper could not reach its notification channel — this
+  // job's failures would go unreported. Only present on wrapper-backed jobs.
+  alerting_ok?: boolean;
+  // True when a per-run status file was read, so a silent stop is detectable.
+  // False means health is inferred from log text only.
+  heartbeat?: boolean;
 };
 
 // cache_age and generated_at come from the metrics service's own caching, so a

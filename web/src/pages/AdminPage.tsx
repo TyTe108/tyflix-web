@@ -1289,6 +1289,17 @@ function JobsBody({ jobs }: { jobs: AdminJob[] }) {
                   <span className="admin-jobs-name">{job.name}</span>
                   <span className="muted admin-jobs-desc">{job.desc}</span>
                   <span className="stats-tag admin-jobs-kind">{job.kind}</span>
+                  {/* Healthy cron with no heartbeat is the informative case:
+                      the row looks fine but we cannot prove the job is still
+                      running. Skip services (heartbeat is meaningless) and
+                      non-ok rows (already flagged). */}
+                  {job.kind === "cron" &&
+                  job.status === "ok" &&
+                  job.heartbeat === false ? (
+                    <span className="muted admin-jobs-no-heartbeat">
+                      no heartbeat
+                    </span>
+                  ) : null}
                 </div>
                 <div className="admin-jobs-cell" role="cell">
                   {job.schedule}
@@ -1303,10 +1314,23 @@ function JobsBody({ jobs }: { jobs: AdminJob[] }) {
                   <span className={jobStatusBadgeClass(job.status)}>
                     {job.status}
                   </span>
+                  {job.alerting_ok === false ? (
+                    <span className="admin-status admin-jobs-alerting-broken">
+                      alerting broken
+                    </span>
+                  ) : null}
                 </div>
               </div>
               {job.last_line ? (
                 <p className="admin-jobs-last-line muted">{job.last_line}</p>
+              ) : null}
+              {/* Suppress cause when the job is ok ("exit code 0" is noise on
+                  every healthy row) or when it equals last_line (wrapper had
+                  no captured output, so last_line already is the cause). */}
+              {job.status !== "ok" &&
+              job.cause &&
+              job.cause !== job.last_line ? (
+                <p className="admin-jobs-cause muted">{job.cause}</p>
               ) : null}
             </div>
           ))}
