@@ -79,6 +79,7 @@ Browser --https--> Cloudflare edge --tunnel--> cloudflared --> Tyflix (Node)
                                                                  |-> Seerr --> Radarr / Sonarr
                                                                  |-> Plex
                                                                  |-> TMDB
+                                                                 |-> metrics
 ```
 
 Only the control plane goes through the tunnel. Video streams direct from the browser to Plex over HTTPS.
