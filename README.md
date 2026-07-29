@@ -108,6 +108,25 @@ It's the same shape as an enterprise pattern like SAP Cloud Connector reaching S
 - Helmet and express-rate-limit for security headers and request throttling
 - Integrations: Plex, Seerr, TMDB, Radarr, Sonarr
 
+## Getting started
+
+```bash
+npm install
+cp .env.example .env     # then fill it in
+npm run dev              # server on :4000, Vite on :5173
+```
+
+`npm run dev` runs both workspaces together. The server needs Plex, Seerr and
+TMDB credentials to do anything useful; see `.env.example` for the eleven keys.
+
+```bash
+npm test -w server       # 328 tests, built-in Node runner
+npm run build            # typecheck + Vite build + tsc
+```
+
+In production the server serves the built SPA from the same origin, so there's
+one process and one port.
+
 ## Status and roadmap
 
 Tyflix is deployed and in daily use on my home server, and it's still an active work in progress. It covers most of Seerr's user-facing surface plus a few things Seerr doesn't do, like the per-user watched-versus-requested analytics. The backend carries 328 tests.

@@ -1,12 +1,15 @@
 # Code tour
 
-A guided way into this codebase. Start at the top and stop whenever you've seen
-enough.
+_Last verified against `c6ad95c`, 2026-07-28._
 
 Tyflix is 89 source files, about 26,500 lines, split across a Node/Express
-backend and a React SPA. You don't need to read most of it. Roughly ten files
-carry the architecture and the rest are leaves hanging off them, so this doc
-puts those ten first and tiers everything else behind them.
+backend and a React SPA. Ten files carry the architecture (3,990 lines, 15% of
+the codebase), and the rest are leaves hanging off them; this doc surfaces
+those ten early and tiers everything else behind them. Worth knowing before you
+budget time: six files alone carry 8,174 lines, 31% of the repo (`AdminPage.tsx`
+1,807, `plex/server.ts` 1,503, `WatchPage.tsx` 1,469, `seerr/client.ts` 1,244,
+`tmdb/client.ts` 1,089, `PlayerControls.tsx` 1,062). The tiering below doesn't
+surface that concentration on its own.
 
 Every file also has a header comment explaining what it is and where it sits,
 so once you're in the code you can keep orienting without coming back here.
@@ -14,21 +17,20 @@ so once you're in the code you can keep orienting without coming back here.
 **Contents**
 
 - [Read this first](#read-this-first)
-- [The system on one page](#the-system-on-one-page)
-- [The 20-minute path](#the-20-minute-path)
-- [The hour path](#the-hour-path)
 - [Decisions worth asking about](#decisions-worth-asking-about)
+- [The system on one page](#the-system-on-one-page)
+- [The spine](#the-spine)
 - [Reading paths by topic](#reading-paths-by-topic)
 - [Conventions you'll see everywhere](#conventions-youll-see-everywhere)
 - [File reference, tiered](#file-reference-tiered)
-- [Running it](#running-it)
 - [Where the rest of the docs are](#where-the-rest-of-the-docs-are)
 
 ## Read this first
 
-The [README](../README.md) covers what the product is and has screenshots. Read
-it before any code; the rest of this doc assumes you know what the app does from
-a user's point of view.
+The [README](../README.md) covers what the product is and has screenshots. If
+you need to run this locally, it also has the install and test commands under
+Getting Started. Read it before any code; the rest of this doc assumes you know
+what the app does from a user's point of view.
 
 Two things to know before you open a file:
 
@@ -43,76 +45,6 @@ downloader, it isn't here on purpose.
 is keyed by its own `ratingKey`. Those two id systems have to be reconciled
 before the app can say "you can play this" instead of "this movie exists
 somewhere." A surprising amount of the code is that join.
-
-## The system on one page
-
-One Node process serves the JSON API and the built React app from the same
-origin.
-
-```
-Browser ──https──> Cloudflare edge ──tunnel──> cloudflared ──> Tyflix (Node/Express)
-   │                                                              ├─> Plex       accounts, library, playback
-   │                                                              ├─> Seerr      requests, media status, issues
-   │                                                              ├─> TMDB       discovery metadata, images
-   │                                                              └─> metrics    admin dashboard
-   │
-   └──────────────── video, direct to Plex over HTTPS ─────────────────────────>
-```
-
-The control plane goes through the tunnel. Video does not, and that exception is
-deliberate. See [Decisions worth asking
-about](#decisions-worth-asking-about).
-
-Backend layout, in dependency order:
-
-```
-config.ts        env in, validated config out, exits the process if anything's missing
-   ↓
-index.ts         builds every client once, mounts every router  ← the map of the backend
-   ↓
-routes/          12 routers, one per API surface, each behind requireAuth or requireAdmin
-   ↓
-plex/ seerr/ tmdb/ dashboard/     typed clients for the four upstreams
-```
-
-The frontend mirrors it:
-
-```
-main.tsx      mounts React inside BrowserRouter + AuthProvider
-   ↓
-App.tsx       the route table  ← the map of the frontend
-   ↓
-pages/        14 screens, one per route
-   ↓
-api/          11 clients, one per backend router
-```
-
-If you read only two files, read `server/src/index.ts` and `web/src/App.tsx`.
-They're the two tables of contents.
-
-## The 20-minute path
-
-Five files, in this order. This is enough to discuss the architecture.
-
-| # | File | Why it's here |
-|---|---|---|
-| 1 | [`server/src/index.ts`](../server/src/index.ts) | Composition root and routing table. Shows every upstream, every route, the middleware order, and which routes are public. |
-| 2 | [`web/src/App.tsx`](../web/src/App.tsx) | Every URL the app answers, and the three access tiers. 94 lines. |
-| 3 | [`server/src/session.ts`](../server/src/session.ts) | How a logged-in user is represented: signed cookie, and the Plex token encrypted inside it. |
-| 4 | [`server/src/routes/watch.ts`](../server/src/routes/watch.ts) | Playback. The most interesting endpoint in the app is `GET /movie/:tmdbId`, which mints a short-lived Plex token and hands back a direct address. |
-| 5 | [`server/src/seerr/mediaStatusProvider.ts`](../server/src/seerr/mediaStatusProvider.ts) | 150 lines that explain half the codebase: the TMDB-id to Plex-ratingKey join. |
-
-## The hour path
-
-Add these five and you've seen everything load-bearing.
-
-| # | File | Why it's here |
-|---|---|---|
-| 6 | [`server/src/plex/connection.ts`](../server/src/plex/connection.ts) | Resolves the `plex.direct` addresses a browser can stream from, local and remote, so the player picks whichever it can reach. |
-| 7 | [`server/src/plex/transientToken.ts`](../server/src/plex/transientToken.ts) | Trades the durable Plex token for a short-lived one. This is what lets video go direct without the real credential leaving the server. |
-| 8 | [`server/src/plex/resolvePmsToken.ts`](../server/src/plex/resolvePmsToken.ts) | 33 lines, and worth every one. A shared Plex user's account token is not their token for a specific server. Getting this wrong broke sign-in for all 14 shared accounts at once. |
-| 9 | [`web/src/pages/WatchPage.tsx`](../web/src/pages/WatchPage.tsx) | The client half of playback: hls.js, resume, Up Next, casting. The largest component in the app, and the header comment maps it before you dive in. |
-| 10 | [`server/src/routes/auth.ts`](../server/src/routes/auth.ts) | Plex's PIN login flow end to end, and where the session cookie gets issued. |
 
 ## Decisions worth asking about
 
@@ -148,12 +80,25 @@ Every other request rides the tunnel. Video is the deliberate exception.
 Proxying a movie through Cloudflare would be slow and outside the terms for that
 path, so playback streams straight from Plex to the browser.
 
-That creates a credential problem. The browser needs to talk to Plex directly,
-and the long-lived Plex token must never reach it. The fix: on play, the server
-mints a short-lived Plex *transient* token from the user's stored token and
-returns Plex's own direct address, both local and remote, so the player uses
-whichever it can reach. Plex transcodes on demand, forced to H.264, so anything
-in the library plays in a browser regardless of how it was ripped.
+That creates a credential problem, and it's worth counting all four credentials
+that end up in play so they don't get conflated: the user's Plex *account*
+token from the PIN login flow, their *per-server* token that the media server
+actually accepts for non-owners (see Per-server Plex tokens, below), the
+disposable Plex *transient* token minted fresh for each play, and the session
+cookie itself. Only the transient token and the cookie ever reach the browser.
+The account and per-server tokens never leave the backend, and the cookie
+carries the account token only as an AES-256-GCM-encrypted blob it can't read.
+
+The fix: on play, the server mints a short-lived transient token from the
+user's per-server token and returns Plex's own direct address, both local and
+remote, so the player uses whichever it can reach. The transient is valid
+roughly 48 hours or until the PMS restarts, so it doesn't expire mid-movie in
+any normal session; if one somehow did, the symptom is a fatal hls.js error,
+the player retries once against the other address, and a further failure
+surfaces as a visible error rather than a silent dead player. There's no
+automatic re-mint, so reloading playback is what gets a fresh one. Plex
+transcodes on demand, forced to H.264, so anything in the library plays in a
+browser regardless of how it was ripped.
 
 **Trade-off:** a transient token does reach the browser. It's short-lived and
 scoped, which is the point, but it's a real widening of the trust boundary
@@ -177,7 +122,9 @@ conceptually about requests. If Seerr is down, availability degrades to unknown
 rather than the app guessing.
 
 **Where to look:** `server/src/seerr/mediaStatusProvider.ts`, then
-`routes/discover.ts` where `annotateMediaStatus` layers status onto results.
+`routes/discover.ts` where `annotateMediaStatus` layers status onto results, and
+`web/src/components/MediaCard.tsx` for where the availability badge actually
+renders.
 
 ### Per-server Plex tokens
 
@@ -238,6 +185,78 @@ the code being secret.
 **Where to look:** `server/src/middleware/auth.ts`, then `session.ts` for
 `isAdmin` and the cookie format.
 
+## The system on one page
+
+One Node process serves the JSON API and the built React app from the same
+origin.
+
+```
+Browser ──https──> Cloudflare edge ──tunnel──> cloudflared ──> Tyflix (Node/Express)
+   │                                                              ├─> Plex       accounts, library, playback
+   │                                                              ├─> Seerr      requests, media status, issues
+   │                                                              ├─> TMDB       discovery metadata, images
+   │                                                              └─> metrics    admin dashboard
+   │
+   └──────────────── video, direct to Plex over HTTPS ─────────────────────────>
+```
+
+The control plane goes through the tunnel. Video does not, and that exception is
+deliberate. See [Video does not go through the tunnel](#video-does-not-go-through-the-tunnel),
+above.
+
+There's no database. The only thing Tyflix itself persists to disk is
+`accessRequests/store.ts`: a JSON file with serialized writes and an atomic
+rename. Everything else is either carried in the signed session cookie or asked
+for fresh from Plex, Seerr, or TMDB on each request; watch progress, for
+instance, is Plex's to keep, not ours. The server only reports it there.
+
+Backend layout, in dependency order:
+
+```
+config.ts        env in, validated config out, exits the process if anything's missing
+   ↓
+index.ts         builds every client once, mounts every router  ← the map of the backend
+   ↓
+routes/          12 routers, one per API surface, each behind requireAuth or requireAdmin
+   ↓
+plex/ seerr/ tmdb/ dashboard/     typed clients for the four upstreams
+```
+
+The frontend mirrors it:
+
+```
+main.tsx      mounts React inside BrowserRouter + AuthProvider
+   ↓
+App.tsx       the route table  ← the map of the frontend
+   ↓
+pages/        14 screens, one per route
+   ↓
+api/          11 clients, one per backend router
+```
+
+If you read only two files, read `server/src/index.ts` and `web/src/App.tsx`.
+They're the two tables of contents.
+
+## The spine
+
+Ten files, in dependency order. The first five are enough to discuss the
+architecture, so stop there if you only have twenty minutes. Read all ten and
+you've seen everything load-bearing.
+
+| # | File | LOC | Why it's here |
+|---|---|---|---|
+| 1 | [`server/src/index.ts`](../server/src/index.ts) | 380 | Composition root and routing table. Shows every upstream, every route, the middleware order, and which routes are public. Two mount-order rules are load-bearing: public routes (auth, config, access-requests) must mount before the catch-all `/api` 404 guard, and `/api/admin/access-requests` must mount before `/api/admin`, since Express matches path prefixes in registration order. |
+| 2 | [`web/src/App.tsx`](../web/src/App.tsx) | 94 | Every URL the app answers, and its three access tiers: public (`/login`, `/request-access`), authenticated (everything behind `ProtectedRoute`), and admin-only (`/admin`, behind `AdminRoute` stacked on top). |
+| 3 | [`server/src/session.ts`](../server/src/session.ts) | 410 | How a logged-in user is represented: signed cookie, and the Plex account token encrypted inside it with AES-256-GCM. Also `isAdmin`, the single place admin is decided. |
+| 4 | [`server/src/routes/watch.ts`](../server/src/routes/watch.ts) | 810 | Playback, eight endpoints. The most interesting is `GET /movie/:tmdbId`, which resolves a TMDB id to a ratingKey, mints a short-lived Plex token, and hands back a direct address. |
+| 5 | [`server/src/seerr/mediaStatusProvider.ts`](../server/src/seerr/mediaStatusProvider.ts) | 150 | 150 lines that explain half the codebase: the TMDB-id to Plex-ratingKey join. In-memory cache, 60-second TTL, shared by the four routers that need it (discover, watchlist, issues, watch). A Seerr outage drops the cache rather than serving it stale, so availability reads as unknown instead of wrong. |
+|  | *stop here if you have twenty minutes* | | |
+| 6 | [`server/src/plex/connection.ts`](../server/src/plex/connection.ts) | 267 | Resolves the `plex.direct` addresses a browser can stream from, local and remote, so the player picks whichever it can reach. |
+| 7 | [`server/src/plex/transientToken.ts`](../server/src/plex/transientToken.ts) | 136 | Trades the durable Plex token for a short-lived one, valid roughly 48 hours or until the PMS restarts. This is what lets video go direct without the real credential leaving the server. |
+| 8 | [`server/src/plex/resolvePmsToken.ts`](../server/src/plex/resolvePmsToken.ts) | 33 | 33 lines, and worth every one. A shared Plex user's account token is not their token for a specific server. Getting this wrong broke sign-in for all 14 shared accounts at once. |
+| 9 | [`web/src/pages/WatchPage.tsx`](../web/src/pages/WatchPage.tsx) | 1,469 | The client half of playback: hls.js, resume, Up Next auto-advance, cast handoff. Read its header first; it maps the twelve effects before you meet them. |
+| 10 | [`server/src/routes/auth.ts`](../server/src/routes/auth.ts) | 241 | Plex's PIN login flow end to end, and where the session cookie gets issued. |
+
 ## Reading paths by topic
 
 Pick the one you care about. Each path is in dependency order.
@@ -256,10 +275,6 @@ issued) → `middleware/auth.ts` (cookie enforced) → `web/src/pages/LoginPage.
 `web/src/pages/MediaDetailPage.tsx` → `web/src/api/requests.ts` →
 `routes/requests.ts` → `seerr/client.ts`. Seerr takes it from there into Radarr
 or Sonarr.
-
-**How does the app know what's already on the server?**
-`seerr/mediaStatusProvider.ts` → `routes/discover.ts` (see `annotateMediaStatus`)
-→ `web/src/components/MediaCard.tsx` (the corner badge).
 
 **How does browsing the actual library work?**
 `routes/library.ts` → `plex/server.ts` → `web/src/api/library.ts` →
@@ -312,32 +327,20 @@ shapes, since the fixtures came from live responses.
 
 ## File reference, tiered
 
-### Tier 1: the spine
+### The rest, by topic
 
-Read these to understand the system. Ten files.
+Grouped by concern. Open these when a path above leads you here.
+
+**Configuration**
 
 | File | LOC | What it is |
 |---|---|---|
-| `server/src/index.ts` | 380 | Composition root and routing table. Builds every client once, mounts every router, sets middleware order. Two mount-order rules are load-bearing and the header explains both. |
-| `server/src/session.ts` | 410 | The session format: cookie layout, HMAC signature, and the AES-256-GCM encrypted Plex token carried inside it. Also `isAdmin`, the single place admin is decided. |
 | `server/src/config.ts` | 213 | Every env var, validated once at boot. Fails loud and exits rather than starting half-configured. |
-| `server/src/routes/watch.ts` | 810 | Playback entrypoint, eight endpoints. Mints the transient token, resolves a direct address, reports timeline progress back to Plex. |
-| `server/src/seerr/mediaStatusProvider.ts` | 150 | The TMDB-id to Plex-ratingKey join, cached. Four routers depend on it. |
-| `server/src/plex/connection.ts` | 267 | Resolves `plex.direct` base URLs, both remote and local, so the browser can pick a reachable one. |
-| `server/src/plex/transientToken.ts` | 136 | Durable token in, short-lived scoped token out. |
-| `server/src/plex/resolvePmsToken.ts` | 33 | Picks the right Plex token for a given user. Small file, expensive lesson. |
-| `web/src/App.tsx` | 94 | The route table and the three access tiers. |
-| `web/src/pages/WatchPage.tsx` | 1,469 | The player: hls.js, resume, Up Next auto-advance, cast handoff. Read its header first; it maps the twelve effects before you meet them. |
-
-### Tier 2: read when the topic comes up
-
-Grouped by concern. Open these when a path above leads you here.
 
 **Auth and access control**
 
 | File | LOC | What it is |
 |---|---|---|
-| `server/src/routes/auth.ts` | 241 | Plex PIN login, four endpoints. Public by necessity. |
 | `server/src/middleware/auth.ts` | 60 | `requireAuth` and `requireAdmin`. The only two gates. |
 | `server/src/middleware/rateLimit.ts` | 77 | Two limiters, keyed on `CF-Connecting-IP`. |
 | `server/src/plex/client.ts` | 223 | The plex.tv account API. Not to be confused with `plex/server.ts`. |
@@ -401,62 +404,18 @@ Grouped by concern. Open these when a path above leads you here.
 | `web/src/cast/cast-globals.d.ts` | 239 | Hand-written ambient types, because the SDK isn't an npm package. |
 | `web/src/cast/useCastPlayer.ts` | 299 | Mirrors receiver state into React and exposes the four transport commands. |
 | `web/src/cast/useCastState.ts` | 159 | Can we cast, are we connected, and the toggle. |
-| `web/src/cast/subscribeSessionReady.ts` | 99 | Fires when a session can actually accept media. The obvious signal is the wrong one; the header says why. |
+| `web/src/cast/subscribeSessionReady.ts` | 99 | Fires when a session can actually accept media. The obvious signal, `CAST_STATE_CHANGED` reaching `CONNECTED`, can arrive before the receiver will accept a load; this waits for `SESSION_STATE_CHANGED`'s `STARTED`/`RESUMED` instead. |
 | `web/src/cast/loadMediaOnCast.ts` | 115 | The only `loadMedia` call. DASH plus Plex's required `/decision` handshake. |
 
-### Tier 3: leaves
+### Leaves
 
-One line each. These are small, do one thing, and rarely need reading unless
-you're changing them.
-
-**Remaining pages** (`web/src/pages/`): `HomePage` (197, personal analytics),
-`MyRequestsPage` (227, your requests plus quota), `IssueDetailPage` (325, one
-issue and its thread), `PersonPage` (265, actor or director credits),
-`CollectionPage` (176, a TMDB franchise), `MyIssuesPage` (143, your reports),
-`WatchlistPage` (111, Plex Watchlist grid).
-
-**Remaining components** (`web/src/components/`): `AppShell` (235, the sidebar
-layout wrapping every signed-in page), `Dropdown` (278, themed replacement for
-the native select, used app-wide), `EpisodeBrowser` (140, the Seasons block),
-`ContinueWatchingRail` (133, Plex On Deck), `RequestCard` (113, one request row),
-`RequestControls` (115, filter and sort bar), `ResumeDialog` (119, the resume
-prompt), `LibraryDetailRow` (110, wide library row), `UpNextCard` (97, the
-next-episode card), `WatchProgress` (93, progress bar over a poster),
-`CastStatusOverlay` (74, playing-on-TV banner), `MediaCard` (72, TMDB poster
-tile), `LibraryCard` (69, Plex poster tile), `PaginationControls` (63, prev and
-next).
-
-**Remaining API clients** (`web/src/api/`), each a thin typed wrapper over
-one backend router: `admin` (486), `accessRequests` (340), `requests` (260),
-`issues` (248), `library` (212), `auth` (190), `me` (133), `config` (70),
-`watchlist` (37).
-
-**Remaining small modules**: `web/src/main.tsx` (34, entry point),
-`web/src/lib/requestControls.ts` (156, filter and sort logic shared by two
-screens), `web/src/hooks/usePagination.ts` (76, client-side paging),
-`web/src/hooks/useAccessRequestsEnabled.ts` (40, one feature flag),
-`server/src/tmdb/studios.ts` (46, curated studio and network list),
-`server/src/routes/config.ts` (40, the public feature-flag probe),
-`server/src/routes/watchlist.ts` (79, one endpoint).
-
-## Running it
+37 files not covered above: pages, components, API clients, and small modules.
+Each one is small and single-purpose, with a header comment explaining what it
+does. Run this for the full inventory with line counts:
 
 ```bash
-npm install
-cp .env.example .env     # then fill it in
-npm run dev              # server on :4000, Vite on :5173
+find server/src web/src \( -name '*.ts' -o -name '*.tsx' \) ! -name '*.test.ts' ! -name '*.test.tsx' | xargs wc -l | sort -n
 ```
-
-`npm run dev` runs both workspaces together. The server needs Plex, Seerr and
-TMDB credentials to do anything useful; see `.env.example` for the eleven keys.
-
-```bash
-npm test -w server       # 328 tests, built-in Node runner
-npm run build            # typecheck + Vite build + tsc
-```
-
-In production the server serves the built SPA from the same origin, so there's
-one process and one port.
 
 ## Where the rest of the docs are
 
