@@ -61,8 +61,18 @@ export function RequestCard({
 
       <div className="request-card-body">
         <div className="request-card-head">
+          {/* Stretched-link: the title keeps its own <Link>, and an absolute
+              inset layer expands its hit area over the card. A wrapping <a>
+              around the row would nest the Approve/Decline buttons inside an
+              anchor (invalid HTML) and steal their clicks. Action controls and
+              the poster sit above the stretch with a higher z-index. */}
           <Link to={to} className="request-card-title">
             {request.title}
+            <span
+              className="request-card-stretch"
+              data-testid="request-card-stretch"
+              aria-hidden="true"
+            />
           </Link>
           <span className="stats-tag">
             {request.mediaType === "tv" ? "TV" : "Movie"}

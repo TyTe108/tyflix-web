@@ -112,7 +112,7 @@ export function MyIssuesPage() {
                     loading="lazy"
                   />
                 ) : null}
-                <div>
+                <div className="my-issues-body">
                   <div className="my-issues-row">
                     <Link
                       to={`/media/${issue.media.mediaType}/${issue.media.tmdbId}`}
@@ -130,7 +130,22 @@ export function MyIssuesPage() {
                   </div>
                   <p className="my-issues-meta muted">
                     Reported {formatIssueDate(issue.createdAt)} ·{" "}
-                    <Link to={`/issues/${issue.id}`}>View issue</Link>
+                    {/* Stretched-link: "View issue" keeps its own <Link>, and an
+                        absolute inset layer expands its hit area over the row.
+                        Wrapping the <li> in an anchor would nest the media
+                        title link inside it. The title sits above the stretch
+                        with a higher z-index so it still goes to media detail. */}
+                    <Link
+                      to={`/issues/${issue.id}`}
+                      className="my-issues-view-link"
+                    >
+                      View issue
+                      <span
+                        className="my-issues-stretch"
+                        data-testid="my-issues-stretch"
+                        aria-hidden="true"
+                      />
+                    </Link>
                   </p>
                 </div>
               </li>
