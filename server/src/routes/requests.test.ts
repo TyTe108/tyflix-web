@@ -196,8 +196,13 @@ function createApp(
   app.use(express.json());
   app.use(
     "/api/requests",
-    requireAuth(SECRET, seerr),
-    createRequestsRouter({ seerr, tmdb, sessionSecret: SECRET }),
+    requireAuth(SECRET, seerr, { isRevoked: () => false }),
+    createRequestsRouter({
+      seerr,
+      tmdb,
+      sessionSecret: SECRET,
+      sessionRevocation: { isRevoked: () => false },
+    }),
   );
   return app;
 }

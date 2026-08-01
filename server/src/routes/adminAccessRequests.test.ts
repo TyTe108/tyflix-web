@@ -287,6 +287,7 @@ function buildApp(
       sharing,
       sessionSecret: SECRET,
       seerr: authSeerr,
+      sessionRevocation: { isRevoked: () => false },
     }),
   );
   return app;

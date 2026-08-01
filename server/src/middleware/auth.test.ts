@@ -3,14 +3,26 @@
 
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { beforeEach, describe, it } from "node:test";
 import type { NextFunction, Request, Response } from "express";
 import type { SeerrUser } from "../seerr/client";
+import {
+  createSessionRevocationStore,
+  type SessionRevocationStore,
+} from "../sessionRevocation";
 import { SESSION_COOKIE_NAME } from "../session";
 import { requireAdmin, requireAuth } from "./auth";
 import { clearPermissionCacheForTests } from "./revalidatePermissions";
 
 const SECRET = "sixteen-chars!!!";
+
+/** Never-revokes stub for characterization cases that aren't about revocation. */
+function openRevocation(): Pick<SessionRevocationStore, "isRevoked"> {
+  return { isRevoked: () => false };
+}
 
 const sessionData = {
   seerrUserId: 7,
@@ -141,7 +153,12 @@ describe("requireAuth", () => {
     const tracker = fakeNext();
     const seerr = echoSeerr(2);
 
-    await run(requireAuth(SECRET, seerr), fakeReq(), fake.res, tracker.next);
+    await run(
+      requireAuth(SECRET, seerr, openRevocation()),
+      fakeReq(),
+      fake.res,
+      tracker.next,
+    );
 
     assert.equal(fake.statusCode, 401);
     assert.deepEqual(fake.jsonBody, { error: "not authenticated" });
@@ -164,7 +181,7 @@ describe("requireAuth", () => {
     const seerr = echoSeerr(2);
 
     await run(
-      requireAuth(SECRET, seerr),
+      requireAuth(SECRET, seerr, openRevocation()),
       fakeReq(`${SESSION_COOKIE_NAME}=${alteredPayload}.${sigPart}`),
       fake.res,
       tracker.next,
@@ -183,7 +200,7 @@ describe("requireAuth", () => {
     const seerr = echoSeerr(2);
 
     await run(
-      requireAuth(SECRET, seerr),
+      requireAuth(SECRET, seerr, openRevocation()),
       fakeReq(`${SESSION_COOKIE_NAME}=${token}`),
       fake.res,
       tracker.next,
@@ -208,7 +225,7 @@ describe("requireAuth", () => {
     const seerr = echoSeerr(2);
 
     await run(
-      requireAuth(SECRET, seerr),
+      requireAuth(SECRET, seerr, openRevocation()),
       fakeReq(`${SESSION_COOKIE_NAME}=${badPayload}.${sigPart}`),
       fake.res,
       tracker.next,
@@ -230,7 +247,7 @@ describe("requireAuth", () => {
     const seerr = echoSeerr(2);
 
     await run(
-      requireAuth(SECRET, seerr),
+      requireAuth(SECRET, seerr, openRevocation()),
       fakeReq(`${SESSION_COOKIE_NAME}=${token}`),
       fake.res,
       tracker.next,
@@ -249,7 +266,7 @@ describe("requireAuth", () => {
     const seerr = echoSeerr(payload.permissions);
 
     await run(
-      requireAuth(SECRET, seerr),
+      requireAuth(SECRET, seerr, openRevocation()),
       fakeReq(`${SESSION_COOKIE_NAME}=${token}`),
       fake.res,
       tracker.next,
@@ -267,7 +284,12 @@ describe("requireAdmin", () => {
     const tracker = fakeNext();
     const seerr = echoSeerr(2);
 
-    await run(requireAdmin(SECRET, seerr), fakeReq(), fake.res, tracker.next);
+    await run(
+      requireAdmin(SECRET, seerr, openRevocation()),
+      fakeReq(),
+      fake.res,
+      tracker.next,
+    );
 
     assert.equal(fake.statusCode, 401);
     assert.deepEqual(fake.jsonBody, { error: "not authenticated" });
@@ -281,7 +303,7 @@ describe("requireAdmin", () => {
     const seerr = echoSeerr(0);
 
     await run(
-      requireAdmin(SECRET, seerr),
+      requireAdmin(SECRET, seerr, openRevocation()),
       fakeReq(`${SESSION_COOKIE_NAME}=${token}`),
       fake.res,
       tracker.next,
@@ -299,7 +321,7 @@ describe("requireAdmin", () => {
     const seerr = echoSeerr(1);
 
     await run(
-      requireAdmin(SECRET, seerr),
+      requireAdmin(SECRET, seerr, openRevocation()),
       fakeReq(`${SESSION_COOKIE_NAME}=${token}`),
       fake.res,
       tracker.next,
@@ -318,7 +340,7 @@ describe("requireAdmin", () => {
     const seerr = echoSeerr(2);
 
     await run(
-      requireAdmin(SECRET, seerr),
+      requireAdmin(SECRET, seerr, openRevocation()),
       fakeReq(`${SESSION_COOKIE_NAME}=${token}`),
       fake.res,
       tracker.next,
@@ -337,7 +359,7 @@ describe("requireAdmin", () => {
     const seerr = echoSeerr(6);
 
     await run(
-      requireAdmin(SECRET, seerr),
+      requireAdmin(SECRET, seerr, openRevocation()),
       fakeReq(`${SESSION_COOKIE_NAME}=${token}`),
       fake.res,
       tracker.next,
@@ -360,7 +382,7 @@ describe("Seerr permission revalidation", () => {
     const tracker = fakeNext();
 
     await run(
-      requireAdmin(SECRET, seerr),
+      requireAdmin(SECRET, seerr, openRevocation()),
       fakeReq(`${SESSION_COOKIE_NAME}=${token}`),
       fake.res,
       tracker.next,
@@ -381,7 +403,7 @@ describe("Seerr permission revalidation", () => {
     const tracker = fakeNext();
 
     await run(
-      requireAdmin(SECRET, seerr),
+      requireAdmin(SECRET, seerr, openRevocation()),
       fakeReq(`${SESSION_COOKIE_NAME}=${token}`),
       fake.res,
       tracker.next,
@@ -406,7 +428,7 @@ describe("Seerr permission revalidation", () => {
     const tracker = fakeNext();
 
     await run(
-      requireAuth(SECRET, seerr),
+      requireAuth(SECRET, seerr, openRevocation()),
       fakeReq(`${SESSION_COOKIE_NAME}=${token}`),
       fake.res,
       tracker.next,
@@ -426,7 +448,7 @@ describe("Seerr permission revalidation", () => {
     const tracker = fakeNext();
 
     await run(
-      requireAdmin(SECRET, seerr),
+      requireAdmin(SECRET, seerr, openRevocation()),
       fakeReq(`${SESSION_COOKIE_NAME}=${token}`),
       fake.res,
       tracker.next,
@@ -446,7 +468,7 @@ describe("Seerr permission revalidation", () => {
     const tracker = fakeNext();
 
     await run(
-      requireAuth(SECRET, seerr),
+      requireAuth(SECRET, seerr, openRevocation()),
       fakeReq(`${SESSION_COOKIE_NAME}=${token}`),
       fake.res,
       tracker.next,
@@ -466,7 +488,7 @@ describe("Seerr permission revalidation", () => {
     const tracker = fakeNext();
 
     await run(
-      requireAuth(SECRET, seerr),
+      requireAuth(SECRET, seerr, openRevocation()),
       fakeReq(`${SESSION_COOKIE_NAME}=${token}`),
       fake.res,
       tracker.next,
@@ -487,7 +509,9 @@ describe("permission revalidation cache", () => {
     const seerr = stubSeerr(async () => seerrUser({ permissions: 2 }));
     const token = signToken(validPayload({ permissions: 2 }), SECRET);
     let nowMs = 1_000;
-    const mw = requireAuth(SECRET, seerr, { now: () => nowMs });
+    const mw = requireAuth(SECRET, seerr, openRevocation(), {
+      now: () => nowMs,
+    });
 
     for (let i = 0; i < 5; i++) {
       const fake = fakeRes();
@@ -509,7 +533,9 @@ describe("permission revalidation cache", () => {
       seerrUser({ id, permissions: id === 7 ? 2 : 0 }),
     );
     let nowMs = 1_000;
-    const mw = requireAuth(SECRET, seerr, { now: () => nowMs });
+    const mw = requireAuth(SECRET, seerr, openRevocation(), {
+      now: () => nowMs,
+    });
 
     const tokenA = signToken(
       validPayload({ seerrUserId: 7, permissions: 2 }),
@@ -550,7 +576,9 @@ describe("permission revalidation cache", () => {
     const seerr = stubSeerr(async () => seerrUser({ permissions: 2 }));
     const token = signToken(validPayload({ permissions: 2 }), SECRET);
     let nowMs = 1_000;
-    const mw = requireAuth(SECRET, seerr, { now: () => nowMs });
+    const mw = requireAuth(SECRET, seerr, openRevocation(), {
+      now: () => nowMs,
+    });
 
     const first = fakeRes();
     await run(
@@ -583,7 +611,9 @@ describe("permission revalidation cache", () => {
     });
     const token = signToken(validPayload({ permissions: 2 }), SECRET);
     let nowMs = 1_000;
-    const mw = requireAuth(SECRET, seerr, { now: () => nowMs });
+    const mw = requireAuth(SECRET, seerr, openRevocation(), {
+      now: () => nowMs,
+    });
 
     const failed = fakeRes();
     const failedNext = fakeNext();
@@ -608,5 +638,94 @@ describe("permission revalidation cache", () => {
     assert.equal(okNext.calls, 1);
     assert.equal(ok.statusCode, undefined);
     assert.equal(seerr.calls.length, 2);
+  });
+});
+
+describe("session revocation via shared helper", () => {
+  async function realRevocationStore(
+    nowSeconds: () => number,
+  ): Promise<SessionRevocationStore> {
+    const dir = await mkdtemp(path.join(tmpdir(), "tyflix-auth-rev-"));
+    return createSessionRevocationStore(
+      path.join(dir, "session-revocation.json"),
+      { now: nowSeconds },
+    );
+  }
+
+  it("rejects a revoked session with the same 401 body as a missing cookie", async () => {
+    // Seerr would succeed — the only way to get 401 here is revocation.
+    const seerr = echoSeerr(2);
+    const wallNow = Math.floor(Date.now() / 1000);
+    let revokeAt = wallNow;
+    const revocation = await realRevocationStore(() => revokeAt);
+    // iat in the past so iat < validAfter after revoke (same-second would be valid).
+    const payload = validPayload({
+      iat: wallNow - 10,
+      exp: wallNow + 3600,
+    });
+    const token = signToken(payload, SECRET);
+
+    await revocation.revokeSessionsBefore(payload.seerrUserId);
+
+    const fake = fakeRes();
+    const tracker = fakeNext();
+    await run(
+      requireAuth(SECRET, seerr, revocation),
+      fakeReq(`${SESSION_COOKIE_NAME}=${token}`),
+      fake.res,
+      tracker.next,
+    );
+
+    assert.equal(fake.statusCode, 401);
+    assert.deepEqual(fake.jsonBody, { error: "not authenticated" });
+    assert.equal(tracker.calls, 0);
+    // Revocation must short-circuit before Seerr.
+    assert.deepEqual(seerr.calls, []);
+  });
+
+  it("rejects a revoked session even with a warm permission cache (ordering)", async () => {
+    // Primes the Phase 32 cache first. A cold-cache revoke test would pass
+    // even if the check sat below the early-return cache hit — this one
+    // fails unless revocation runs ABOVE the cache lookup.
+    const seerr = echoSeerr(2);
+    const wallNow = Math.floor(Date.now() / 1000);
+    let revokeAt = wallNow;
+    let nowMs = 1_000;
+    const revocation = await realRevocationStore(() => revokeAt);
+    const payload = validPayload({
+      iat: wallNow - 10,
+      exp: wallNow + 3600,
+    });
+    const token = signToken(payload, SECRET);
+    const mw = requireAuth(SECRET, seerr, revocation, { now: () => nowMs });
+
+    const primed = fakeRes();
+    const primedNext = fakeNext();
+    await run(
+      mw,
+      fakeReq(`${SESSION_COOKIE_NAME}=${token}`),
+      primed.res,
+      primedNext.next,
+    );
+    assert.equal(primedNext.calls, 1);
+    assert.equal(seerr.calls.length, 1);
+
+    await revocation.revokeSessionsBefore(payload.seerrUserId);
+
+    // Still inside the 10s cache window — a misplaced check would 200 here.
+    const after = fakeRes();
+    const afterNext = fakeNext();
+    await run(
+      mw,
+      fakeReq(`${SESSION_COOKIE_NAME}=${token}`),
+      after.res,
+      afterNext.next,
+    );
+
+    assert.equal(after.statusCode, 401);
+    assert.deepEqual(after.jsonBody, { error: "not authenticated" });
+    assert.equal(afterNext.calls, 0);
+    // No second Seerr call: revocation rejected before the cache/Seerr path.
+    assert.equal(seerr.calls.length, 1);
   });
 });

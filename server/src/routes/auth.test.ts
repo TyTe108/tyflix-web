@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { beforeEach, describe, it } from "node:test";
 import express from "express";
+import { requireAuth } from "../middleware/auth";
 import { clearPermissionCacheForTests } from "../middleware/revalidatePermissions";
 import type { PlexClient, PlexUser } from "../plex/client";
 import {
@@ -8,6 +13,10 @@ import {
   type SeerrClient,
   type SeerrUser,
 } from "../seerr/client";
+import {
+  createSessionRevocationStore,
+  type SessionRevocationStore,
+} from "../sessionRevocation";
 import { issueSession, SESSION_COOKIE_NAME } from "../session";
 import { createAuthRouter } from "./auth";
 
@@ -16,6 +25,16 @@ beforeEach(() => {
 });
 
 const SECRET = "sixteen-chars!!!";
+
+async function tempRevocationStore(
+  now?: () => number,
+): Promise<SessionRevocationStore> {
+  const dir = await mkdtemp(path.join(tmpdir(), "tyflix-auth-route-rev-"));
+  return createSessionRevocationStore(
+    path.join(dir, "session-revocation.json"),
+    now !== undefined ? { now } : {},
+  );
+}
 
 function plexUser(overrides: Partial<PlexUser> = {}): PlexUser {
   return {
@@ -50,8 +69,9 @@ function buildApp(
     seerr?: Partial<SeerrClient> & {
       getUserById?: (id: number) => Promise<SeerrUser | null>;
     };
+    sessionRevocation?: SessionRevocationStore;
   } = {},
-): { app: express.Express; calls: Calls } {
+): { app: express.Express; calls: Calls; sessionRevocation: SessionRevocationStore } {
   const calls: Calls = { signInTokens: [], getUserPlexIds: [] };
 
   const plex = {
@@ -73,8 +93,22 @@ function buildApp(
       calls.getUserPlexIds.push(plexId);
       return seerrUser();
     },
+    async getUserById(id: number) {
+      return seerrUser({ id });
+    },
     ...overrides.seerr,
   } as unknown as SeerrClient;
+
+  // Lazy sync placeholder — tests that need real revocation pass one in.
+  // Existing plex/check and /me cases use a never-revokes stub.
+  const sessionRevocation =
+    overrides.sessionRevocation ??
+    ({
+      isRevoked: () => false,
+      async revokeSessionsBefore() {
+        /* no-op stub for tests that don't exercise logout */
+      },
+    } satisfies SessionRevocationStore);
 
   const app = express();
   app.use(express.json());
@@ -85,9 +119,18 @@ function buildApp(
       seerr,
       sessionSecret: SECRET,
       secureCookies: false,
+      sessionRevocation,
     }),
   );
-  return { app, calls };
+  // Protected probe used by logout tests to assert the cookie is dead.
+  app.use(
+    "/api/probe",
+    requireAuth(SECRET, seerr, sessionRevocation),
+    (_req, res) => {
+      res.json({ ok: true });
+    },
+  );
+  return { app, calls, sessionRevocation };
 }
 
 async function checkPin(
@@ -296,6 +339,34 @@ function meCookie(permissions: number, seerrUserId = 9): string {
   return `${SESSION_COOKIE_NAME}=${cookies[0].value}`;
 }
 
+/**
+ * Cookie with a controlled iat. Used by logout tests so the session is older
+ * than the revoke timestamp (issueSession's real-clock iat can land in the
+ * same second as logout, and iat === validAfter is deliberately valid).
+ */
+function meCookieIssuedAt(
+  iat: number,
+  permissions: number,
+  seerrUserId = 9,
+): string {
+  const payload = {
+    seerrUserId,
+    plexId: 100,
+    plexUsername: "alice",
+    displayName: "Alice",
+    avatar: "https://plex/avatar.png",
+    permissions,
+    iat,
+    exp: iat + 30 * 24 * 60 * 60,
+  };
+  const json = JSON.stringify(payload);
+  const payloadPart = Buffer.from(json, "utf8").toString("base64url");
+  const sigPart = createHmac("sha256", SECRET)
+    .update(json)
+    .digest("base64url");
+  return `${SESSION_COOKIE_NAME}=${payloadPart}.${sigPart}`;
+}
+
 async function fetchMe(
   app: express.Express,
   cookie: string | null,
@@ -389,6 +460,172 @@ describe("GET /api/auth/me", () => {
     assert.equal(body.user.permissions, 2);
     assert.equal(body.user.seerrUserId, 9);
     assert.equal(body.isAdmin, true);
+  });
+});
+
+async function fetchLocal(
+  app: express.Express,
+  pathName: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const server = app.listen(0);
+  try {
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("failed to bind test server");
+    }
+    return await fetch(`http://127.0.0.1:${address.port}${pathName}`, init);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+  }
+}
+
+function cookieHeaderFromSetCookie(setCookie: string): string {
+  // Keep only name=value; drop Path/HttpOnly/etc. attributes.
+  return setCookie.split(";")[0]!;
+}
+
+describe("POST /api/auth/logout", () => {
+  it("returns 200 {ok:true} even when there is no session", async () => {
+    const revocation = await tempRevocationStore();
+    const { app } = buildApp({ sessionRevocation: revocation });
+
+    const response = await fetchLocal(app, "/api/auth/logout", {
+      method: "POST",
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+  });
+
+  it("invalidates the caller's cookie against a protected route", async () => {
+    const revocation = await tempRevocationStore();
+    const { app } = buildApp({
+      sessionRevocation: revocation,
+      seerr: {
+        async getUserById(id: number) {
+          return seerrUser({ id, permissions: 0 });
+        },
+      },
+    });
+
+    const cookie = meCookieIssuedAt(Math.floor(Date.now() / 1000) - 60, 0, 9);
+
+    const before = await fetchLocal(app, "/api/probe", {
+      headers: { cookie },
+    });
+    assert.equal(before.status, 200);
+
+    const logout = await fetchLocal(app, "/api/auth/logout", {
+      method: "POST",
+      headers: { cookie },
+    });
+    assert.equal(logout.status, 200);
+    assert.deepEqual(await logout.json(), { ok: true });
+
+    // Same cookie value still sent — must be 401, not merely a cleared Set-Cookie.
+    const after = await fetchLocal(app, "/api/probe", {
+      headers: { cookie },
+    });
+    assert.equal(after.status, 401);
+    assert.deepEqual(await after.json(), { error: "not authenticated" });
+  });
+
+  it("rejects a second separately-held copy of the same pre-logout cookie", async () => {
+    // Per-user revocation: two "sessions" (copies) for the same user; one
+    // logout must kill both. A per-cookie-instance fix would leave copy B alive.
+    const revocation = await tempRevocationStore();
+    const { app } = buildApp({
+      sessionRevocation: revocation,
+      seerr: {
+        async getUserById(id: number) {
+          return seerrUser({ id, permissions: 0 });
+        },
+      },
+    });
+
+    const cookieA = meCookieIssuedAt(Math.floor(Date.now() / 1000) - 60, 0, 9);
+    const cookieB = cookieA; // separately held copy of the same signed cookie
+
+    const logout = await fetchLocal(app, "/api/auth/logout", {
+      method: "POST",
+      headers: { cookie: cookieA },
+    });
+    assert.equal(logout.status, 200);
+
+    const probeA = await fetchLocal(app, "/api/probe", {
+      headers: { cookie: cookieA },
+    });
+    const probeB = await fetchLocal(app, "/api/probe", {
+      headers: { cookie: cookieB },
+    });
+    assert.equal(probeA.status, 401);
+    assert.equal(probeB.status, 401);
+    assert.deepEqual(await probeA.json(), { error: "not authenticated" });
+    assert.deepEqual(await probeB.json(), { error: "not authenticated" });
+  });
+
+  it("allows a fresh login immediately after logout", async () => {
+    const revocation = await tempRevocationStore();
+    const { app } = buildApp({
+      sessionRevocation: revocation,
+      seerr: {
+        async signInWithPlex() {
+          return seerrUser({ id: 9, plexId: 100, permissions: 0 });
+        },
+        async getUserById(id: number) {
+          return seerrUser({ id, permissions: 0 });
+        },
+      },
+    });
+
+    const oldCookie = meCookieIssuedAt(Math.floor(Date.now() / 1000) - 60, 0, 9);
+
+    const logout = await fetchLocal(app, "/api/auth/logout", {
+      method: "POST",
+      headers: { cookie: oldCookie },
+    });
+    assert.equal(logout.status, 200);
+
+    const dead = await fetchLocal(app, "/api/probe", {
+      headers: { cookie: oldCookie },
+    });
+    assert.equal(dead.status, 401);
+
+    // New /plex/check session for the same user must work (iat >= validAfter).
+    const login = await checkPin(app);
+    assert.equal(login.status, 200);
+    const setCookie = sessionCookieValue(login);
+    assert.notEqual(setCookie, null);
+    const newCookie = cookieHeaderFromSetCookie(setCookie!);
+
+    const alive = await fetchLocal(app, "/api/probe", {
+      headers: { cookie: newCookie },
+    });
+    assert.equal(alive.status, 200);
+  });
+
+  it("does not return 200 {ok:true} when revokeSessionsBefore fails", async () => {
+    // Fail-loud: a write failure must not clear the cookie under a success body.
+    const sessionRevocation: SessionRevocationStore = {
+      isRevoked: () => false,
+      async revokeSessionsBefore() {
+        throw new Error("disk full");
+      },
+    };
+    const { app } = buildApp({ sessionRevocation });
+
+    const cookie = meCookieIssuedAt(Math.floor(Date.now() / 1000) - 60, 0, 9);
+    const response = await fetchLocal(app, "/api/auth/logout", {
+      method: "POST",
+      headers: { cookie },
+    });
+
+    assert.ok(
+      response.status >= 500 && response.status < 600,
+      `expected 5xx, got ${response.status}`,
+    );
   });
 });
 

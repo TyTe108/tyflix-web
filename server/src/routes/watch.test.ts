@@ -121,7 +121,11 @@ function baseDeps(): WatchRouterDeps {
 function createApp(deps: WatchRouterDeps): express.Express {
   const app = express();
   app.use(express.json());
-  app.use("/api/watch", requireAuth(SECRET, authSeerr), createWatchRouter(deps));
+  app.use(
+    "/api/watch",
+    requireAuth(SECRET, authSeerr, { isRevoked: () => false }),
+    createWatchRouter(deps),
+  );
   return app;
 }
 

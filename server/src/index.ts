@@ -54,6 +54,7 @@ import { createWatchRouter } from "./routes/watch";
 import { createWatchlistRouter } from "./routes/watchlist";
 import { createSeerrClient } from "./seerr/client";
 import { createMediaStatusProvider } from "./seerr/mediaStatusProvider";
+import { createSessionRevocationStore } from "./sessionRevocation";
 import { createTmdbClient } from "./tmdb/client";
 import { createMediaEnrichment } from "./tmdb/enrichment";
 
@@ -78,8 +79,14 @@ void start().catch((err) => {
 });
 
 // Builds the upstream clients, mounts everything in order, then listens. Async
-// only because the access-request store reads its JSON file at construction.
+// because the JSON-file stores read at construction.
 async function start(): Promise<void> {
+  // Always constructed — session revocation is core auth, not feature-flagged.
+  // Boot fails loud if SESSION_REVOCATION_FILE's parent directory is missing.
+  const sessionRevocation = await createSessionRevocationStore(
+    config.sessionRevocationFile,
+  );
+
   // Self-serve access requests are off unless ACCESS_REQUESTS_FILE points at a
   // real path. An undefined store here is the single feature flag: it gates the
   // public submit route, gates the admin queue, and is what /api/config reports
@@ -213,6 +220,7 @@ async function start(): Promise<void> {
       seerr,
       sessionSecret: config.sessionSecret,
       secureCookies,
+      sessionRevocation,
     }),
   );
 
@@ -239,7 +247,7 @@ async function start(): Promise<void> {
   // out of res.locals.session, which requireAuth puts there.
   app.use(
     "/api/me",
-    requireAuth(config.sessionSecret, seerr),
+    requireAuth(config.sessionSecret, seerr, sessionRevocation),
     createMeRouter({ plexServer, seerr }),
   );
 
@@ -261,6 +269,7 @@ async function start(): Promise<void> {
         sharing,
         sessionSecret: config.sessionSecret,
         seerr,
+        sessionRevocation,
       }),
     );
   }
@@ -269,7 +278,7 @@ async function start(): Promise<void> {
   // top of a valid session.
   app.use(
     "/api/admin",
-    requireAdmin(config.sessionSecret, seerr),
+    requireAdmin(config.sessionSecret, seerr, sessionRevocation),
     createAdminRouter({ dashboard }),
   );
 
@@ -277,7 +286,7 @@ async function start(): Promise<void> {
   // TMDB-id-to-rating-key join happening in mediaStatus.
   app.use(
     "/api/discover",
-    requireAuth(config.sessionSecret, seerr),
+    requireAuth(config.sessionSecret, seerr, sessionRevocation),
     createDiscoverRouter({ tmdb, mediaStatus }),
   );
 
@@ -287,7 +296,7 @@ async function start(): Promise<void> {
   // token for shared accounts.
   app.use(
     "/api/library",
-    requireAuth(config.sessionSecret, seerr),
+    requireAuth(config.sessionSecret, seerr, sessionRevocation),
     createLibraryRouter({
       plexServer,
       sharedServerAccess,
@@ -300,23 +309,24 @@ async function start(): Promise<void> {
   // title and poster.
   app.use(
     "/api/watchlist",
-    requireAuth(config.sessionSecret, seerr),
+    requireAuth(config.sessionSecret, seerr, sessionRevocation),
     createWatchlistRouter({ seerr, mediaStatus, mediaEnrichment }),
   );
 
   app.use(
     "/api/issues",
-    requireAuth(config.sessionSecret, seerr),
+    requireAuth(config.sessionSecret, seerr, sessionRevocation),
     createIssuesRouter({ seerr, mediaStatus, mediaEnrichment }),
   );
 
   app.use(
     "/api/requests",
-    requireAuth(config.sessionSecret, seerr),
+    requireAuth(config.sessionSecret, seerr, sessionRevocation),
     createRequestsRouter({
       seerr,
       tmdb,
       sessionSecret: config.sessionSecret,
+      sessionRevocation,
     }),
   );
 
@@ -325,7 +335,7 @@ async function start(): Promise<void> {
   // reachable plex.direct address, and the rating key behind a TMDB id.
   app.use(
     "/api/watch",
-    requireAuth(config.sessionSecret, seerr),
+    requireAuth(config.sessionSecret, seerr, sessionRevocation),
     createWatchRouter({
       plexConnection,
       transientMinter,

@@ -42,6 +42,7 @@ import {
   type SharedServerShare,
 } from "../plex/sharing";
 import type { SeerrClient } from "../seerr/client";
+import type { SessionRevocationStore } from "../sessionRevocation";
 
 // How long a Plex pending/shares snapshot is reused. The admin page polls, and
 // shares change on human timescales, so a minute is plenty.
@@ -76,6 +77,7 @@ export type AdminAccessRequestsRouterDeps = {
   >;
   sessionSecret: string;
   seerr: Pick<SeerrClient, "getUserById">;
+  sessionRevocation: Pick<SessionRevocationStore, "isRevoked">;
 };
 
 // Plex's view of who's been invited and who's accepted, flattened into two
@@ -90,9 +92,9 @@ type PlexReconcileSnapshot = {
 export function createAdminAccessRequestsRouter(
   deps: AdminAccessRequestsRouterDeps,
 ): Router {
-  const { store, sharing, sessionSecret, seerr } = deps;
+  const { store, sharing, sessionSecret, seerr, sessionRevocation } = deps;
   const router = Router();
-  const admin = requireAdmin(sessionSecret, seerr);
+  const admin = requireAdmin(sessionSecret, seerr, sessionRevocation);
 
   // Cleared on approve, since an invite has just changed the state this holds.
   let plexCache: {

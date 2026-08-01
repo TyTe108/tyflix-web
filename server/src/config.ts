@@ -8,7 +8,8 @@
 // line at boot tells you exactly which one to fix. Three variables have
 // defaults (PORT, NODE_ENV, PLEX_PRODUCT) and only ACCESS_REQUESTS_FILE is
 // genuinely optional. Everything else is required, because every one of them is
-// a credential or an upstream address the app can't work without.
+// a credential, an upstream address, or core auth infrastructure the app can't
+// work without.
 //
 // loadConfig takes the env as a parameter defaulting to process.env, which is
 // what lets config.test.ts exercise all of this without mutating the real
@@ -42,6 +43,8 @@ export type AppConfig = {
   tmdbApiKey: string;
   /** Absolute path to the access-requests JSON file. Absent = feature off. */
   accessRequestsFile?: string;
+  /** Absolute path to the session-revocation JSON file. Always required. */
+  sessionRevocationFile: string;
 };
 
 /**
@@ -185,6 +188,18 @@ function parseAccessRequestsFile(raw: string | undefined): string | undefined {
   return trimmed;
 }
 
+// Required absolute path. Session revocation is core auth infrastructure, not
+// an optional feature — boot must fail if this is missing or relative.
+function parseSessionRevocationFile(raw: string | undefined): string {
+  const validated = validate("SESSION_REVOCATION_FILE", raw, (v) => {
+    if (!path.isAbsolute(v.trim())) {
+      return "must be an absolute path";
+    }
+    return null;
+  });
+  return validated.trim();
+}
+
 /**
  * Validates the whole environment and returns the config the rest of the server
  * runs on. Called once from index.ts at boot.
@@ -208,6 +223,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     seerrApiKey: parseSeerrApiKey(env.SEERR_API_KEY),
     dashboardUrl: parseDashboardUrl(env.DASHBOARD_URL),
     tmdbApiKey: parseTmdbApiKey(env.TMDB_API_KEY),
+    sessionRevocationFile: parseSessionRevocationFile(
+      env.SESSION_REVOCATION_FILE,
+    ),
     ...(accessRequestsFile !== undefined ? { accessRequestsFile } : {}),
   };
 }

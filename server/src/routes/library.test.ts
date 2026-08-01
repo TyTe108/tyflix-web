@@ -70,7 +70,7 @@ function createApp(deps: LibraryRouterDeps): express.Express {
   const app = express();
   app.use(
     "/api/library",
-    requireAuth(SECRET, authSeerr),
+    requireAuth(SECRET, authSeerr, { isRevoked: () => false }),
     createLibraryRouter(deps),
   );
   return app;

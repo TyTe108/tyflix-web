@@ -25,6 +25,7 @@ import {
   type SeerrClient,
   type SeerrRequest,
 } from "../seerr/client";
+import type { SessionRevocationStore } from "../sessionRevocation";
 import { isAdmin, type SessionPayload } from "../session";
 import type { TmdbClient } from "../tmdb/client";
 
@@ -41,12 +42,13 @@ export type RequestsRouterDeps = {
   >;
   tmdb: Pick<TmdbClient, "movieDetail" | "tvDetail">;
   sessionSecret: string;
+  sessionRevocation: Pick<SessionRevocationStore, "isRevoked">;
 };
 
 export function createRequestsRouter(deps: RequestsRouterDeps): Router {
-  const { seerr, tmdb, sessionSecret } = deps;
+  const { seerr, tmdb, sessionSecret, sessionRevocation } = deps;
   const router = Router();
-  const admin = requireAdmin(sessionSecret, seerr);
+  const admin = requireAdmin(sessionSecret, seerr, sessionRevocation);
 
   /**
    * GET /api/requests/profiles?mediaType=movie|tv

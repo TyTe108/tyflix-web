@@ -24,6 +24,7 @@ import {
   type SeerrClient,
   type SeerrUser,
 } from "../seerr/client";
+import type { SessionRevocationStore } from "../sessionRevocation";
 import {
   clearSession,
   isAdmin,
@@ -37,10 +38,11 @@ export type AuthRouterDeps = {
   sessionSecret: string;
   // False in development so the cookie survives plain http://localhost.
   secureCookies: boolean;
+  sessionRevocation: SessionRevocationStore;
 };
 
 export function createAuthRouter(deps: AuthRouterDeps): Router {
-  const { plex, seerr, sessionSecret, secureCookies } = deps;
+  const { plex, seerr, sessionSecret, secureCookies, sessionRevocation } = deps;
   const router = Router();
 
   /**
@@ -173,10 +175,11 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   /**
    * GET /api/auth/me
    *
-   * Who's signed in. Verifies the cookie, then re-checks permissions against
-   * Seerr (same helper as requireAuth). Returns `{ user, isAdmin }` with the
-   * live permissions, 401 when the cookie is missing/tampered/expired or Seerr
-   * says the account is gone, and 503 when Seerr is unreachable.
+   * Who's signed in. Verifies the cookie, then re-checks revocation and
+   * permissions against Seerr (same helper as requireAuth). Returns
+   * `{ user, isAdmin }` with the live permissions, 401 when the cookie is
+   * missing/tampered/expired/revoked or Seerr says the account is gone, and
+   * 503 when Seerr is unreachable.
    *
    * Note the `user` block leaves out email: that only comes back from
    * /plex/check, since the session doesn't carry it. The cookie is not
@@ -189,8 +192,12 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
       return;
     }
 
-    const result = await revalidateSessionPermissions(session, seerr);
-    if (result.status === "not_found") {
+    const result = await revalidateSessionPermissions(
+      session,
+      seerr,
+      sessionRevocation,
+    );
+    if (result.status === "revoked" || result.status === "not_found") {
       res.status(401).json({ error: "not authenticated" });
       return;
     }
@@ -215,11 +222,18 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   /**
    * POST /api/auth/logout
    *
-   * Clears the session cookie and returns `{ ok: true }`. Always 200, even
-   * without a session, so the client never has to special-case it. Nothing is
-   * revoked on Plex's side; the encrypted token simply stops being reachable.
+   * Revokes every session for this user (durably, before responding), clears
+   * the browser cookie, and returns `{ ok: true }`. Always 200, even without
+   * a session, so the client never has to special-case it. A write failure
+   * during revoke is not swallowed into ok:true — it surfaces as an error.
+   * Nothing is revoked on Plex's side; the encrypted token simply stops being
+   * accepted here.
    */
-  router.post("/logout", (_req, res) => {
+  router.post("/logout", async (req, res) => {
+    const session = readSession(req, sessionSecret);
+    if (session !== null) {
+      await sessionRevocation.revokeSessionsBefore(session.seerrUserId);
+    }
     clearSession(res, { secure: secureCookies });
     res.json({ ok: true });
   });

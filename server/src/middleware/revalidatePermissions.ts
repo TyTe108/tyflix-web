@@ -1,10 +1,16 @@
-// Fresh Seerr permission lookup for an already-verified session.
+// Fresh Seerr permission lookup for an already-verified session, plus a
+// revocation check against the durable session-revocation store.
 //
 // requireAuth / requireAdmin and GET /api/auth/me all go through here so the
 // fetch-and-classify logic lives in one place. The cookie's permissions field
 // is not consulted — only the Seerr record for session.seerrUserId.
+//
+// Revocation is checked first, on every call, never cached. The Phase 32
+// coalescing cache sits below it; putting the check after the cache hit would
+// let a logged-out cookie keep working for up to 10 seconds.
 
 import type { SeerrClient } from "../seerr/client";
+import type { SessionRevocationStore } from "../sessionRevocation";
 import type { SessionPayload } from "../session";
 
 /**
@@ -16,7 +22,8 @@ import type { SessionPayload } from "../session";
  * Collapsing them to one call is the measured reason this exists.
  *
  * What it costs: up to 10 seconds of permission staleness (a revoke or grant
- * in Seerr may not be seen until the window elapses).
+ * in Seerr may not be seen until the window elapses). Session revocation is
+ * NOT covered by this cache — it is checked on every call before the lookup.
  *
  * Errors are deliberately not cached. A cached failure would 503 every request
  * for that user for the rest of the window even after Seerr has recovered; the
@@ -33,11 +40,14 @@ const cache = new Map<number, CacheEntry>();
 const inflight = new Map<number, Promise<PermissionRevalidation>>();
 
 /**
- * Three outcomes of asking Seerr for the caller's current permissions:
+ * Outcomes of revalidating an already-verified session:
  *
  * - `ok`: Seerr confirmed the account; `permissions` is the live bitfield.
  *   Callers attach it to `res.locals.session` (request-scoped only; do not
  *   re-issue the cookie) and continue.
+ * - `revoked`: the session's iat is strictly before this user's validAfter in
+ *   the revocation store. Callers must reject with 401 — same body as a
+ *   missing cookie. Never distinguish this from not_found in the response.
  * - `not_found`: Seerr answered 404 — the account no longer exists. Callers
  *   must reject with 401. Never fall through to the cookie's permissions.
  * - `unreachable`: transport failure, timeout, unexpected body, or any other
@@ -46,6 +56,7 @@ const inflight = new Map<number, Promise<PermissionRevalidation>>();
  */
 export type PermissionRevalidation =
   | { status: "ok"; permissions: number }
+  | { status: "revoked" }
   | { status: "not_found" }
   | { status: "unreachable" };
 
@@ -55,14 +66,25 @@ export type RevalidatePermissionsOptions = {
 };
 
 /**
- * Looks up the session's Seerr user and classifies the result. See
- * PermissionRevalidation for what each status means and what callers should do.
+ * Checks revocation, then looks up the session's Seerr user and classifies the
+ * result. See PermissionRevalidation for what each status means and what
+ * callers should do.
+ *
+ * Ordering is load-bearing: revocation runs before the coalescing cache. A
+ * cache hit must never skip the revocation check.
  */
 export async function revalidateSessionPermissions(
   session: SessionPayload,
   seerr: Pick<SeerrClient, "getUserById">,
+  revocation: Pick<SessionRevocationStore, "isRevoked">,
   options: RevalidatePermissionsOptions = {},
 ): Promise<PermissionRevalidation> {
+  // Always first, never cached: in-memory integer compare, and still correct
+  // while Seerr is down.
+  if (revocation.isRevoked(session.seerrUserId, session.iat)) {
+    return { status: "revoked" };
+  }
+
   const now = options.now ?? Date.now;
   const userId = session.seerrUserId;
 

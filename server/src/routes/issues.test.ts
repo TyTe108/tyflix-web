@@ -151,7 +151,7 @@ function createApp(
   app.use(express.json());
   app.use(
     "/api/issues",
-    requireAuth(SECRET, auth),
+    requireAuth(SECRET, auth, { isRevoked: () => false }),
     createIssuesRouter({
       seerr,
       mediaStatus: {

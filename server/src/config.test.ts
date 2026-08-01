@@ -14,6 +14,7 @@ const validEnv = {
   SEERR_API_KEY: "seerr-api-key",
   DASHBOARD_URL: "http://dashboard:8787",
   TMDB_API_KEY: "tmdb-api-key",
+  SESSION_REVOCATION_FILE: "/data/session-revocation.json",
 };
 
 describe("loadConfig", () => {
@@ -31,7 +32,35 @@ describe("loadConfig", () => {
       seerrApiKey: "seerr-api-key",
       dashboardUrl: "http://dashboard:8787",
       tmdbApiKey: "tmdb-api-key",
+      sessionRevocationFile: "/data/session-revocation.json",
     });
+  });
+
+  it("throws naming SESSION_REVOCATION_FILE when missing or empty", () => {
+    assert.throws(
+      () => loadConfig({ ...validEnv, SESSION_REVOCATION_FILE: undefined }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("SESSION_REVOCATION_FILE"),
+    );
+    assert.throws(
+      () => loadConfig({ ...validEnv, SESSION_REVOCATION_FILE: "  " }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("SESSION_REVOCATION_FILE"),
+    );
+  });
+
+  it("throws when SESSION_REVOCATION_FILE is a relative path", () => {
+    assert.throws(
+      () =>
+        loadConfig({
+          ...validEnv,
+          SESSION_REVOCATION_FILE: "data/session-revocation.json",
+        }),
+      (err: unknown) =>
+        err instanceof Error &&
+        err.message.includes("SESSION_REVOCATION_FILE") &&
+        err.message.includes("absolute"),
+    );
   });
 
   it("omits accessRequestsFile when ACCESS_REQUESTS_FILE is unset or whitespace", () => {

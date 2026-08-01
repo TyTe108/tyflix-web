@@ -69,7 +69,7 @@ describe("GET /api/me/quota", () => {
     const app = express();
     app.use(
       "/api/me",
-      requireAuth(SECRET, seerr),
+      requireAuth(SECRET, seerr, { isRevoked: () => false }),
       createMeRouter({
         seerr,
         plexServer: {} as PlexServerClient,
