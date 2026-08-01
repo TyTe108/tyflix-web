@@ -37,6 +37,7 @@ export type RequestsRouterDeps = {
     | "createRequest"
     | "approveRequest"
     | "declineRequest"
+    | "getUserById"
   >;
   tmdb: Pick<TmdbClient, "movieDetail" | "tvDetail">;
   sessionSecret: string;
@@ -45,7 +46,7 @@ export type RequestsRouterDeps = {
 export function createRequestsRouter(deps: RequestsRouterDeps): Router {
   const { seerr, tmdb, sessionSecret } = deps;
   const router = Router();
-  const admin = requireAdmin(sessionSecret);
+  const admin = requireAdmin(sessionSecret, seerr);
 
   /**
    * GET /api/requests/profiles?mediaType=movie|tv

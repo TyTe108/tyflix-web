@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import express from "express";
 import type {
   AccessRequest,
@@ -8,6 +8,7 @@ import type {
   MarkInvitedInput,
 } from "../accessRequests/store";
 import { AccessRequestTransitionError } from "../accessRequests/store";
+import { clearPermissionCacheForTests } from "../middleware/revalidatePermissions";
 import {
   PlexSharingError,
   type InviteResult,
@@ -25,6 +26,26 @@ import {
 const SECRET = "sixteen-chars!!!";
 const ADMIN_PERMISSION = 2;
 
+const livePermissions = new Map<number, number>();
+
+beforeEach(() => {
+  clearPermissionCacheForTests();
+  livePermissions.clear();
+});
+
+const authSeerr = {
+  async getUserById(id: number) {
+    return {
+      id,
+      plexId: 10,
+      plexUsername: "tyler",
+      displayName: "Tyler",
+      email: null,
+      permissions: livePermissions.get(id) ?? 0,
+    };
+  },
+};
+
 const SECTIONS: ShareableSection[] = [
   { id: 122223622, key: 1, title: "Movies", type: "movie" },
   { id: 122223654, key: 2, title: "TV Shows", type: "show" },
@@ -36,6 +57,8 @@ type FakeRes = {
 };
 
 function sessionCookie(permissions = 0): string {
+  livePermissions.set(1, permissions);
+  clearPermissionCacheForTests();
   const cookies: Array<{ name: string; value: string }> = [];
   const res: FakeRes = {
     cookies,
@@ -263,6 +286,7 @@ function buildApp(
       store,
       sharing,
       sessionSecret: SECRET,
+      seerr: authSeerr,
     }),
   );
   return app;

@@ -211,6 +211,125 @@ describe("createSeerrClient().signInWithPlex", () => {
   });
 });
 
+describe("createSeerrClient().getUserById", () => {
+  it("GETs /api/v1/user/:id with X-Api-Key and returns the mapped user", async () => {
+    const calls: Array<{ url: string; headers: HeadersInit | undefined }> = [];
+    globalThis.fetch = async (input, init) => {
+      calls.push({
+        url: String(input),
+        headers: init?.headers,
+      });
+      return jsonResponse(200, userRow({ id: 9, plexId: 42, permissions: 2 }));
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "secret-key",
+    });
+    const user = await seerr.getUserById(9);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "http://seerr:5055/api/v1/user/9");
+    const headers = new Headers(calls[0].headers);
+    assert.equal(headers.get("X-Api-Key"), "secret-key");
+    assert.deepEqual(user, {
+      id: 9,
+      plexId: 42,
+      plexUsername: "alice",
+      displayName: "Alice",
+      email: "a@example.com",
+      permissions: 2,
+    });
+  });
+
+  it("returns null on 404 (account no longer exists)", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse(404, { message: "User not found." });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    assert.equal(await seerr.getUserById(999999), null);
+  });
+
+  it("throws SeerrUpstreamError on transport failure", async () => {
+    globalThis.fetch = async () => {
+      throw new Error("connection refused");
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    await assert.rejects(
+      () => seerr.getUserById(1),
+      (err: unknown) =>
+        err instanceof SeerrUpstreamError && err.status === 502,
+    );
+  });
+
+  it("rejects with forwarded status on 500 (not null / not_found)", async () => {
+    // null would be classified as not_found -> 401 for every user; a Seerr
+    // outage must stay a throw so revalidation maps it to 503.
+    globalThis.fetch = async () => jsonResponse(500, { message: "boom" });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    await assert.rejects(
+      () => seerr.getUserById(1),
+      (err: unknown) =>
+        err instanceof SeerrUpstreamError && err.status === 500,
+    );
+  });
+
+  it("rejects with forwarded status on 403 (not null / not_found)", async () => {
+    globalThis.fetch = async () => jsonResponse(403, { message: "forbidden" });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    await assert.rejects(
+      () => seerr.getUserById(1),
+      (err: unknown) =>
+        err instanceof SeerrUpstreamError && err.status === 403,
+    );
+  });
+
+  it("rejects with 502 on an unmappable 200 body (not null / not_found)", async () => {
+    globalThis.fetch = async () => jsonResponse(200, { id: "nope" });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    await assert.rejects(
+      () => seerr.getUserById(1),
+      (err: unknown) =>
+        err instanceof SeerrUpstreamError && err.status === 502,
+    );
+  });
+
+  it("passes an AbortSignal to fetch (timeout wiring)", async () => {
+    let signal: AbortSignal | undefined;
+    globalThis.fetch = async (_input, init) => {
+      signal = init?.signal ?? undefined;
+      return jsonResponse(200, userRow({ id: 1 }));
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    await seerr.getUserById(1);
+
+    assert.ok(signal instanceof AbortSignal);
+  });
+});
+
 describe("createSeerrClient().getUserByPlexId", () => {
   it("requests with X-Api-Key and returns the matching user", async () => {
     const calls: Array<{ url: string; headers: HeadersInit | undefined }> = [];

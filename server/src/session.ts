@@ -41,9 +41,9 @@ export const SESSION_COOKIE_NAME = "tyflix_session";
 // one that counts) and as the cookie's maxAge (client side, just tidiness).
 export const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 export const SESSION_MAX_AGE_MS = SESSION_TTL_SECONDS * 1000;
-// Mirrors Seerr's ADMIN permission flag. The `permissions` number in the
-// payload is copied from the Seerr user at login, so admin here means admin
-// there.
+// Mirrors Seerr's ADMIN permission flag. Live checks (requireAuth /requireAdmin
+// / GET /me) test Seerr's current bitfield against this; the cookie's copy is
+// only the value from login.
 export const SEERR_ADMIN_BIT = 2;
 
 // AES-256-GCM parameters for the encrypted Plex-token blob. The key is derived
@@ -68,9 +68,11 @@ export type SessionPayload = {
   plexUsername: string;
   displayName: string;
   avatar: string | null;
-  // Seerr's permission bitmask, copied at login. Tested against
-  // SEERR_ADMIN_BIT. A user promoted in Seerr keeps the old value until they
-  // sign in again.
+  // Seerr's permission bitmask as of login (advisory/historical on the wire).
+  // Authoritative permissions for a request come from a live Seerr re-check in
+  // requireAuth / GET /api/auth/me and are attached to res.locals.session for
+  // that request only — the cookie is not rewritten. Tested against
+  // SEERR_ADMIN_BIT.
   permissions: number;
   iat: number; // issued at, epoch seconds
   exp: number; // expires at, epoch seconds; readSession rejects anything past it

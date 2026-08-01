@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import express from "express";
 import { requireAuth } from "../middleware/auth";
+import { clearPermissionCacheForTests } from "../middleware/revalidatePermissions";
 import type { PlexServerClient } from "../plex/server";
 import type { SeerrClient, UserQuota } from "../seerr/client";
 import { issueSession, SESSION_COOKIE_NAME } from "../session";
 import { createMeRouter } from "./me";
 
 const SECRET = "sixteen-chars!!!";
+
+beforeEach(() => {
+  clearPermissionCacheForTests();
+});
 
 type FakeRes = {
   cookies: Array<{ name: string; value: string }>;
@@ -49,12 +54,22 @@ describe("GET /api/me/quota", () => {
         userIds.push(userId);
         return quota;
       },
+      async getUserById(id: number) {
+        return {
+          id,
+          plexId: 10,
+          plexUsername: "tyler",
+          displayName: "Tyler",
+          email: null,
+          permissions: 0,
+        };
+      },
     } as SeerrClient;
 
     const app = express();
     app.use(
       "/api/me",
-      requireAuth(SECRET),
+      requireAuth(SECRET, seerr),
       createMeRouter({
         seerr,
         plexServer: {} as PlexServerClient,

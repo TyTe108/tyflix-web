@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import express from "express";
 import { requireAuth } from "../middleware/auth";
+import { clearPermissionCacheForTests } from "../middleware/revalidatePermissions";
 import type { PlexConnectionResolver } from "../plex/connection";
 import {
   PlexServerUpstreamError,
@@ -22,6 +23,23 @@ const CLIENT_ID = "client-id-1";
 const CONNECTIONS = {
   local: "https://10-0-0-10.machine-abc.plex.direct:32400",
   remote: "https://1-2-3-4.machine-abc.plex.direct:32400",
+};
+
+beforeEach(() => {
+  clearPermissionCacheForTests();
+});
+
+const authSeerr = {
+  async getUserById(id: number) {
+    return {
+      id,
+      plexId: 10,
+      plexUsername: "tyler",
+      displayName: "Tyler",
+      email: null,
+      permissions: 0,
+    };
+  },
 };
 
 function sessionCookie(opts: { plexToken?: string } = {}): string {
@@ -103,7 +121,7 @@ function baseDeps(): WatchRouterDeps {
 function createApp(deps: WatchRouterDeps): express.Express {
   const app = express();
   app.use(express.json());
-  app.use("/api/watch", requireAuth(SECRET), createWatchRouter(deps));
+  app.use("/api/watch", requireAuth(SECRET, authSeerr), createWatchRouter(deps));
   return app;
 }
 

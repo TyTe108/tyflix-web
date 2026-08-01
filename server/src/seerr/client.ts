@@ -178,6 +178,12 @@ export type SeerrClientOptions = {
   apiKey: string; // Seerr admin API key, sent as X-Api-Key on every call
 };
 
+// Bound on getUserById only (the per-request auth revalidation path). Mirrors
+// dashboard/client.ts's AbortController pattern; 5000ms is the hardcoded cap
+// for that lookup — short relative to the dashboard's 10s because auth sits on
+// every authenticated request and median latency on the wire is ~6ms.
+const GET_USER_BY_ID_TIMEOUT_MS = 5_000;
+
 /**
  * Builds the Seerr client. One instance is created at startup and shared by
  * every router that needs Seerr.
@@ -281,6 +287,69 @@ export function createSeerrClient(options: SeerrClientOptions) {
     //    read and never forward to the browser.
     const body = await postJson("/api/v1/auth/plex", { authToken });
     return mapSeerrUser(body);
+  }
+
+  /**
+   * One Seerr account by Seerr user id (`GET /api/v1/user/:id`).
+   *
+   * Used by the per-request permission revalidation path. Unlike
+   * getUserByPlexId this is a single targeted call, and unlike the rest of
+   * this client it is bounded by GET_USER_BY_ID_TIMEOUT_MS (AbortController,
+   * same shape as dashboard/client.ts).
+   *
+   * @returns null when Seerr answers 404 ("User not found.") — the account
+   * no longer exists. Callers map that to 401; do not confuse it with a
+   * transport failure.
+   * @throws SeerrUpstreamError on timeout, network failure, non-404 error
+   * status, or an unmappable 200 body.
+   */
+  async function getUserById(id: number): Promise<SeerrUser | null> {
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      GET_USER_BY_ID_TIMEOUT_MS,
+    );
+    const path = `/api/v1/user/${id}`;
+
+    let res: Response;
+    try {
+      res = await fetch(`${baseUrl}${path}`, {
+        method: "GET",
+        headers: {
+          "X-Api-Key": apiKey,
+          Accept: "application/json",
+        },
+        signal: controller.signal,
+      });
+    } catch (err) {
+      // Dead Seerr and our own abort both land here as a thrown fetch error.
+      const message =
+        err instanceof Error ? err.message : "Seerr request failed";
+      throw new SeerrUpstreamError(message, 502);
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (res.status === 404) {
+      return null;
+    }
+
+    if (!res.ok) {
+      throw new SeerrUpstreamError(
+        `Seerr ${path} failed (${res.status})`,
+        res.status,
+      );
+    }
+
+    const body: unknown = await res.json();
+    const mapped = mapSeerrUser(body);
+    if (mapped === null) {
+      throw new SeerrUpstreamError(
+        "Seerr getUserById returned unexpected body",
+        502,
+      );
+    }
+    return mapped;
   }
 
   /**
@@ -856,6 +925,7 @@ export function createSeerrClient(options: SeerrClientOptions) {
 
   return {
     signInWithPlex,
+    getUserById,
     getUserByPlexId,
     listAllRequests,
     listUserRequests,

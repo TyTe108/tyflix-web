@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import express from "express";
 import { requireAuth } from "../middleware/auth";
-import type { CreateSeerrIssueInput } from "../seerr/client";
+import { clearPermissionCacheForTests } from "../middleware/revalidatePermissions";
+import type { CreateSeerrIssueInput, SeerrUser } from "../seerr/client";
 import type { IssueStatus, IssueView } from "../seerr/issues";
 import { issueSession, SESSION_COOKIE_NAME } from "../session";
 import { createMediaEnrichment } from "../tmdb/enrichment";
@@ -14,12 +15,21 @@ import {
 const SECRET = "sixteen-chars!!!";
 const ADMIN_PERMISSION = 2;
 
+const livePermissions = new Map<number, number>();
+
+beforeEach(() => {
+  clearPermissionCacheForTests();
+  livePermissions.clear();
+});
+
 type FakeRes = {
   cookies: Array<{ name: string; value: string }>;
   cookie(name: string, value: string): void;
 };
 
 function sessionCookie(permissions = 0, seerrUserId = 7): string {
+  livePermissions.set(seerrUserId, permissions);
+  clearPermissionCacheForTests();
   const cookies: Array<{ name: string; value: string }> = [];
   const res: FakeRes = {
     cookies,
@@ -40,6 +50,19 @@ function sessionCookie(permissions = 0, seerrUserId = 7): string {
     { secret: SECRET, secure: false },
   );
   return `${SESSION_COOKIE_NAME}=${cookies[0].value}`;
+}
+
+function authSeerr(
+  getUserById: (id: number) => Promise<SeerrUser | null> = async (id) => ({
+    id,
+    plexId: 10,
+    plexUsername: "tyler",
+    displayName: "Tyler",
+    email: null,
+    permissions: livePermissions.get(id) ?? 0,
+  }),
+) {
+  return { getUserById };
 }
 
 function issueView(overrides: Partial<IssueView> = {}): IssueView {
@@ -122,12 +145,13 @@ function createApp(
       return new Map();
     },
   },
+  auth: { getUserById: (id: number) => Promise<SeerrUser | null> } = authSeerr(),
 ): express.Express {
   const app = express();
   app.use(express.json());
   app.use(
     "/api/issues",
-    requireAuth(SECRET),
+    requireAuth(SECRET, auth),
     createIssuesRouter({
       seerr,
       mediaStatus: {
@@ -258,6 +282,45 @@ describe("issue routes", () => {
     assert.deepEqual(seerr.statusCalls, [
       { issueId: 51, status: "resolved" },
     ]);
+  });
+
+  it("rejects GET /all for a demoted user whose cookie still says admin", async () => {
+    // Cookie carries ADMIN_PERMISSION; Seerr alone returns 0. issues.ts reads
+    // isAdmin(session.permissions) off res.locals.session with no local code
+    // changes — so this 403 proves requireAuth attached the live value before
+    // the route ran. 401 would be not-found; 503 would be unreachable.
+    let listCalls = 0;
+    const seerr = createStubSeerr({
+      async listIssues() {
+        listCalls += 1;
+        return [];
+      },
+    });
+    const app = createApp(
+      seerr,
+      10,
+      {
+        async enrich() {
+          return new Map();
+        },
+      },
+      authSeerr(async (id) => ({
+        id,
+        plexId: 10,
+        plexUsername: "tyler",
+        displayName: "Tyler",
+        email: null,
+        permissions: 0,
+      })),
+    );
+
+    const response = await fetchLocal(app, "GET", "/api/issues/all", {
+      cookie: sessionCookie(ADMIN_PERMISSION, 44),
+    });
+
+    assert.equal(response.status, 403);
+    assert.deepEqual(await response.json(), { error: "forbidden" });
+    assert.equal(listCalls, 0);
   });
 
   it("scopes personal lists and restricts the all-users list to admins", async () => {

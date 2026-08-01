@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import express from "express";
 import { requireAuth } from "../middleware/auth";
+import { clearPermissionCacheForTests } from "../middleware/revalidatePermissions";
 import type { SharedServerAccessResolver } from "../plex/sharedServerAccess";
 import type { LibrarySortKey, PlexServerClient } from "../plex/server";
 import { PlexServerUpstreamError } from "../plex/server";
@@ -11,6 +12,23 @@ import { createLibraryRouter, type LibraryRouterDeps } from "./library";
 const SECRET = "sixteen-chars!!!";
 const USER_TOKEN = "user-durable-token";
 const SHARED_TOKEN = "shared-server-access-token";
+
+beforeEach(() => {
+  clearPermissionCacheForTests();
+});
+
+const authSeerr = {
+  async getUserById(id: number) {
+    return {
+      id,
+      plexId: 10,
+      plexUsername: "tyler",
+      displayName: "Tyler",
+      email: null,
+      permissions: 0,
+    };
+  },
+};
 
 function sessionCookie(opts: { plexToken?: string } = {}): string {
   const cookies: Array<{ name: string; value: string }> = [];
@@ -52,7 +70,7 @@ function createApp(deps: LibraryRouterDeps): express.Express {
   const app = express();
   app.use(
     "/api/library",
-    requireAuth(SECRET),
+    requireAuth(SECRET, authSeerr),
     createLibraryRouter(deps),
   );
   return app;

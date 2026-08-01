@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import express from "express";
+import { clearPermissionCacheForTests } from "../middleware/revalidatePermissions";
 import type { PlexClient, PlexUser } from "../plex/client";
 import {
   SeerrUpstreamError,
   type SeerrClient,
   type SeerrUser,
 } from "../seerr/client";
-import { SESSION_COOKIE_NAME } from "../session";
+import { issueSession, SESSION_COOKIE_NAME } from "../session";
 import { createAuthRouter } from "./auth";
+
+beforeEach(() => {
+  clearPermissionCacheForTests();
+});
 
 const SECRET = "sixteen-chars!!!";
 
@@ -42,7 +47,9 @@ type Calls = {
 function buildApp(
   overrides: {
     plex?: Partial<PlexClient>;
-    seerr?: Partial<SeerrClient>;
+    seerr?: Partial<SeerrClient> & {
+      getUserById?: (id: number) => Promise<SeerrUser | null>;
+    };
   } = {},
 ): { app: express.Express; calls: Calls } {
   const calls: Calls = { signInTokens: [], getUserPlexIds: [] };
@@ -266,3 +273,122 @@ describe("GET /api/auth/plex/check", () => {
     assert.deepEqual(calls.signInTokens, []);
   });
 });
+
+function meCookie(permissions: number, seerrUserId = 9): string {
+  const cookies: Array<{ name: string; value: string }> = [];
+  const res = {
+    cookie(name: string, value: string) {
+      cookies.push({ name, value });
+    },
+  };
+  issueSession(
+    res as unknown as import("express").Response,
+    {
+      seerrUserId,
+      plexId: 100,
+      plexUsername: "alice",
+      displayName: "Alice",
+      avatar: "https://plex/avatar.png",
+      permissions,
+    },
+    { secret: SECRET, secure: false },
+  );
+  return `${SESSION_COOKIE_NAME}=${cookies[0].value}`;
+}
+
+async function fetchMe(
+  app: express.Express,
+  cookie: string | null,
+): Promise<Response> {
+  const server = app.listen(0);
+  try {
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("failed to bind test server");
+    }
+    return await fetch(`http://127.0.0.1:${address.port}/api/auth/me`, {
+      headers: cookie === null ? {} : { cookie },
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+  }
+}
+
+describe("GET /api/auth/me", () => {
+  it("returns permissions/isAdmin from a fresh Seerr check, not the cookie", async () => {
+    // Cookie says admin (2); Seerr alone returns 0. Trusting the cookie would
+    // yield isAdmin true — the failure mode this case is named after.
+    const getUserIds: number[] = [];
+    const { app } = buildApp({
+      seerr: {
+        async getUserById(id: number) {
+          getUserIds.push(id);
+          return seerrUser({ id, permissions: 0 });
+        },
+      },
+    });
+
+    const response = await fetchMe(app, meCookie(2, 9));
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      user: { permissions: number };
+      isAdmin: boolean;
+    };
+    assert.equal(body.user.permissions, 0);
+    assert.equal(body.isAdmin, false);
+    assert.deepEqual(getUserIds, [9]);
+  });
+
+  it("returns 503 when the Seerr lookup throws", async () => {
+    // Stub fails in exactly one mode: throw. 401 would be the not-found branch.
+    const { app } = buildApp({
+      seerr: {
+        async getUserById() {
+          throw new Error("connection refused");
+        },
+      },
+    });
+
+    const response = await fetchMe(app, meCookie(2));
+    assert.equal(response.status, 503);
+  });
+
+  it("returns 401 when Seerr reports the account no longer exists", async () => {
+    // Stub fails in exactly one mode: null (404 signal). 503 would mean we
+    // collapsed not-found into unreachable.
+    const { app } = buildApp({
+      seerr: {
+        async getUserById() {
+          return null;
+        },
+      },
+    });
+
+    const response = await fetchMe(app, meCookie(2));
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), { error: "not authenticated" });
+  });
+
+  it("happy path: mirrors Seerr permissions and isAdmin", async () => {
+    const { app } = buildApp({
+      seerr: {
+        async getUserById(id: number) {
+          return seerrUser({ id, permissions: 2 });
+        },
+      },
+    });
+
+    const response = await fetchMe(app, meCookie(0, 9));
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      user: { permissions: number; seerrUserId: number };
+      isAdmin: boolean;
+    };
+    assert.equal(body.user.permissions, 2);
+    assert.equal(body.user.seerrUserId, 9);
+    assert.equal(body.isAdmin, true);
+  });
+});
+

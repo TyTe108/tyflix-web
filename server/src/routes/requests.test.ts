@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 import express from "express";
 import { requireAuth } from "../middleware/auth";
+import { clearPermissionCacheForTests } from "../middleware/revalidatePermissions";
 import {
   SeerrUpstreamError,
   type CreateSeerrRequestInput,
   type SeerrRequest,
+  type SeerrUser,
 } from "../seerr/client";
 import { issueSession, SESSION_COOKIE_NAME } from "../session";
 import {
@@ -16,12 +18,23 @@ import {
 const SECRET = "sixteen-chars!!!";
 const ADMIN_PERMISSION = 2;
 
+// sessionCookie registers the permissions Seerr should report for that user so
+// existing admin-gate cases keep working after live revalidation.
+const livePermissions = new Map<number, number>();
+
+beforeEach(() => {
+  clearPermissionCacheForTests();
+  livePermissions.clear();
+});
+
 type FakeRes = {
   cookies: Array<{ name: string; value: string }>;
   cookie(name: string, value: string): void;
 };
 
 function sessionCookie(permissions = 0, seerrUserId = 7): string {
+  livePermissions.set(seerrUserId, permissions);
+  clearPermissionCacheForTests();
   const cookies: Array<{ name: string; value: string }> = [];
   const res: FakeRes = {
     cookies,
@@ -42,6 +55,17 @@ function sessionCookie(permissions = 0, seerrUserId = 7): string {
     { secret: SECRET, secure: false },
   );
   return `${SESSION_COOKIE_NAME}=${cookies[0].value}`;
+}
+
+function liveSeerrUser(id: number): SeerrUser {
+  return {
+    id,
+    plexId: 10,
+    plexUsername: "tyler",
+    displayName: "Tyler",
+    email: null,
+    permissions: livePermissions.get(id) ?? 0,
+  };
 }
 
 function seerrRequest(
@@ -87,6 +111,9 @@ function createStubSeerr(
     profileCalls,
     approveCalls,
     declineCalls,
+    async getUserById(id: number) {
+      return liveSeerrUser(id);
+    },
     async listAllRequests() {
       return [];
     },
@@ -169,7 +196,7 @@ function createApp(
   app.use(express.json());
   app.use(
     "/api/requests",
-    requireAuth(SECRET),
+    requireAuth(SECRET, seerr),
     createRequestsRouter({ seerr, tmdb, sessionSecret: SECRET }),
   );
   return app;

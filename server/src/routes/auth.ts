@@ -3,7 +3,8 @@
 //
 // Public by necessity. This is the surface that creates a session, so it can't
 // sit behind requireAuth. GET /me reads and verifies the cookie itself instead
-// of relying on middleware, which is why it lives here rather than in me.ts.
+// of relying on middleware (and then revalidates permissions via the same
+// helper requireAuth uses), which is why it lives here rather than in me.ts.
 //
 // The flow is Plex's PIN handshake, the same one their own apps use. We ask
 // plex.tv for a PIN, the browser opens Plex's auth page in a popup, and the SPA
@@ -16,6 +17,7 @@
 // decrypts it.
 
 import { Router } from "express";
+import { revalidateSessionPermissions } from "../middleware/revalidatePermissions";
 import { PlexUpstreamError, type PlexClient } from "../plex/client";
 import {
   SeerrUpstreamError,
@@ -171,18 +173,29 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   /**
    * GET /api/auth/me
    *
-   * Who's signed in, straight out of the cookie. Returns `{ user, isAdmin }`,
-   * or 401 when the cookie is missing, tampered with, or expired. Makes no
-   * upstream calls at all, which is what lets the SPA check auth state on every
-   * page load for free.
+   * Who's signed in. Verifies the cookie, then re-checks permissions against
+   * Seerr (same helper as requireAuth). Returns `{ user, isAdmin }` with the
+   * live permissions, 401 when the cookie is missing/tampered/expired or Seerr
+   * says the account is gone, and 503 when Seerr is unreachable.
    *
    * Note the `user` block leaves out email: that only comes back from
-   * /plex/check, since the session doesn't carry it.
+   * /plex/check, since the session doesn't carry it. The cookie is not
+   * rewritten — fresh permissions are response-only.
    */
-  router.get("/me", (req, res) => {
+  router.get("/me", async (req, res) => {
     const session = readSession(req, sessionSecret);
     if (session === null) {
       res.status(401).json({ error: "not authenticated" });
+      return;
+    }
+
+    const result = await revalidateSessionPermissions(session, seerr);
+    if (result.status === "not_found") {
+      res.status(401).json({ error: "not authenticated" });
+      return;
+    }
+    if (result.status === "unreachable") {
+      res.status(503).json({ error: "seerr unavailable" });
       return;
     }
 
@@ -193,9 +206,9 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         plexUsername: session.plexUsername,
         displayName: session.displayName,
         avatar: session.avatar,
-        permissions: session.permissions,
+        permissions: result.permissions,
       },
-      isAdmin: isAdmin(session.permissions),
+      isAdmin: isAdmin(result.permissions),
     });
   });
 

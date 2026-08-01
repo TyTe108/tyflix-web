@@ -239,7 +239,7 @@ async function start(): Promise<void> {
   // out of res.locals.session, which requireAuth puts there.
   app.use(
     "/api/me",
-    requireAuth(config.sessionSecret),
+    requireAuth(config.sessionSecret, seerr),
     createMeRouter({ plexServer, seerr }),
   );
 
@@ -260,6 +260,7 @@ async function start(): Promise<void> {
         store: accessRequestStore,
         sharing,
         sessionSecret: config.sessionSecret,
+        seerr,
       }),
     );
   }
@@ -268,7 +269,7 @@ async function start(): Promise<void> {
   // top of a valid session.
   app.use(
     "/api/admin",
-    requireAdmin(config.sessionSecret),
+    requireAdmin(config.sessionSecret, seerr),
     createAdminRouter({ dashboard }),
   );
 
@@ -276,7 +277,7 @@ async function start(): Promise<void> {
   // TMDB-id-to-rating-key join happening in mediaStatus.
   app.use(
     "/api/discover",
-    requireAuth(config.sessionSecret),
+    requireAuth(config.sessionSecret, seerr),
     createDiscoverRouter({ tmdb, mediaStatus }),
   );
 
@@ -286,7 +287,7 @@ async function start(): Promise<void> {
   // token for shared accounts.
   app.use(
     "/api/library",
-    requireAuth(config.sessionSecret),
+    requireAuth(config.sessionSecret, seerr),
     createLibraryRouter({
       plexServer,
       sharedServerAccess,
@@ -299,19 +300,19 @@ async function start(): Promise<void> {
   // title and poster.
   app.use(
     "/api/watchlist",
-    requireAuth(config.sessionSecret),
+    requireAuth(config.sessionSecret, seerr),
     createWatchlistRouter({ seerr, mediaStatus, mediaEnrichment }),
   );
 
   app.use(
     "/api/issues",
-    requireAuth(config.sessionSecret),
+    requireAuth(config.sessionSecret, seerr),
     createIssuesRouter({ seerr, mediaStatus, mediaEnrichment }),
   );
 
   app.use(
     "/api/requests",
-    requireAuth(config.sessionSecret),
+    requireAuth(config.sessionSecret, seerr),
     createRequestsRouter({
       seerr,
       tmdb,
@@ -324,7 +325,7 @@ async function start(): Promise<void> {
   // reachable plex.direct address, and the rating key behind a TMDB id.
   app.use(
     "/api/watch",
-    requireAuth(config.sessionSecret),
+    requireAuth(config.sessionSecret, seerr),
     createWatchRouter({
       plexConnection,
       transientMinter,
