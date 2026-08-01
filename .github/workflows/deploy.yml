@@ -32,6 +32,9 @@ jobs:
       - name: Build web (tsc -b && vite build)
         run: npm run build -w web
 
+      - name: Test web (vitest)
+        run: npm test -w web
+
       - name: Build + test server (node:test)
         run: npm test -w server
 
