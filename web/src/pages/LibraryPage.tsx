@@ -37,8 +37,10 @@ import {
 import { LibraryCard } from "../components/LibraryCard";
 import { ContinueWatchingRail } from "../components/ContinueWatchingRail";
 import { LibraryDetailRow } from "../components/LibraryDetailRow";
+import { BottomSheet } from "../components/BottomSheet";
 import { Dropdown } from "../components/Dropdown";
 import { PaginationControls } from "../components/PaginationControls";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 // Sections and items load independently, so each gets its own status.
 type LoadStatus = "loading" | "ready" | "error";
@@ -118,6 +120,9 @@ function writeStoredView(value: LibraryView): void {
 export function LibraryPage() {
   const { mediaType } = useParams<{ mediaType?: string }>();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
+  const filtersButtonRef = useRef<HTMLButtonElement>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [sections, setSections] = useState<LibrarySection[]>([]);
   const [sectionsStatus, setSectionsStatus] = useState<LoadStatus>("loading");
@@ -134,6 +139,7 @@ export function LibraryPage() {
   const [genreId, setGenreId] = useState<string | null>(null);
   const [unwatched, setUnwatched] = useState(false);
   const [genres, setGenres] = useState<LibraryGenre[]>([]);
+  const [genresStatus, setGenresStatus] = useState<LoadStatus>("loading");
   const [firstChar, setFirstChar] = useState<string | null>(null);
   const [firstChars, setFirstChars] = useState<LibraryFirstCharacter[]>([]);
   const [search, setSearch] = useState("");
@@ -245,6 +251,7 @@ export function LibraryPage() {
 
     setGenreId(null);
     setFirstChar(null);
+    setGenresStatus("loading");
 
     // Fired together rather than awaited in series. Neither one blocks the
     // grid, and a failure in either just leaves that control empty.
@@ -253,11 +260,13 @@ export function LibraryPage() {
       .then((result) => {
         if (!cancelled) {
           setGenres(result);
+          setGenresStatus("ready");
         }
       })
       .catch(() => {
         if (!cancelled) {
           setGenres([]);
+          setGenresStatus("error");
         }
       });
 
@@ -388,6 +397,89 @@ export function LibraryPage() {
     setPage(1);
   }
 
+  // How many Filters-sheet controls differ from their defaults. Sort defaults
+  // to title, genre to all, unwatched off, view to grid. Poster size is not
+  // counted: it is dropped below 48rem rather than exposed in the sheet.
+  const activeFilterCount =
+    (sort !== "title" ? 1 : 0) +
+    (genreId !== null ? 1 : 0) +
+    (unwatched ? 1 : 0) +
+    (view !== VIEW_DEFAULT ? 1 : 0);
+
+  const closeFilters = useCallback(() => {
+    setFiltersOpen(false);
+  }, []);
+
+  const sortGenreUnwatchedControls = (
+    <>
+      <label className="library-control">
+        <span>Sort</span>
+        <Dropdown
+          label="Sort"
+          value={sort}
+          options={[
+            { value: "title", label: "Title" },
+            { value: "added", label: "Recently Added" },
+            { value: "year", label: "Year" },
+            { value: "rating", label: "Rating" },
+          ]}
+          onChange={(nextSort) => onSortChange(nextSort as LibrarySortKey)}
+        />
+      </label>
+
+      <label className="library-control">
+        <span>Genre</span>
+        {genresStatus === "loading" ? (
+          <p className="muted library-filters-pending">Loading genres…</p>
+        ) : genresStatus === "error" ? (
+          <p className="muted library-filters-pending">
+            Couldn&apos;t load genres.
+          </p>
+        ) : (
+          <Dropdown
+            label="Genre"
+            value={genreId ?? ""}
+            options={[
+              { value: "", label: "All genres" },
+              ...genres.map((genre) => ({
+                value: genre.id,
+                label: genre.title,
+              })),
+            ]}
+            onChange={onGenreChange}
+          />
+        )}
+      </label>
+
+      <label className="library-control library-control--checkbox">
+        <span>Unwatched only</span>
+        <input
+          type="checkbox"
+          checked={unwatched}
+          onChange={(event) => onUnwatchedChange(event.target.checked)}
+        />
+      </label>
+    </>
+  );
+
+  const sheetFilterControls = (
+    <>
+      {sortGenreUnwatchedControls}
+      <label className="library-control">
+        <span>View</span>
+        <Dropdown
+          label="View"
+          value={view}
+          options={[
+            { value: "grid", label: "Grid View" },
+            { value: "detail", label: "Detail View" },
+          ]}
+          onChange={onViewChange}
+        />
+      </label>
+    </>
+  );
+
   // Sections gate the entire page, so they short-circuit before any of the
   // toolbar renders. The items status is handled inline further down, where a
   // failure only replaces the grid.
@@ -423,9 +515,9 @@ export function LibraryPage() {
       <ContinueWatchingRail />
 
       {/* Toolbar: section switch on the left, display preferences on the
-          right. The two section buttons navigate rather than set state, since
-          the section lives in the URL. The poster-size slider only applies to
-          the grid, so it disappears in detail view. */}
+          right (desktop). On mobile, View lives in the Filters sheet and the
+          poster-size slider is dropped — a 120×16 range is not thumb-usable,
+          and the default card size already fits the auto-fill grid. */}
       <div className="library-toolbar">
         <div className="discover-media-toggle" aria-label="Library type">
           <button
@@ -454,48 +546,64 @@ export function LibraryPage() {
           </button>
         </div>
 
-        <div className="library-toolbar-actions">
-          <Dropdown
-            label="View"
-            value={view}
-            options={[
-              { value: "grid", label: "Grid View" },
-              { value: "detail", label: "Detail View" },
-            ]}
-            onChange={onViewChange}
-          />
-          {view === "grid" ? (
-            <label className="library-size">
-              <span
-                className="library-size-hint library-size-hint--sm"
-                aria-hidden="true"
-              >
-                ▢
-              </span>
-              <input
-                type="range"
-                min={CARD_SIZE_MIN}
-                max={CARD_SIZE_MAX}
-                step={0.5}
-                value={cardSize}
-                aria-label="Poster size"
-                onChange={(event) =>
-                  onCardSizeChange(Number(event.target.value))
-                }
-              />
-              <span
-                className="library-size-hint library-size-hint--lg"
-                aria-hidden="true"
-              >
-                ▢
-              </span>
-            </label>
-          ) : null}
-        </div>
+        {isMobile ? (
+          <button
+            ref={filtersButtonRef}
+            type="button"
+            className="btn secondary library-filters-button"
+            aria-expanded={filtersOpen}
+            aria-haspopup="dialog"
+            onClick={() => setFiltersOpen(true)}
+          >
+            {activeFilterCount > 0
+              ? `Filters (${activeFilterCount})`
+              : "Filters"}
+          </button>
+        ) : (
+          <div className="library-toolbar-actions">
+            <Dropdown
+              label="View"
+              value={view}
+              options={[
+                { value: "grid", label: "Grid View" },
+                { value: "detail", label: "Detail View" },
+              ]}
+              onChange={onViewChange}
+            />
+            {view === "grid" ? (
+              <label className="library-size">
+                <span
+                  className="library-size-hint library-size-hint--sm"
+                  aria-hidden="true"
+                >
+                  ▢
+                </span>
+                <input
+                  type="range"
+                  min={CARD_SIZE_MIN}
+                  max={CARD_SIZE_MAX}
+                  step={0.5}
+                  value={cardSize}
+                  aria-label="Poster size"
+                  onChange={(event) =>
+                    onCardSizeChange(Number(event.target.value))
+                  }
+                />
+                <span
+                  className="library-size-hint library-size-hint--lg"
+                  aria-hidden="true"
+                >
+                  ▢
+                </span>
+              </label>
+            ) : null}
+          </div>
+        )}
       </div>
 
-      {/* Filter row. All four of these are server-side: each one re-requests
-          the section from Plex with different params. Nothing here filters
+      {/* Filter row. Search stays inline on every viewport. Sort / Genre /
+          Unwatched are inline on desktop and move into the Filters sheet
+          below 48rem. All of them re-request from Plex; nothing filters
           `items` in place. */}
       <div className="library-controls" aria-label="Library filters">
         <label className="library-search">
@@ -513,46 +621,31 @@ export function LibraryPage() {
           />
         </label>
 
-        <label className="library-control">
-          <span>Sort</span>
-          <Dropdown
-            label="Sort"
-            value={sort}
-            options={[
-              { value: "title", label: "Title" },
-              { value: "added", label: "Recently Added" },
-              { value: "year", label: "Year" },
-              { value: "rating", label: "Rating" },
-            ]}
-            onChange={(nextSort) => onSortChange(nextSort as LibrarySortKey)}
-          />
-        </label>
-
-        <label className="library-control">
-          <span>Genre</span>
-          <Dropdown
-            label="Genre"
-            value={genreId ?? ""}
-            options={[
-              { value: "", label: "All genres" },
-              ...genres.map((genre) => ({
-                value: genre.id,
-                label: genre.title,
-              })),
-            ]}
-            onChange={onGenreChange}
-          />
-        </label>
-
-        <label className="library-control library-control--checkbox">
-          <span>Unwatched only</span>
-          <input
-            type="checkbox"
-            checked={unwatched}
-            onChange={(event) => onUnwatchedChange(event.target.checked)}
-          />
-        </label>
+        {!isMobile ? sortGenreUnwatchedControls : null}
       </div>
+
+      {isMobile ? (
+        <BottomSheet
+          open={filtersOpen}
+          onClose={closeFilters}
+          returnFocusRef={filtersButtonRef}
+          aria-label="Filters"
+          scrimClassName="library-filters-scrim"
+          sheetClassName="library-filters-sheet"
+        >
+          <div className="library-filters-sheet-header">
+            <h2 className="library-filters-sheet-title">Filters</h2>
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={closeFilters}
+            >
+              Done
+            </button>
+          </div>
+          <div className="library-filters-sheet-body">{sheetFilterControls}</div>
+        </BottomSheet>
+      ) : null}
 
       {itemsStatus === "loading" ? (
         <p className="muted">Loading…</p>
