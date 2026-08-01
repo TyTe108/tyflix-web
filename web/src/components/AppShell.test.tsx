@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchAccessRequestPendingCount } from "../api/accessRequests";
 import { fetchMe, type MeResponse } from "../api/auth";
 import { AuthProvider } from "../auth/AuthContext";
+import { setViewport } from "../test/setup";
 import { AppShell } from "./AppShell";
 
 // AuthProvider imports fetchMe / logoutRequest from this module. Replacing the
@@ -137,5 +138,49 @@ describe("AppShell", () => {
 
     const badge = await screen.findByLabelText("1 pending access request");
     expect(badge.textContent).toBe("1");
+  });
+
+  it("renders the sidebar and not the mobile tab bar above 48rem", async () => {
+    setViewport("desktop");
+    vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: false }));
+
+    renderAppShell();
+    await screen.findByText("Test User");
+
+    screen.getByRole("complementary");
+    const nav = screen.getByRole("navigation", { name: "Primary" });
+    within(nav).getByRole("link", { name: "Home" });
+    expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+  });
+
+  it("renders the mobile tab bar and not the sidebar below 48rem", async () => {
+    setViewport("mobile");
+    vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: false }));
+
+    renderAppShell();
+    await screen.findByRole("button", { name: "More" });
+
+    expect(screen.queryByRole("complementary")).toBeNull();
+    const nav = screen.getByRole("navigation", { name: "Primary" });
+    within(nav).getByRole("link", { name: "Library" });
+    within(nav).getByRole("button", { name: "More" });
+    expect(within(nav).queryByRole("link", { name: "Home" })).toBeNull();
+  });
+
+  it("switches between sidebar and mobile nav when the viewport crosses 48rem", async () => {
+    setViewport("desktop");
+    vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: false }));
+
+    renderAppShell();
+    await screen.findByText("Test User");
+    screen.getByRole("complementary");
+
+    setViewport("mobile");
+    await screen.findByRole("button", { name: "More" });
+    expect(screen.queryByRole("complementary")).toBeNull();
+
+    setViewport("desktop");
+    await screen.findByRole("complementary");
+    expect(screen.queryByRole("button", { name: "More" })).toBeNull();
   });
 });

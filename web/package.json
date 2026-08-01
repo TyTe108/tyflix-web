@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "tsc -p tsconfig.vitest.json --noEmit && vitest run"
+    "test": "tsc -p tsconfig.vitest.json --noEmit && NODE_ENV=test vitest run"
   },
   "dependencies": {
     "hls.js": "^1.6.16",
