@@ -124,7 +124,6 @@ export function MobileNav({ pendingAccessCount }: MobileNavProps) {
             ref={sheetRef}
             className="mobile-nav-sheet"
             role="dialog"
-            aria-modal="true"
             aria-label="More"
             tabIndex={-1}
             onClick={(event) => event.stopPropagation()}
