@@ -56,6 +56,13 @@ type PlayerControlsProps = {
   audioTracks: AudioStream[];
   subtitleTracks: SubtitleStream[];
   /**
+   * Subtitle stream id already applied for this item (from a stored language
+   * preference re-resolved on load), or null for Off. Seeds the highlight;
+   * PlayerControls remounts each item so this only needs to be the initial
+   * useState value.
+   */
+  initialSubtitleId?: string | null;
+  /**
    * Applies a new stream selection. Rejecting leaves the current highlights
    * alone, which is how a failed switch avoids lying about what's playing.
    */
@@ -170,6 +177,7 @@ export function PlayerControls({
   durationMs,
   audioTracks,
   subtitleTracks,
+  initialSubtitleId = null,
   onStreamSettingsChange,
   autoPlay,
   onAutoPlayChange,
@@ -204,9 +212,10 @@ export function PlayerControls({
   const [selectedQuality, setSelectedQuality] = useState<QualityId>("original");
   // null = use Plex default (highlight the default/first track in the UI).
   const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
-  // null = Off. We do not reflect a pre-existing server-side selection on load.
+  // null = Off. Seeded from WatchPage when a stored language preference was
+  // re-applied on this item's load; otherwise starts Off.
   const [selectedSubtitleId, setSelectedSubtitleId] = useState<string | null>(
-    null,
+    initialSubtitleId,
   );
 
   settingsOpenRef.current = settingsOpen;

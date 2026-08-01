@@ -39,6 +39,7 @@ import {
   reportTimelineBeacon,
   selectSubtitle,
   type NextEpisode,
+  type SubtitleStream,
   type TimelineState,
   type WatchConnections,
   type WatchDescriptor,
@@ -59,6 +60,9 @@ import { useCastState } from "../cast/useCastState";
 
 // Auto-advance is a per-browser preference, so it lives in localStorage.
 const AUTO_PLAY_STORAGE_KEY = "tyflix.autoPlay";
+// Last-chosen subtitle language (+ forced), re-resolved per item by language
+// rather than by Plex stream id (ids are part-scoped and change every episode).
+const SUBTITLE_PREFERENCE_STORAGE_KEY = "tyflix.subtitlePreference";
 // Floor for the Up Next card. Plenty of episodes have no credits marker, and
 // this is what covers them.
 const UP_NEXT_WINDOW_SEC = 30;
@@ -143,6 +147,77 @@ function writeStoredAutoPlay(value: boolean): void {
   } catch {
     // private mode / quota — preference stays in-memory only
   }
+}
+
+// Language (+ forced) remembered across item loads. null means Off / never set.
+type SubtitlePreference = {
+  language: string;
+  forced: boolean;
+};
+
+// Corrupt or unreadable data is treated as no preference, same as a missing key.
+function readStoredSubtitlePreference(): SubtitlePreference | null {
+  try {
+    const raw = localStorage.getItem(SUBTITLE_PREFERENCE_STORAGE_KEY);
+    if (raw === null) {
+      return null;
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      typeof (parsed as { language?: unknown }).language !== "string" ||
+      typeof (parsed as { forced?: unknown }).forced !== "boolean"
+    ) {
+      return null;
+    }
+    return {
+      language: (parsed as { language: string }).language,
+      forced: (parsed as { forced: boolean }).forced,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Best effort. null clears the key (explicit Off, or wipe a prior choice).
+function writeStoredSubtitlePreference(pref: SubtitlePreference | null): void {
+  try {
+    if (pref === null) {
+      localStorage.removeItem(SUBTITLE_PREFERENCE_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(SUBTITLE_PREFERENCE_STORAGE_KEY, JSON.stringify(pref));
+  } catch {
+    // private mode / quota — preference stays in-memory only
+  }
+}
+
+/**
+ * Picks a subtitle track for a remembered language preference.
+ *
+ * Case-insensitive language match. Prefers a track whose forced flag matches
+ * the preference; otherwise the first same-language track. Returns null when
+ * nothing in `tracks` shares the language — never substitutes another one.
+ */
+function resolveSubtitleForPreference(
+  tracks: SubtitleStream[],
+  pref: SubtitlePreference,
+): SubtitleStream | null {
+  const wanted = pref.language.toLowerCase();
+  const sameLanguage = tracks.filter(
+    (track) =>
+      typeof track.language === "string" &&
+      track.language.toLowerCase() === wanted,
+  );
+  if (sameLanguage.length === 0) {
+    return null;
+  }
+  return (
+    sameLanguage.find((track) => track.forced === pref.forced) ??
+    sameLanguage[0] ??
+    null
+  );
 }
 
 // Route params are whatever's in the URL bar. Anything that isn't a positive
@@ -314,8 +389,10 @@ export function WatchPage() {
   // Previous value of castUi.connected, so the true-to-false edge is detectable.
   const wasCastConnectedRef = useRef(false);
   // Last subtitleStreamId successfully applied via PUT. Avoids redundant
-  // selects when only quality/audio change. Defaults to Off (null); we do not
-  // reflect a pre-existing server-side selection on load.
+  // selects when only quality/audio change. Starts null each item load, then
+  // may be set from the stored language preference before status goes ready
+  // (or by an in-episode switch). Not a mirror of whatever Plex had selected
+  // on its own.
   const appliedSubtitleIdRef = useRef<string | null>(null);
   const [descriptor, setDescriptor] = useState<WatchDescriptor | null>(null);
   const [status, setStatus] = useState<LoadStatus>("loading");
@@ -420,7 +497,9 @@ export function WatchPage() {
   //
   // Also the reset point for everything that's per-title: pending seeks, the
   // latched Cast position, and the applied subtitle all get cleared, and the
-  // resume dialog is re-decided from the new descriptor's viewOffsetMs.
+  // resume dialog is re-decided from the new descriptor's viewOffsetMs. A
+  // stored subtitle preference may then be re-applied (PUT + re-fetch) before
+  // status flips to ready, so the first play already has burn-in.
   useEffect(() => {
     let load: (() => Promise<WatchDescriptor>) | null = null;
     if (isEpisode) {
@@ -452,14 +531,47 @@ export function WatchPage() {
     appliedSubtitleIdRef.current = null;
 
     void load()
-      .then((result) => {
+      .then(async (result) => {
         if (cancelled) {
           return;
         }
-        setDescriptor(result);
+
+        // Re-apply a remembered language before committing the descriptor, so
+        // the first transcode already has burn-in. Failures here must not take
+        // the page to error — fall back to the original result (Off).
+        let finalResult = result;
+        const pref = readStoredSubtitlePreference();
+        if (pref !== null) {
+          const match = resolveSubtitleForPreference(
+            result.streams.subtitle,
+            pref,
+          );
+          if (match !== null) {
+            try {
+              await selectSubtitle(result.ratingKey, match.id);
+              if (cancelled) {
+                return;
+              }
+              appliedSubtitleIdRef.current = match.id;
+              finalResult = await load();
+              if (cancelled) {
+                return;
+              }
+            } catch (err: unknown) {
+              console.error("Failed to re-apply subtitle preference", err);
+              appliedSubtitleIdRef.current = null;
+              finalResult = result;
+            }
+          }
+        }
+
+        if (cancelled) {
+          return;
+        }
+        setDescriptor(finalResult);
         setResumeDialog(
-          shouldOfferResumeDialog(result)
-            ? resumeDialogFromDescriptor(result)
+          shouldOfferResumeDialog(finalResult)
+            ? resumeDialogFromDescriptor(finalResult)
             : null,
         );
         setStatus("ready");
@@ -1357,12 +1469,31 @@ export function WatchPage() {
     try {
       // Burn-in is a part-level PUT, not a transcode URL param. Select (or
       // clear) before restarting so the new session picks up the choice.
+      // Persist language (+ forced) rather than the stream id — ids are
+      // part-scoped and won't match the next episode.
       if (settings.subtitleStreamId !== appliedSubtitleIdRef.current) {
         await selectSubtitle(
           descriptor.ratingKey,
           settings.subtitleStreamId ?? "0",
         );
         appliedSubtitleIdRef.current = settings.subtitleStreamId;
+        if (settings.subtitleStreamId === null) {
+          writeStoredSubtitlePreference(null);
+        } else {
+          const track = descriptor.streams.subtitle.find(
+            (s) => s.id === settings.subtitleStreamId,
+          );
+          if (
+            track !== undefined &&
+            typeof track.language === "string" &&
+            track.language.trim() !== ""
+          ) {
+            writeStoredSubtitlePreference({
+              language: track.language,
+              forced: track.forced,
+            });
+          }
+        }
       }
 
       // Re-enter the same endpoint this page loaded from, now with tuning. The
@@ -1450,6 +1581,7 @@ export function WatchPage() {
             durationMs={descriptor.durationMs}
             audioTracks={descriptor.streams.audio}
             subtitleTracks={descriptor.streams.subtitle}
+            initialSubtitleId={appliedSubtitleIdRef.current}
             onStreamSettingsChange={onStreamSettingsChange}
             autoPlay={isEpisode ? autoPlay : undefined}
             onAutoPlayChange={isEpisode ? onAutoPlayChange : undefined}
