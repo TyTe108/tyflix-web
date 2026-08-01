@@ -5,9 +5,13 @@
 // Destinations come from navItems.tsx. The pending-access badge is passed in
 // from AppShell, which still owns the poll — this file only decides where the
 // badge renders (More tab, and Admin inside the sheet).
-import { useEffect, useRef, useState } from "react";
+//
+// The More overlay is the shared BottomSheet so Library filters (and later
+// Dropdown) get the same scrim / Escape / focus behaviour.
+import { useCallback, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { BottomSheet } from "./BottomSheet";
 import {
   LogoutIcon,
   MOBILE_MORE_ITEMS,
@@ -40,42 +44,13 @@ export function MobileNav({ pendingAccessCount }: MobileNavProps) {
   const { user, isAdmin, logout } = useAuth();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
-  const sheetRef = useRef<HTMLDivElement>(null);
-  const wasMoreOpenRef = useRef(false);
 
   const showBadge =
     pendingAccessCount !== null && pendingAccessCount > 0;
 
-  useEffect(() => {
-    if (!moreOpen) {
-      return;
-    }
-
-    sheetRef.current?.focus();
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setMoreOpen(false);
-      }
-    };
-
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [moreOpen]);
-
-  // Return focus to the More trigger after the sheet unmounts.
-  useEffect(() => {
-    if (wasMoreOpenRef.current && !moreOpen) {
-      moreButtonRef.current?.focus();
-    }
-    wasMoreOpenRef.current = moreOpen;
-  }, [moreOpen]);
-
-  const closeMore = () => {
+  const closeMore = useCallback(() => {
     setMoreOpen(false);
-  };
+  }, []);
 
   return (
     <>
@@ -114,76 +89,69 @@ export function MobileNav({ pendingAccessCount }: MobileNavProps) {
         </button>
       </nav>
 
-      {moreOpen ? (
-        <div
-          className="mobile-nav-scrim"
-          data-testid="mobile-nav-scrim"
-          onClick={closeMore}
-        >
-          <div
-            ref={sheetRef}
-            className="mobile-nav-sheet"
-            role="dialog"
-            aria-label="More"
-            tabIndex={-1}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="mobile-nav-sheet-nav">
-              {MOBILE_MORE_ITEMS.filter(
-                (item) => !item.adminOnly || isAdmin,
-              ).map((item) => {
-                const itemBadge =
-                  item.to === "/admin" && showBadge && pendingAccessCount !== null;
-                return (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    end={item.end}
-                    className={({ isActive }) =>
-                      isActive
-                        ? "mobile-nav-sheet-link active"
-                        : "mobile-nav-sheet-link"
-                    }
-                    onClick={closeMore}
-                  >
-                    <span className="mobile-nav-tab-icon">
-                      {item.icon}
-                      {itemBadge ? (
-                        <PendingBadge count={pendingAccessCount} />
-                      ) : null}
-                    </span>
-                    <span className="mobile-nav-sheet-label">{item.label}</span>
-                  </NavLink>
-                );
-              })}
-            </div>
-
-            <div className="mobile-nav-sheet-footer">
-              {user ? (
-                <div className="mobile-nav-sheet-user">
-                  <span className="mobile-nav-sheet-user-name">
-                    {user.displayName}
-                  </span>
-                  {isAdmin ? (
-                    <span className="mobile-nav-sheet-admin-chip">admin</span>
-                  ) : null}
-                </div>
-              ) : null}
-              <button
-                type="button"
-                className="mobile-nav-sheet-logout"
-                onClick={() => {
-                  closeMore();
-                  void logout();
-                }}
+      <BottomSheet
+        open={moreOpen}
+        onClose={closeMore}
+        returnFocusRef={moreButtonRef}
+        aria-label="More"
+        scrimClassName="mobile-nav-scrim"
+        sheetClassName="mobile-nav-sheet"
+        scrimTestId="mobile-nav-scrim"
+      >
+        <div className="mobile-nav-sheet-nav">
+          {MOBILE_MORE_ITEMS.filter(
+            (item) => !item.adminOnly || isAdmin,
+          ).map((item) => {
+            const itemBadge =
+              item.to === "/admin" && showBadge && pendingAccessCount !== null;
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) =>
+                  isActive
+                    ? "mobile-nav-sheet-link active"
+                    : "mobile-nav-sheet-link"
+                }
+                onClick={closeMore}
               >
-                <span className="mobile-nav-tab-icon">{LogoutIcon}</span>
-                <span className="mobile-nav-sheet-label">Logout</span>
-              </button>
-            </div>
-          </div>
+                <span className="mobile-nav-tab-icon">
+                  {item.icon}
+                  {itemBadge ? (
+                    <PendingBadge count={pendingAccessCount} />
+                  ) : null}
+                </span>
+                <span className="mobile-nav-sheet-label">{item.label}</span>
+              </NavLink>
+            );
+          })}
         </div>
-      ) : null}
+
+        <div className="mobile-nav-sheet-footer">
+          {user ? (
+            <div className="mobile-nav-sheet-user">
+              <span className="mobile-nav-sheet-user-name">
+                {user.displayName}
+              </span>
+              {isAdmin ? (
+                <span className="mobile-nav-sheet-admin-chip">admin</span>
+              ) : null}
+            </div>
+          ) : null}
+          <button
+            type="button"
+            className="mobile-nav-sheet-logout"
+            onClick={() => {
+              closeMore();
+              void logout();
+            }}
+          >
+            <span className="mobile-nav-tab-icon">{LogoutIcon}</span>
+            <span className="mobile-nav-sheet-label">Logout</span>
+          </button>
+        </div>
+      </BottomSheet>
     </>
   );
 }
