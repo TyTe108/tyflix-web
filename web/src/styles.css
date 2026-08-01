@@ -4066,3 +4066,118 @@ a.library-detail-title:hover {
     min-height: 44px;
   }
 }
+
+/* Stretch layers are inert on desktop (no expanded hit area above 48rem). */
+.request-card-stretch,
+.my-issues-stretch {
+  display: none;
+}
+
+/*
+ * Mobile touch targets + wrapping rows (max-width: 48rem) for requests, issues,
+ * issue detail, and media detail. Breakpoint must match MOBILE_MEDIA_QUERY in
+ * useIsMobile.ts.
+ */
+@media (max-width: 48rem) {
+  .row,
+  .media-detail-tag-row,
+  .episode-row,
+  .issue-detail-header {
+    flex-wrap: wrap;
+  }
+
+  .back-link {
+    min-height: 44px;
+    padding-top: 0.55rem;
+    padding-bottom: 0.55rem;
+    box-sizing: border-box;
+  }
+
+  /* Stretched-link hit layers: absolute inset over the row, same role as a
+     title::after recipe. Only active below 48rem. */
+  .request-card {
+    position: relative;
+  }
+
+  .request-card-stretch {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+  }
+
+  .request-card-poster,
+  .request-card-actions {
+    position: relative;
+    z-index: 2;
+  }
+
+  .request-card-title {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .request-card-actions .btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .my-issues-item {
+    position: relative;
+    align-items: flex-start;
+  }
+
+  .my-issues-stretch {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+  }
+
+  .my-issues-title {
+    position: relative;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  /* No position here — a positioned ancestor would trap the stretch's
+     inset:0 against the link box instead of .my-issues-item. */
+  .my-issues-view-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .issue-detail-admin-link,
+  .issue-detail-title-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    box-sizing: border-box;
+  }
+
+  .request-season-check {
+    min-height: 44px;
+    align-items: center;
+    box-sizing: border-box;
+  }
+
+  .request-season-check input {
+    width: 1.25rem;
+    height: 1.25rem;
+    min-width: 1.25rem;
+    min-height: 1.25rem;
+    margin-top: 0;
+  }
+
+  .episode-row .btn {
+    min-height: 44px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}

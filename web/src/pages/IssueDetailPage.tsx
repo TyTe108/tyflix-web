@@ -194,8 +194,14 @@ export function IssueDetailPage() {
   return (
     <main className="page page-wide">
       <header className="row">
-        <Link to="/issues">← Back to My Issues</Link>
-        {isAdmin ? <Link to="/admin">Admin</Link> : null}
+        <Link to="/issues" className="back-link">
+          ← Back to My Issues
+        </Link>
+        {isAdmin ? (
+          <Link to="/admin" className="issue-detail-admin-link">
+            Admin
+          </Link>
+        ) : null}
       </header>
 
       {status === "loading" ? (
@@ -238,6 +244,7 @@ export function IssueDetailPage() {
               <h1>
                 <Link
                   to={`/media/${issue.media.mediaType}/${issue.media.tmdbId}`}
+                  className="issue-detail-title-link"
                 >
                   {issue.media.title ?? `TMDB #${issue.media.tmdbId}`}
                 </Link>
