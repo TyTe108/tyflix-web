@@ -738,6 +738,16 @@ a {
   margin: 0;
 }
 
+/* Phase 37.0: multi-line HLS failover diagnostics on a phone-width screen. */
+.watch-playback-diag {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  max-width: 100%;
+}
+
 .watch-header {
   display: flex;
   flex-direction: column;

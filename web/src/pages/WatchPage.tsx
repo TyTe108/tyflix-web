@@ -126,6 +126,224 @@ function resumeDialogFromDescriptor(
   };
 }
 
+// One fatal hls.js failure on one connection attempt. `sourceUrl` is the full
+// stream URL used for that attach; it is redacted before any text or log leaves
+// buildHlsPlaybackFailureReport.
+export type HlsAttemptFailure = {
+  connection: "local" | "remote";
+  sourceUrl: string;
+  // Loose on purpose: an unexpected hls.js shape is itself a finding, so we
+  // accept whatever landed and print what we got rather than requiring fields.
+  data: Record<string, unknown>;
+};
+
+export type HlsPlaybackFailureReport = {
+  message: string;
+  logPayload: {
+    hadLocalUrl: boolean;
+    attempts: Array<Record<string, unknown>>;
+  };
+};
+
+/**
+ * Hostname + pathname only. Stream URLs carry X-Plex-Token (and a session id)
+ * as query parameters; this text gets screenshotted and sent over chat, so a
+ * full URL must never appear on screen or in console.error.
+ */
+export function redactStreamUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.hostname}${parsed.pathname}`;
+  } catch {
+    // Not parseable as absolute — still strip query/hash so a token cannot
+    // leak through a relative or mangled string.
+    const noHash = url.split("#")[0] ?? url;
+    return noHash.split("?")[0] ?? noHash;
+  }
+}
+
+function redactIfUrlLike(value: unknown): unknown {
+  if (typeof value !== "string") {
+    return value;
+  }
+  if (/^https?:\/\//i.test(value) || /X-Plex-Token/i.test(value)) {
+    return redactStreamUrl(value);
+  }
+  return value;
+}
+
+// Pull the fields we care about off an hls.js error, redacting any URL that
+// might carry a Plex token. Missing expected fields are not filled in with
+// generics — whatever arrived is what gets reported.
+function summarizeHlsErrorData(
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  const summary: Record<string, unknown> = {};
+
+  if ("type" in data) {
+    summary.type = data.type;
+  }
+  if ("details" in data) {
+    summary.details = data.details;
+  }
+
+  const response = data.response;
+  if (response !== undefined && response !== null && typeof response === "object") {
+    const raw = response as Record<string, unknown>;
+    const resp: Record<string, unknown> = {};
+    if ("code" in raw) {
+      resp.code = raw.code;
+    }
+    if ("text" in raw) {
+      resp.text = raw.text;
+    }
+    if (typeof raw.url === "string") {
+      resp.url = redactStreamUrl(raw.url);
+    }
+    for (const [key, value] of Object.entries(raw)) {
+      if (key === "code" || key === "text" || key === "url" || key === "data") {
+        continue;
+      }
+      resp[key] = redactIfUrlLike(value);
+    }
+    summary.response = resp;
+  }
+
+  if (typeof data.url === "string") {
+    summary.url = redactStreamUrl(data.url);
+  }
+  if ("reason" in data) {
+    summary.reason = data.reason;
+  }
+  const err = data.error;
+  if (err instanceof Error) {
+    summary.error = err.message;
+  } else if (err !== undefined && err !== null && typeof err === "object") {
+    const message = (err as { message?: unknown }).message;
+    if (typeof message === "string") {
+      summary.error = redactIfUrlLike(message);
+    }
+  }
+
+  // Unexpected shape: no type/details/response at all — dump remaining keys so
+  // the device still shows what hls.js handed us.
+  if (
+    summary.type === undefined &&
+    summary.details === undefined &&
+    summary.response === undefined
+  ) {
+    for (const [key, value] of Object.entries(data)) {
+      if (key === "fatal" || key in summary) {
+        continue;
+      }
+      if (
+        key === "frag" ||
+        key === "loader" ||
+        key === "networkDetails" ||
+        key === "context" ||
+        key === "error" ||
+        key === "err"
+      ) {
+        summary[key] = value === null ? null : typeof value;
+        continue;
+      }
+      summary[key] = redactIfUrlLike(value);
+    }
+  }
+
+  return summary;
+}
+
+/**
+ * Build the on-screen diagnostic string and the structured console.error
+ * payload for a complete local→remote (or remote-only) failure.
+ */
+export function buildHlsPlaybackFailureReport(input: {
+  hadLocalUrl: boolean;
+  attempts: HlsAttemptFailure[];
+}): HlsPlaybackFailureReport {
+  const attempts: Array<Record<string, unknown>> = input.attempts.map(
+    (attempt) => ({
+      connection: attempt.connection,
+      url: redactStreamUrl(attempt.sourceUrl),
+      ...summarizeHlsErrorData(attempt.data),
+    }),
+  );
+
+  const logPayload = {
+    hadLocalUrl: input.hadLocalUrl,
+    attempts,
+  };
+
+  const lines: string[] = [
+    "Playback failed on all connections.",
+    `Descriptor had local URL: ${input.hadLocalUrl ? "yes" : "no"}`,
+    "",
+  ];
+
+  for (let i = 0; i < attempts.length; i++) {
+    const summarized = attempts[i]!;
+    lines.push(`${i + 1}. ${String(summarized.connection)} — ${String(summarized.url)}`);
+
+    if (summarized.type !== undefined) {
+      lines.push(`   type: ${String(summarized.type)}`);
+    }
+    if (summarized.details !== undefined) {
+      lines.push(`   details: ${String(summarized.details)}`);
+    }
+
+    const resp = summarized.response;
+    if (resp !== undefined && resp !== null && typeof resp === "object") {
+      const r = resp as Record<string, unknown>;
+      if (r.code !== undefined || r.text !== undefined) {
+        const code = r.code !== undefined ? String(r.code) : "?";
+        const text =
+          r.text !== undefined && String(r.text) !== ""
+            ? ` ${String(r.text)}`
+            : "";
+        lines.push(`   HTTP: ${code}${text}`);
+      }
+    }
+
+    // Fail-loud: when the usual fields are missing, print the summarized object
+    // so an unexpected hls.js shape is still visible on the device.
+    if (
+      summarized.type === undefined &&
+      summarized.details === undefined &&
+      summarized.response === undefined
+    ) {
+      lines.push(`   raw: ${JSON.stringify(summarized)}`);
+    } else if (
+      summarized.type === undefined ||
+      summarized.details === undefined
+    ) {
+      const extras: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(summarized)) {
+        if (
+          key === "connection" ||
+          key === "url" ||
+          key === "type" ||
+          key === "details" ||
+          key === "response"
+        ) {
+          continue;
+        }
+        extras[key] = value;
+      }
+      if (Object.keys(extras).length > 0) {
+        lines.push(`   also: ${JSON.stringify(extras)}`);
+      }
+    }
+
+    lines.push("");
+  }
+
+  return {
+    message: lines.join("\n").trimEnd(),
+    logPayload,
+  };
+}
+
 // Auto-advance defaults to on, including when localStorage can't be read.
 function readStoredAutoPlay(): boolean {
   try {
@@ -1121,6 +1339,10 @@ export function WatchPage() {
 
     let hls: Hls | null = null;
     let usedRemote = primaryUrl === remoteUrl;
+    // Accumulate fatal errors across the local→remote failover. The first hls
+    // instance is destroyed before the second starts, so replacing the message
+    // (as the old code did) could only ever show the last failure.
+    const attemptFailures: HlsAttemptFailure[] = [];
 
     if (pendingResumeRef.current !== null || resumeDialogOpenRef.current) {
       // Avoid briefly playing from 0:00 while the user chooses or a new
@@ -1164,6 +1386,21 @@ export function WatchPage() {
         if (!data.fatal) {
           return;
         }
+        const connection: "local" | "remote" =
+          localUrl !== null && source === localUrl ? "local" : "remote";
+        attemptFailures.push({
+          connection,
+          sourceUrl: source,
+          data: {
+            type: data.type,
+            details: data.details,
+            fatal: data.fatal,
+            url: data.url,
+            reason: data.reason,
+            error: data.error,
+            response: data.response,
+          },
+        });
         // On a fatal error, fall back local → remote once; if remote also
         // fails, surface a visible error rather than a silent dead player.
         if (!usedRemote && remoteUrl !== source) {
@@ -1175,8 +1412,13 @@ export function WatchPage() {
         hls?.destroy();
         hls = null;
         pendingResumeRef.current = null;
+        const report = buildHlsPlaybackFailureReport({
+          hadLocalUrl: localUrl !== null,
+          attempts: attemptFailures,
+        });
+        console.error("HLS playback failed", report.logPayload);
         setStatus("error");
-        setError("Playback failed on all connections");
+        setError(report.message);
       });
       hls.loadSource(source);
       hls.attachMedia(video);
@@ -1562,7 +1804,9 @@ export function WatchPage() {
           "re-login required" reaches the user instead of a generic failure. */}
       {status === "error" ? (
         <div className="stats-error">
-          <p className="error">{error ?? "Failed to load stream"}</p>
+          <p className="error watch-playback-diag">
+            {error ?? "Failed to load stream"}
+          </p>
           <Link to="/" className="btn secondary">
             Back
           </Link>
