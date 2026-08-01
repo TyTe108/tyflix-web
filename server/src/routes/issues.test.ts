@@ -95,11 +95,15 @@ function createStubSeerr(
   overrides: Partial<IssuesRouterDeps["seerr"]> = {},
 ): IssuesRouterDeps["seerr"] & {
   createCalls: CreateSeerrIssueInput[];
-  commentCalls: Array<{ issueId: number; message: string }>;
+  commentCalls: Array<{ issueId: number; message: string; userId: number }>;
   statusCalls: Array<{ issueId: number; status: IssueStatus }>;
 } {
   const createCalls: CreateSeerrIssueInput[] = [];
-  const commentCalls: Array<{ issueId: number; message: string }> = [];
+  const commentCalls: Array<{
+    issueId: number;
+    message: string;
+    userId: number;
+  }> = [];
   const statusCalls: Array<{ issueId: number; status: IssueStatus }> = [];
   return {
     createCalls,
@@ -115,8 +119,8 @@ function createStubSeerr(
       createCalls.push(input);
       return issueView();
     },
-    async addIssueComment(issueId, message) {
-      commentCalls.push({ issueId, message });
+    async addIssueComment(issueId, message, userId) {
+      commentCalls.push({ issueId, message, userId });
       return issueView({
         id: issueId,
         comments: [
@@ -277,7 +281,7 @@ describe("issue routes", () => {
     assert.equal(ownerComment.status, 200);
     assert.equal(adminStatus.status, 200);
     assert.deepEqual(seerr.commentCalls, [
-      { issueId: 51, message: "More detail" },
+      { issueId: 51, message: "More detail", userId: 7 },
     ]);
     assert.deepEqual(seerr.statusCalls, [
       { issueId: 51, status: "resolved" },

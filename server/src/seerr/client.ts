@@ -150,7 +150,7 @@ export type CreateSeerrIssueInput = {
   issueType: IssueType;
   message: string;
   mediaId: number; // Seerr's media id, not a TMDB id
-  userId: number;
+  userId: number; // Seerr user id of the real reporter, sent as X-API-User
   problemSeason?: number;
   problemEpisode?: number;
 };
@@ -800,43 +800,84 @@ export function createSeerrClient(options: SeerrClientOptions) {
    * issues router resolves it through mediaStatusProvider first and 404s when
    * Seerr isn't tracking the title at all.
    *
+   * Read the note below before touching this. The X-API-User header is what
+   * makes the issue belong to the person who filed it; drop it and every
+   * household report is attributed to the admin. Same bug class as
+   * createRequest (fixed in 51d06b3); the tests now assert the header.
+   *
+   * @throws Error when userId isn't a positive integer, before any network
+   * call, because a missing reporter is a programming mistake and not an
+   * upstream problem.
    * @throws SeerrUpstreamError on a bad status or an unmappable body.
    */
   async function createIssue(
     input: CreateSeerrIssueInput,
   ): Promise<IssueView> {
-    const body = await postJson("/api/v1/issue", {
-      issueType: issueTypeToCode(input.issueType),
-      message: input.message,
-      mediaId: input.mediaId,
-      userId: input.userId,
-      ...(input.problemSeason === undefined
-        ? {}
-        : { problemSeason: input.problemSeason }),
-      ...(input.problemEpisode === undefined
-        ? {}
-        : { problemEpisode: input.problemEpisode }),
-    });
+    // Seerr resolves API-key auth to user ID 1 (the original admin) unless the
+    // caller also sends X-API-User. Issue createdBy and the initial comment's
+    // user are set to that authenticated req.user, unconditionally — the
+    // deployed Seerr (v3.3.0) doesn't read a body userId for issue creation at
+    // all (that override is a develop-branch-only feature gated on
+    // MANAGE_ISSUES, not present in this deployment). Omitting X-API-User
+    // silently attributes every household issue to the admin.
+    if (!Number.isInteger(input.userId) || input.userId <= 0) {
+      throw new Error(
+        `createIssue requires a positive integer userId (got ${String(input.userId)})`,
+      );
+    }
+
+    const body = await postJson(
+      "/api/v1/issue",
+      {
+        issueType: issueTypeToCode(input.issueType),
+        message: input.message,
+        mediaId: input.mediaId,
+        ...(input.problemSeason === undefined
+          ? {}
+          : { problemSeason: input.problemSeason }),
+        ...(input.problemEpisode === undefined
+          ? {}
+          : { problemEpisode: input.problemEpisode }),
+      },
+      { "X-API-User": String(input.userId) },
+    );
     return requireSeerrIssue(body, "createIssue");
   }
 
   /**
    * Adds a comment to an issue thread and returns the updated issue.
    *
-   * Unlike createIssue there's no requester field here, so the comment carries
-   * whatever identity the API key resolves to. routes/issues.ts already has a
-   * TODO on that attribution gap; the caller still does its own ownership check
-   * before letting anyone comment.
+   * Read the note below before touching this. The X-API-User header is what
+   * makes the comment belong to the person who wrote it; drop it and every
+   * household reply is attributed to the admin. Same bug class as
+   * createRequest (fixed in 51d06b3); the tests now assert the header. The
+   * caller still does its own ownership check before letting anyone comment.
    *
+   * @throws Error when userId isn't a positive integer, before any network
+   * call, because a missing commenter is a programming mistake and not an
+   * upstream problem.
    * @throws SeerrUpstreamError on a bad status or an unmappable body.
    */
   async function addIssueComment(
     issueId: number,
     message: string,
+    userId: number,
   ): Promise<IssueView> {
-    const body = await postJson(`/api/v1/issue/${issueId}/comment`, {
-      message,
-    });
+    // Seerr resolves API-key auth to user ID 1 (the original admin) unless the
+    // caller also sends X-API-User. Comment authorship is based on that
+    // authenticated req.user — there is no body userId field. Omitting
+    // X-API-User silently attributes every household comment to the admin.
+    if (!Number.isInteger(userId) || userId <= 0) {
+      throw new Error(
+        `addIssueComment requires a positive integer userId (got ${String(userId)})`,
+      );
+    }
+
+    const body = await postJson(
+      `/api/v1/issue/${issueId}/comment`,
+      { message },
+      { "X-API-User": String(userId) },
+    );
     return requireSeerrIssue(body, "addIssueComment");
   }
 

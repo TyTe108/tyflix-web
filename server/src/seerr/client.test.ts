@@ -729,15 +729,21 @@ describe("Seerr issues client", () => {
     assert.equal(issues[0].status, "resolved");
   });
 
-  it("creates an issue with numeric type, userId, and problem location", async () => {
+  it("creates an issue with numeric type, X-API-User, and problem location", async () => {
     let call:
-      | { url: string; method: string | undefined; body: string | undefined }
+      | {
+          url: string;
+          method: string | undefined;
+          body: string | undefined;
+          headers: HeadersInit | undefined;
+        }
       | undefined;
     globalThis.fetch = async (input, init) => {
       call = {
         url: String(input),
         method: init?.method,
         body: typeof init?.body === "string" ? init.body : undefined,
+        headers: init?.headers,
       };
       return jsonResponse(201, issueRow({ issueType: 3 }));
     };
@@ -758,14 +764,94 @@ describe("Seerr issues client", () => {
     assert.ok(call);
     assert.equal(call.url, "http://seerr:5055/api/v1/issue");
     assert.equal(call.method, "POST");
+    assert.equal(new Headers(call.headers).get("X-API-User"), "44");
     assert.deepEqual(JSON.parse(call.body ?? ""), {
       issueType: 3,
       message: "Subtitle timing is wrong",
       mediaId: 10,
-      userId: 44,
       problemSeason: 2,
       problemEpisode: 3,
     });
+  });
+
+  it("throws before calling Seerr when createIssue userId is not a positive integer", async () => {
+    let called = false;
+    globalThis.fetch = async () => {
+      called = true;
+      return jsonResponse(201, issueRow());
+    };
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    await assert.rejects(
+      () =>
+        seerr.createIssue({
+          issueType: "video",
+          message: "Broken",
+          mediaId: 10,
+          userId: 0,
+        }),
+      (err: unknown) =>
+        err instanceof Error &&
+        err.message.includes("createIssue requires a positive integer userId"),
+    );
+    assert.equal(called, false);
+  });
+
+  it("adds an issue comment with X-API-User", async () => {
+    let call:
+      | {
+          url: string;
+          method: string | undefined;
+          body: string | undefined;
+          headers: HeadersInit | undefined;
+        }
+      | undefined;
+    globalThis.fetch = async (input, init) => {
+      call = {
+        url: String(input),
+        method: init?.method,
+        body: typeof init?.body === "string" ? init.body : undefined,
+        headers: init?.headers,
+      };
+      return jsonResponse(200, issueRow());
+    };
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    await seerr.addIssueComment(51, "More detail", 7);
+
+    assert.ok(call);
+    assert.equal(call.url, "http://seerr:5055/api/v1/issue/51/comment");
+    assert.equal(call.method, "POST");
+    assert.equal(new Headers(call.headers).get("X-API-User"), "7");
+    assert.deepEqual(JSON.parse(call.body ?? ""), { message: "More detail" });
+  });
+
+  it("throws before calling Seerr when addIssueComment userId is not a positive integer", async () => {
+    let called = false;
+    globalThis.fetch = async () => {
+      called = true;
+      return jsonResponse(200, issueRow());
+    };
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    await assert.rejects(
+      () => seerr.addIssueComment(51, "More detail", -1),
+      (err: unknown) =>
+        err instanceof Error &&
+        err.message.includes(
+          "addIssueComment requires a positive integer userId",
+        ),
+    );
+    assert.equal(called, false);
   });
 });
 

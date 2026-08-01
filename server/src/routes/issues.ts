@@ -228,9 +228,7 @@ export function createIssuesRouter(deps: IssuesRouterDeps): Router {
         res.status(403).json({ error: "forbidden" });
         return;
       }
-      // TODO: The admin API key makes Seerr attribute comments to its owner,
-      // not the acting Tyflix user. Issue creation is attributed with userId.
-      res.json(await seerr.addIssueComment(id, message));
+      res.json(await seerr.addIssueComment(id, message, session.seerrUserId));
     } catch (err) {
       respondUpstreamError(res, err);
     }
