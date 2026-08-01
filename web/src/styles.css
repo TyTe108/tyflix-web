@@ -4181,3 +4181,80 @@ a.library-detail-title:hover {
     justify-content: center;
   }
 }
+
+/*
+ * Mobile admin + shared request filters (max-width: 48rem).
+ * Tabs wrap so all seven stay on-screen; Users/Jobs/Containers keep horizontal
+ * scroll with a sticky identifying column. Breakpoint must match
+ * MOBILE_MEDIA_QUERY in useIsMobile.ts.
+ */
+@media (max-width: 48rem) {
+  /* Prefer wrap over a scroll strip: 605px of tabs fits in two rows with no
+     hidden Jobs/Containers and no fade/scrollbar affordance to invent. */
+  .admin-tabs {
+    flex-wrap: wrap;
+    overflow-x: visible;
+    scrollbar-width: auto;
+    row-gap: 0.15rem;
+  }
+
+  .admin-tabs::-webkit-scrollbar {
+    display: initial;
+  }
+
+  .admin-tab {
+    min-height: 44px;
+    box-sizing: border-box;
+  }
+
+  /* Visible thin scrollbar so overflow is obvious (macOS often hides it). */
+  .admin-users-scroll,
+  .admin-jobs-scroll,
+  .admin-containers-scroll {
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+  }
+
+  .admin-users-scroll::-webkit-scrollbar,
+  .admin-jobs-scroll::-webkit-scrollbar,
+  .admin-containers-scroll::-webkit-scrollbar {
+    height: 6px;
+  }
+
+  .admin-users-scroll::-webkit-scrollbar-thumb,
+  .admin-jobs-scroll::-webkit-scrollbar-thumb,
+  .admin-containers-scroll::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--text-muted) 55%, transparent);
+    border-radius: 999px;
+  }
+
+  /* Sticky first column: keeps the user / job / container name in view while
+     the numeric columns scroll. Relies on the *-scroll ancestor being the
+     overflow container — an overflow:hidden wrapper around the list would
+     make position:sticky silently stop sticking. */
+  .admin-users-row > :first-child,
+  .admin-jobs-row > :first-child,
+  .admin-containers-row > :first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--bg);
+    box-shadow: 1px 0 0 var(--border);
+  }
+
+  .admin-users-sort {
+    min-height: 44px;
+    box-sizing: border-box;
+  }
+
+  .request-filters .dropdown-trigger {
+    min-height: 44px;
+    box-sizing: border-box;
+  }
+
+  .request-filter-dir {
+    min-height: 44px;
+    min-width: 44px;
+    box-sizing: border-box;
+  }
+}
