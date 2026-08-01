@@ -49,35 +49,46 @@ type WebkitVideoElement = HTMLVideoElement & {
  * 2. `video.webkitEnterFullscreen()` — iPhone Safari's native player (no FS on divs).
  * 3. Otherwise call `onUnavailable` so the UI can show a visible error.
  *    `console.error` alone is not enough; nobody reads a console on a phone.
+ *
+ * Step 2 runs both when `requestFullscreen` is absent AND when it exists but
+ * its promise rejects (permissions policy, some iPad embeds). Treating only
+ * absence as a signal would surface the error without trying the webkit path.
  */
 function requestPlayerFullscreen(
   shell: HTMLElement,
   video: HTMLVideoElement | null,
   onUnavailable: () => void,
 ): void {
+  const tryWebkit = (): boolean => {
+    const webkitVideo = video as WebkitVideoElement | null;
+    if (
+      webkitVideo === null ||
+      typeof webkitVideo.webkitEnterFullscreen !== "function"
+    ) {
+      return false;
+    }
+    try {
+      webkitVideo.webkitEnterFullscreen();
+      return true;
+    } catch (err: unknown) {
+      console.error("webkitEnterFullscreen failed", err);
+      return false;
+    }
+  };
+
   if (typeof shell.requestFullscreen === "function") {
     void shell.requestFullscreen().catch((err: unknown) => {
       console.error("Fullscreen request failed", err);
-      onUnavailable();
+      if (!tryWebkit()) {
+        onUnavailable();
+      }
     });
     return;
   }
 
-  const webkitVideo = video as WebkitVideoElement | null;
-  if (
-    webkitVideo !== null &&
-    typeof webkitVideo.webkitEnterFullscreen === "function"
-  ) {
-    try {
-      webkitVideo.webkitEnterFullscreen();
-    } catch (err: unknown) {
-      console.error("webkitEnterFullscreen failed", err);
-      onUnavailable();
-    }
-    return;
+  if (!tryWebkit()) {
+    onUnavailable();
   }
-
-  onUnavailable();
 }
 
 // Labels for the Quality group. WatchPage turns each one into the bitrate and
@@ -960,7 +971,7 @@ export function PlayerControls({
 
           <button
             type="button"
-            className="watch-control-btn"
+            className="watch-control-btn watch-control-btn--mute"
             aria-label={
               target.muted || target.volume === 0 ? "Unmute" : "Mute"
             }

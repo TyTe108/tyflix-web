@@ -218,6 +218,34 @@ describe("PlayerControls fullscreen", () => {
     expect(webkitEnterFullscreen).toHaveBeenCalled();
   });
 
+  it("falls back to webkitEnterFullscreen when requestFullscreen exists but rejects", async () => {
+    setViewport("mobile");
+    const harness = await mountPlayer();
+
+    const requestFullscreen = vi
+      .fn()
+      .mockRejectedValue(new Error("Fullscreen denied"));
+    const shell = shellElement();
+    shell.requestFullscreen = requestFullscreen;
+
+    const webkitEnterFullscreen = vi.fn();
+    const video = harness.videoRef.current;
+    if (video === null) {
+      throw new Error("expected video element");
+    }
+    Object.defineProperty(video, "webkitEnterFullscreen", {
+      configurable: true,
+      value: webkitEnterFullscreen,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Enter fullscreen" }));
+
+    await waitFor(() => {
+      expect(webkitEnterFullscreen).toHaveBeenCalled();
+    });
+    expect(screen.queryByText(/fullscreen/i)).toBeNull();
+  });
+
   it("surfaces a user-visible error when neither fullscreen API exists", async () => {
     setViewport("mobile");
     const harness = await mountPlayer();

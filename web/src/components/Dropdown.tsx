@@ -10,7 +10,15 @@
 // Keyboard and ARIA behaviour is hand-rolled to match what the native control
 // gives you for free, so treat the roles and the arrow-key handling as load
 // bearing rather than decoration.
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { MOBILE_MEDIA_QUERY } from "../hooks/useIsMobile";
 
 type DropdownOption = {
   value: string;
@@ -52,6 +60,7 @@ export function Dropdown({
   const listboxId = `${triggerId}-listbox`;
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLUListElement>(null);
   // Per-option DOM nodes, kept only so the highlighted one can be scrolled into
   // view when arrow keys walk past the edge of the panel.
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -122,6 +131,56 @@ export function Dropdown({
       optionRefs.current[highlightedIndex]?.scrollIntoView({ block: "nearest" });
     }
   }, [highlightedIndex, open]);
+
+  // Mobile only: cap panel height to space actually below the trigger (or above
+  // when flipped). A flat max-height:16rem was wrong inside the Library Filters
+  // BottomSheet — the panel started mid-sheet and extended past the fold, so
+  // the last Genre options could not be reached. Desktop keeps the CSS cap.
+  useLayoutEffect(() => {
+    if (!open) {
+      return;
+    }
+    if (!window.matchMedia(MOBILE_MEDIA_QUERY).matches) {
+      return;
+    }
+
+    const panel = panelRef.current;
+    const trigger = triggerRef.current;
+    if (panel === null || trigger === null) {
+      return;
+    }
+
+    const applyBounds = () => {
+      const gapPx = 4;
+      const edgePad = 8;
+      const triggerRect = trigger.getBoundingClientRect();
+      const viewportHeight = document.documentElement.clientHeight;
+      const remPx = parseFloat(
+        getComputedStyle(document.documentElement).fontSize,
+      );
+      const remCap = 16 * remPx;
+      const spaceBelow = viewportHeight - triggerRect.bottom - gapPx - edgePad;
+      const spaceAbove = triggerRect.top - gapPx - edgePad;
+
+      if (spaceBelow < remCap * 0.5 && spaceAbove > spaceBelow) {
+        panel.style.top = "auto";
+        panel.style.bottom = "calc(100% + 0.25rem)";
+        panel.style.maxHeight = `${Math.max(0, Math.min(remCap, spaceAbove))}px`;
+      } else {
+        panel.style.top = "calc(100% + 0.25rem)";
+        panel.style.bottom = "auto";
+        panel.style.maxHeight = `${Math.max(0, Math.min(remCap, spaceBelow))}px`;
+      }
+    };
+
+    applyBounds();
+    window.addEventListener("resize", applyBounds);
+    window.addEventListener("scroll", applyBounds, true);
+    return () => {
+      window.removeEventListener("resize", applyBounds);
+      window.removeEventListener("scroll", applyBounds, true);
+    };
+  }, [open]);
 
   // All keyboard handling lives on the trigger, because focus never leaves it.
   // The options are real buttons for the mouse, but they're never focused, so
@@ -219,6 +278,7 @@ export function Dropdown({
           arrow keys can't end up disagreeing about which row is live. */}
       {open && !disabled ? (
         <ul
+          ref={panelRef}
           id={listboxId}
           role="listbox"
           className="dropdown-panel"
