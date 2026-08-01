@@ -34,6 +34,51 @@ import {
 import type { AudioStream, SubtitleStream } from "../api/watch";
 import type { RemotePlaybackControl } from "../cast/useCastPlayer";
 import { useCastState } from "../cast/useCastState";
+import { useIsMobile } from "../hooks/useIsMobile";
+
+// iPhone Safari exposes these on <video> instead of Element.requestFullscreen.
+type WebkitVideoElement = HTMLVideoElement & {
+  webkitEnterFullscreen?: () => void;
+  webkitExitFullscreen?: () => void;
+  webkitDisplayingFullscreen?: boolean;
+};
+
+/**
+ * Enter fullscreen with a three-way fallback:
+ * 1. `shell.requestFullscreen()` — standard API; keeps our chrome in the FS tree.
+ * 2. `video.webkitEnterFullscreen()` — iPhone Safari's native player (no FS on divs).
+ * 3. Otherwise call `onUnavailable` so the UI can show a visible error.
+ *    `console.error` alone is not enough; nobody reads a console on a phone.
+ */
+function requestPlayerFullscreen(
+  shell: HTMLElement,
+  video: HTMLVideoElement | null,
+  onUnavailable: () => void,
+): void {
+  if (typeof shell.requestFullscreen === "function") {
+    void shell.requestFullscreen().catch((err: unknown) => {
+      console.error("Fullscreen request failed", err);
+      onUnavailable();
+    });
+    return;
+  }
+
+  const webkitVideo = video as WebkitVideoElement | null;
+  if (
+    webkitVideo !== null &&
+    typeof webkitVideo.webkitEnterFullscreen === "function"
+  ) {
+    try {
+      webkitVideo.webkitEnterFullscreen();
+    } catch (err: unknown) {
+      console.error("webkitEnterFullscreen failed", err);
+      onUnavailable();
+    }
+    return;
+  }
+
+  onUnavailable();
+}
 
 // Labels for the Quality group. WatchPage turns each one into the bitrate and
 // resolution caps it sends to Plex; "original" means send no caps at all.
@@ -193,12 +238,15 @@ export function PlayerControls({
   const mediaRef = useRef<HTMLDivElement | null>(null);
   const scrubbingRef = useRef(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // These three mirror state into refs so the long-lived <video> listeners read
-  // current values without the effect rebinding on every change.
+  // These mirror state into refs so the long-lived <video> listeners (and
+  // onMediaClick) read current values without the effect rebinding on every
+  // change.
   const settingsOpenRef = useRef(false);
+  const controlsVisibleRef = useRef(true);
   const playbackRateRef = useRef(1);
   const remoteActiveRef = useRef(false);
 
+  const isMobile = useIsMobile();
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -217,8 +265,10 @@ export function PlayerControls({
   const [selectedSubtitleId, setSelectedSubtitleId] = useState<string | null>(
     initialSubtitleId,
   );
+  const [fullscreenError, setFullscreenError] = useState<string | null>(null);
 
   settingsOpenRef.current = settingsOpen;
+  controlsVisibleRef.current = controlsVisible;
   playbackRateRef.current = playbackRate;
 
   const remoteActive = remote?.isActive === true;
@@ -439,6 +489,40 @@ export function PlayerControls({
     };
   }, []);
 
+  // iPhone Safari's native fullscreen fires these on the <video> instead of
+  // document fullscreenchange, so the icon stays honest through that path too.
+  useEffect(() => {
+    const video = videoRef.current as WebkitVideoElement | null;
+    if (video === null) {
+      return;
+    }
+    const onBegin = () => {
+      setFullscreen(true);
+    };
+    const onEnd = () => {
+      setFullscreen(false);
+    };
+    video.addEventListener("webkitbeginfullscreen", onBegin);
+    video.addEventListener("webkitendfullscreen", onEnd);
+    return () => {
+      video.removeEventListener("webkitbeginfullscreen", onBegin);
+      video.removeEventListener("webkitendfullscreen", onEnd);
+    };
+  }, [videoRef]);
+
+  // Clear the inline fullscreen error after a short beat so it doesn't linger.
+  useEffect(() => {
+    if (fullscreenError === null) {
+      return;
+    }
+    const timerId = window.setTimeout(() => {
+      setFullscreenError(null);
+    }, 4000);
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [fullscreenError]);
+
   // Dismiss the settings panel on an outside click, and hold the bar visible
   // for as long as the panel is open. Runs on every open/close.
   useEffect(() => {
@@ -508,11 +592,20 @@ export function PlayerControls({
     });
   };
 
-  // Click on the picture. With settings open the first click only closes the
-  // panel, so you don't pause the film on your way out of the menu.
+  // Click on the picture. Precedence, top to bottom:
+  // 1. Settings open → close the panel only (don't pause on the way out).
+  // 2. Mobile + controls hidden → reveal the bar only (touch has no pointermove,
+  //    so without this the only way back is a tap that also toggled play).
+  // 3. Otherwise → toggle playback.
+  // The reveal branch is gated on useIsMobile(), not (pointer: coarse), so a
+  // touchscreen laptop above 48rem keeps desktop click-to-pause behavior.
   const onMediaClick = () => {
     if (settingsOpenRef.current) {
       setSettingsOpen(false);
+      return;
+    }
+    if (isMobile && !controlsVisibleRef.current) {
+      revealControls();
       return;
     }
     togglePlay();
@@ -664,8 +757,8 @@ export function PlayerControls({
     })),
   ];
 
-  // Fullscreens the whole shell, not the <video>, so the bar and any overlay
-  // card come along instead of being clipped out by the native video view.
+  // Prefer shell fullscreen so the bar and overlays come along. Fall back to
+  // video.webkitEnterFullscreen on iPhone Safari, which has no FS API on divs.
   const toggleFullscreen = () => {
     if (remoteActive) {
       return;
@@ -680,8 +773,13 @@ export function PlayerControls({
       });
       return;
     }
-    void shell.requestFullscreen().catch((err: unknown) => {
-      console.error("Fullscreen request failed", err);
+    const webkitVideo = videoRef.current as WebkitVideoElement | null;
+    if (webkitVideo?.webkitDisplayingFullscreen === true) {
+      webkitVideo.webkitExitFullscreen?.();
+      return;
+    }
+    requestPlayerFullscreen(shell, videoRef.current, () => {
+      setFullscreenError("Fullscreen isn't available in this browser.");
     });
   };
 
@@ -733,6 +831,12 @@ export function PlayerControls({
 
       {/* Cast status, resume prompt, Up Next. Composed by WatchPage. */}
       {overlay}
+
+      {fullscreenError !== null ? (
+        <div className="watch-fullscreen-error" role="status">
+          {fullscreenError}
+        </div>
+      ) : null}
 
       <div
         className={
