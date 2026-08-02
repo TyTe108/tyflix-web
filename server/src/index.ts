@@ -10,13 +10,13 @@
 // finally a catch-all /api handler that returns a JSON 404 instead of letting
 // an unknown API path fall through to index.html.
 //
-// Two mount-order rules are load-bearing. Everything public (/api/auth,
+// Mount-order rules are load-bearing. Everything public (/api/auth,
 // /api/config, /api/access-requests) has to be registered before that /api 404
-// guard, and /api/admin/access-requests has to come before /api/admin because
-// Express matches prefixes in registration order. Note that most routers are
-// gated by requireAuth/requireAdmin right here at the mount, but the admin
-// access-requests router applies requireAdmin internally instead, which is why
-// it looks unguarded below.
+// guard. /api/admin/media and /api/admin/access-requests have to come before
+// /api/admin because Express matches prefixes in registration order. Note that
+// most routers are gated by requireAuth/requireAdmin right here at the mount,
+// but the admin access-requests router applies requireAdmin internally instead,
+// which is why it looks unguarded below.
 //
 // In production this same process serves the built React app from
 // ../../web/dist, with a splat route sending every unmatched path to index.html
@@ -42,6 +42,7 @@ import { createSharedServerAccessResolver } from "./plex/sharedServerAccess";
 import { createTransientTokenMinter } from "./plex/transientToken";
 import { createAccessRequestsRouter } from "./routes/accessRequests";
 import { createAdminAccessRequestsRouter } from "./routes/adminAccessRequests";
+import { createAdminMediaRouter } from "./routes/adminMedia";
 import { createAdminRouter } from "./routes/admin";
 import { createAuthRouter } from "./routes/auth";
 import { createConfigRouter } from "./routes/config";
@@ -251,8 +252,16 @@ async function start(): Promise<void> {
     createMeRouter({ plexServer, seerr }),
   );
 
-  // More specific than /api/admin — mount first. Same ACCESS_REQUESTS_FILE gate
-  // as the public submit route.
+  // More specific than /api/admin — mount first. requireAdmin at the mount so
+  // every media-removal route is gated; this router deletes files.
+  app.use(
+    "/api/admin/media",
+    requireAdmin(config.sessionSecret, seerr, sessionRevocation),
+    createAdminMediaRouter({ seerr, mediaStatus, mediaEnrichment }),
+  );
+
+  // More specific than /api/admin — mount before it. Same ACCESS_REQUESTS_FILE
+  // gate as the public submit route.
   //
   // No requireAdmin here on purpose: createAdminAccessRequestsRouter builds its
   // own requireAdmin from sessionSecret and applies it per route.
