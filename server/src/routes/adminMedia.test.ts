@@ -8,6 +8,12 @@ import {
 } from "../seerr/client";
 import { isAdmin, type SessionPayload } from "../session";
 import {
+  SonarrUpstreamError,
+  type SonarrEpisode,
+  type SonarrEpisodeFile,
+  type SonarrSeries,
+} from "../sonarr/client";
+import {
   createAdminMediaRouter,
   type AdminMediaRouterDeps,
 } from "./adminMedia";
@@ -46,7 +52,7 @@ function mediaRow(
 }
 
 function requestRow(
-  overrides: Partial<SeerrRequest> & {
+  overrides: Omit<Partial<SeerrRequest>, "media"> & {
     media?: Partial<SeerrRequest["media"]>;
   } = {},
 ): SeerrRequest {
@@ -86,11 +92,18 @@ function createTrackingDeps(options: {
   enrichTitle?: string;
   requests?: SeerrRequest[];
   declineErrors?: Map<number, Error>;
+  series?: SonarrSeries;
+  episodes?: SonarrEpisode[];
+  episodeFiles?: SonarrEpisodeFile[];
+  setSeasonsMonitoredError?: Error;
+  setEpisodesMonitoredError?: Error;
+  deleteEpisodeFileErrors?: Map<number, Error>;
   calls: CallLog;
 }): AdminMediaRouterDeps {
   const row =
     options.mediaRow === undefined ? mediaRow() : options.mediaRow;
   const declineErrors = options.declineErrors ?? new Map();
+  const deleteEpisodeFileErrors = options.deleteEpisodeFileErrors ?? new Map();
 
   return {
     seerr: {
@@ -125,6 +138,51 @@ function createTrackingDeps(options: {
           throw err;
         }
         return requestRow({ id });
+      },
+    },
+    sonarr: {
+      async getSeries(seriesId) {
+        options.calls.push(`getSeries:${seriesId}`);
+        return (
+          options.series ?? {
+            id: seriesId,
+            seasons: [
+              { seasonNumber: 0, monitored: false },
+              { seasonNumber: 1, monitored: true },
+            ],
+          }
+        );
+      },
+      async listEpisodes(seriesId) {
+        options.calls.push(`listEpisodes:${seriesId}`);
+        return options.episodes ?? [];
+      },
+      async listEpisodeFiles(seriesId) {
+        options.calls.push(`listEpisodeFiles:${seriesId}`);
+        return options.episodeFiles ?? [];
+      },
+      async setSeasonsMonitored(seriesId, seasonNumbers, monitored) {
+        options.calls.push(
+          `setSeasonsMonitored:${seriesId}:${seasonNumbers.join(",")}:${monitored}`,
+        );
+        if (options.setSeasonsMonitoredError) {
+          throw options.setSeasonsMonitoredError;
+        }
+      },
+      async setEpisodesMonitored(episodeIds, monitored) {
+        options.calls.push(
+          `setEpisodesMonitored:${episodeIds.join(",")}:${monitored}`,
+        );
+        if (options.setEpisodesMonitoredError) {
+          throw options.setEpisodesMonitoredError;
+        }
+      },
+      async deleteEpisodeFile(fileId) {
+        options.calls.push(`deleteEpisodeFile:${fileId}`);
+        const err = deleteEpisodeFileErrors.get(fileId);
+        if (err) {
+          throw err;
+        }
       },
     },
     mediaStatus: {
@@ -596,6 +654,501 @@ describe("DELETE /api/admin/media/:mediaType/:tmdbId", () => {
     assert.deepEqual(body.requestsDeclined, [10]);
     assert.deepEqual(body.requestsFailedToDecline, []);
     assert.equal(calls.includes("declineRequest:20"), false);
+  });
+});
+
+describe("GET /api/admin/media/tv/:tmdbId/seasons", () => {
+  it("returns season 0 and joins episode file sizes", async () => {
+    const calls: CallLog = [];
+    const deps = createTrackingDeps({
+      calls,
+      mediaRow: mediaRow({
+        tmdbId: 1396,
+        mediaType: "tv",
+        externalServiceId: 97,
+      }),
+      series: {
+        id: 97,
+        seasons: [
+          { seasonNumber: 0, monitored: false },
+          { seasonNumber: 1, monitored: true },
+        ],
+      },
+      episodes: [
+        {
+          id: 100,
+          seasonNumber: 0,
+          episodeNumber: 1,
+          title: "Special",
+          episodeFileId: 500,
+          hasFile: true,
+          monitored: false,
+        },
+        {
+          id: 101,
+          seasonNumber: 1,
+          episodeNumber: 1,
+          title: "Pilot",
+          episodeFileId: 501,
+          hasFile: true,
+          monitored: true,
+        },
+        {
+          id: 102,
+          seasonNumber: 1,
+          episodeNumber: 2,
+          title: "Missing",
+          episodeFileId: 0,
+          hasFile: false,
+          monitored: true,
+        },
+      ],
+      episodeFiles: [
+        {
+          id: 500,
+          seasonNumber: 0,
+          path: "/tv/show/S00E01.mkv",
+          size: 50,
+        },
+        {
+          id: 501,
+          seasonNumber: 1,
+          path: "/tv/show/S01E01.mkv",
+          size: 100,
+        },
+      ],
+    });
+
+    const response = await fetchLocal(
+      createApp(deps),
+      "/api/admin/media/tv/1396/seasons",
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      tmdbId: 1396,
+      sonarrSeriesId: 97,
+      seasons: [
+        {
+          seasonNumber: 0,
+          monitored: false,
+          episodeCount: 1,
+          episodeFileCount: 1,
+          sizeOnDisk: 50,
+          episodes: [
+            {
+              id: 100,
+              episodeNumber: 1,
+              title: "Special",
+              monitored: false,
+              hasFile: true,
+              episodeFileId: 500,
+              size: 50,
+            },
+          ],
+        },
+        {
+          seasonNumber: 1,
+          monitored: true,
+          episodeCount: 2,
+          episodeFileCount: 1,
+          sizeOnDisk: 100,
+          episodes: [
+            {
+              id: 101,
+              episodeNumber: 1,
+              title: "Pilot",
+              monitored: true,
+              hasFile: true,
+              episodeFileId: 501,
+              size: 100,
+            },
+            {
+              id: 102,
+              episodeNumber: 2,
+              title: "Missing",
+              monitored: true,
+              hasFile: false,
+              episodeFileId: 0,
+              size: 0,
+            },
+          ],
+        },
+      ],
+    });
+    assert.deepEqual(calls, [
+      "getMediaRow:tv:1396",
+      "getSeries:97",
+      "listEpisodes:97",
+      "listEpisodeFiles:97",
+    ]);
+  });
+
+  it("returns 400 for an invalid tmdbId and calls nothing upstream", async () => {
+    const calls: CallLog = [];
+    const response = await fetchLocal(
+      createApp(createTrackingDeps({ calls })),
+      "/api/admin/media/tv/0/seasons",
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(calls, []);
+  });
+
+  it("returns 404 when Seerr is not tracking the title", async () => {
+    const calls: CallLog = [];
+    const response = await fetchLocal(
+      createApp(createTrackingDeps({ calls, mediaRow: null })),
+      "/api/admin/media/tv/1396/seasons",
+    );
+
+    assert.equal(response.status, 404);
+    assert.deepEqual(calls, ["getMediaRow:tv:1396"]);
+  });
+
+  it("returns 409 when Seerr has no Sonarr series id", async () => {
+    const calls: CallLog = [];
+    const response = await fetchLocal(
+      createApp(
+        createTrackingDeps({
+          calls,
+          mediaRow: mediaRow({
+            tmdbId: 1396,
+            mediaType: "tv",
+            externalServiceId: null,
+          }),
+        }),
+      ),
+      "/api/admin/media/tv/1396/seasons",
+    );
+
+    assert.equal(response.status, 409);
+    assert.match(
+      ((await response.json()) as { error: string }).error,
+      /Sonarr series id/i,
+    );
+    assert.deepEqual(calls, ["getMediaRow:tv:1396"]);
+  });
+});
+
+describe("DELETE /api/admin/media/tv/:tmdbId/season/:seasonNumber", () => {
+  it("unmonitors before deleting files and declines only fully covered requests", async () => {
+    const calls: CallLog = [];
+    const deps = createTrackingDeps({
+      calls,
+      mediaRow: mediaRow({
+        tmdbId: 1396,
+        mediaType: "tv",
+        externalServiceId: 97,
+      }),
+      episodeFiles: [
+        {
+          id: 501,
+          seasonNumber: 3,
+          path: "/tv/show/S03E01.mkv",
+          size: 100,
+        },
+        {
+          id: 502,
+          seasonNumber: 3,
+          path: "/tv/show/S03E02.mkv",
+          size: 200,
+        },
+        {
+          id: 601,
+          seasonNumber: 4,
+          path: "/tv/show/S04E01.mkv",
+          size: 300,
+        },
+      ],
+      requests: [
+        requestRow({
+          id: 10,
+          status: 2,
+          type: "tv",
+          seasons: [{ seasonNumber: 3 }],
+          media: { tmdbId: 1396, mediaType: "tv" },
+        }),
+        requestRow({
+          id: 11,
+          status: 1,
+          type: "tv",
+          seasons: [
+            { seasonNumber: 1 },
+            { seasonNumber: 2 },
+            { seasonNumber: 3 },
+            { seasonNumber: 4 },
+          ],
+          media: { tmdbId: 1396, mediaType: "tv" },
+        }),
+      ],
+    });
+
+    const response = await fetchLocal(
+      createApp(deps),
+      "/api/admin/media/tv/1396/season/3",
+      { method: "DELETE" },
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      tmdbId: 1396,
+      seasonNumber: 3,
+      unmonitored: true,
+      filesDeleted: [501, 502],
+      filesFailedToDelete: [],
+      requestsDeclined: [10],
+      requestsLeftOpen: [{ id: 11, seasons: [1, 2, 3, 4] }],
+    });
+    assert.deepEqual(calls, [
+      "getMediaRow:tv:1396",
+      "listEpisodeFiles:97",
+      "setSeasonsMonitored:97:3:false",
+      "deleteEpisodeFile:501",
+      "deleteEpisodeFile:502",
+      "listAllRequests",
+      "declineRequest:10",
+    ]);
+  });
+
+  it("accepts season 0 with no files as successful meaningful work", async () => {
+    const calls: CallLog = [];
+    const response = await fetchLocal(
+      createApp(
+        createTrackingDeps({
+          calls,
+          mediaRow: mediaRow({
+            tmdbId: 1396,
+            mediaType: "tv",
+            externalServiceId: 97,
+          }),
+          episodeFiles: [],
+        }),
+      ),
+      "/api/admin/media/tv/1396/season/0",
+      { method: "DELETE" },
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      tmdbId: 1396,
+      seasonNumber: 0,
+      unmonitored: true,
+      filesDeleted: [],
+      filesFailedToDelete: [],
+      requestsDeclined: [],
+      requestsLeftOpen: [],
+    });
+    assert.deepEqual(calls, [
+      "getMediaRow:tv:1396",
+      "listEpisodeFiles:97",
+      "setSeasonsMonitored:97:0:false",
+      "listAllRequests",
+    ]);
+  });
+
+  it("returns 400 for a negative or non-integer season and calls nothing upstream", async () => {
+    for (const season of ["-1", "1.5"]) {
+      const calls: CallLog = [];
+      const response = await fetchLocal(
+        createApp(createTrackingDeps({ calls })),
+        `/api/admin/media/tv/1396/season/${season}`,
+        { method: "DELETE" },
+      );
+      assert.equal(response.status, 400, season);
+      assert.deepEqual(calls, []);
+    }
+  });
+
+  it("aborts without deleting files when unmonitoring fails", async () => {
+    const calls: CallLog = [];
+    const originalConsoleError = console.error;
+    console.error = () => undefined;
+    try {
+      const response = await fetchLocal(
+        createApp(
+          createTrackingDeps({
+            calls,
+            mediaRow: mediaRow({
+              tmdbId: 1396,
+              mediaType: "tv",
+              externalServiceId: 97,
+            }),
+            episodeFiles: [
+              {
+                id: 501,
+                seasonNumber: 3,
+                path: "/tv/show/S03E01.mkv",
+                size: 100,
+              },
+            ],
+            setSeasonsMonitoredError: new SonarrUpstreamError("down", 503),
+          }),
+        ),
+        "/api/admin/media/tv/1396/season/3",
+        { method: "DELETE" },
+      );
+
+      assert.equal(response.status, 503);
+      assert.deepEqual(calls, [
+        "getMediaRow:tv:1396",
+        "listEpisodeFiles:97",
+        "setSeasonsMonitored:97:3:false",
+      ]);
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
+  it("returns 500 with per-file results on a partial delete", async () => {
+    const calls: CallLog = [];
+    const originalConsoleError = console.error;
+    console.error = () => undefined;
+    try {
+      const response = await fetchLocal(
+        createApp(
+          createTrackingDeps({
+            calls,
+            mediaRow: mediaRow({
+              tmdbId: 1396,
+              mediaType: "tv",
+              externalServiceId: 97,
+            }),
+            episodeFiles: [
+              {
+                id: 501,
+                seasonNumber: 3,
+                path: "/tv/show/S03E01.mkv",
+                size: 100,
+              },
+              {
+                id: 502,
+                seasonNumber: 3,
+                path: "/tv/show/S03E02.mkv",
+                size: 200,
+              },
+            ],
+            deleteEpisodeFileErrors: new Map([
+              [502, new SonarrUpstreamError("stale file", 404)],
+            ]),
+          }),
+        ),
+        "/api/admin/media/tv/1396/season/3",
+        { method: "DELETE" },
+      );
+
+      assert.equal(response.status, 500);
+      assert.deepEqual(await response.json(), {
+        tmdbId: 1396,
+        seasonNumber: 3,
+        unmonitored: true,
+        filesDeleted: [501],
+        filesFailedToDelete: [{ fileId: 502, error: "stale file" }],
+        requestsDeclined: [],
+        requestsLeftOpen: [],
+      });
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+});
+
+describe("DELETE /api/admin/media/tv/:tmdbId/episode/:episodeId", () => {
+  it("unmonitors one episode, deletes its file, and leaves requests open", async () => {
+    const calls: CallLog = [];
+    const deps = createTrackingDeps({
+      calls,
+      mediaRow: mediaRow({
+        tmdbId: 1396,
+        mediaType: "tv",
+        externalServiceId: 97,
+      }),
+      episodes: [
+        {
+          id: 101,
+          seasonNumber: 3,
+          episodeNumber: 1,
+          title: "Episode",
+          episodeFileId: 501,
+          hasFile: true,
+          monitored: true,
+        },
+      ],
+      requests: [
+        requestRow({
+          id: 11,
+          status: 2,
+          type: "tv",
+          seasons: [{ seasonNumber: 3 }],
+          media: { tmdbId: 1396, mediaType: "tv" },
+        }),
+      ],
+    });
+
+    const response = await fetchLocal(
+      createApp(deps),
+      "/api/admin/media/tv/1396/episode/101",
+      { method: "DELETE" },
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      tmdbId: 1396,
+      episodeId: 101,
+      seasonNumber: 3,
+      unmonitored: true,
+      fileDeleted: true,
+      fileId: 501,
+      requestsLeftOpen: [{ id: 11, seasons: [3] }],
+    });
+    assert.deepEqual(calls, [
+      "getMediaRow:tv:1396",
+      "listEpisodes:97",
+      "setEpisodesMonitored:101:false",
+      "deleteEpisodeFile:501",
+      "listAllRequests",
+    ]);
+  });
+
+  it("succeeds without deleting a file when hasFile is false", async () => {
+    const calls: CallLog = [];
+    const response = await fetchLocal(
+      createApp(
+        createTrackingDeps({
+          calls,
+          mediaRow: mediaRow({
+            tmdbId: 1396,
+            mediaType: "tv",
+            externalServiceId: 97,
+          }),
+          episodes: [
+            {
+              id: 102,
+              seasonNumber: 3,
+              episodeNumber: 2,
+              title: "Missing",
+              episodeFileId: 0,
+              hasFile: false,
+              monitored: true,
+            },
+          ],
+        }),
+      ),
+      "/api/admin/media/tv/1396/episode/102",
+      { method: "DELETE" },
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      tmdbId: 1396,
+      episodeId: 102,
+      seasonNumber: 3,
+      unmonitored: true,
+      fileDeleted: false,
+      fileId: null,
+      requestsLeftOpen: [],
+    });
+    assert.equal(calls.some((call) => call.startsWith("deleteEpisodeFile:")), false);
   });
 });
 

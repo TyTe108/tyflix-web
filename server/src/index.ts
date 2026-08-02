@@ -58,6 +58,7 @@ import { createWatchlistRouter } from "./routes/watchlist";
 import { createSeerrClient } from "./seerr/client";
 import { createMediaStatusProvider } from "./seerr/mediaStatusProvider";
 import { createSessionRevocationStore } from "./sessionRevocation";
+import { createSonarrClient } from "./sonarr/client";
 import { createTmdbClient } from "./tmdb/client";
 import { createMediaEnrichment } from "./tmdb/enrichment";
 
@@ -145,6 +146,10 @@ async function start(): Promise<void> {
     apiKey: config.seerrApiKey,
   });
   const mediaStatus = createMediaStatusProvider(seerr);
+  const sonarr = createSonarrClient({
+    baseUrl: config.sonarrUrl,
+    apiKey: config.sonarrApiKey,
+  });
 
   // Host metrics service behind the admin dashboard: CPU, memory, storage, GPU.
   const dashboard = createDashboardClient({
@@ -259,7 +264,7 @@ async function start(): Promise<void> {
   app.use(
     "/api/admin/media",
     requireAdmin(config.sessionSecret, seerr, sessionRevocation),
-    createAdminMediaRouter({ seerr, mediaStatus, mediaEnrichment }),
+    createAdminMediaRouter({ seerr, sonarr, mediaStatus, mediaEnrichment }),
   );
 
   // More specific than /api/admin — mount before it. requireAdmin at the mount;
