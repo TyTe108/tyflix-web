@@ -12,11 +12,12 @@
 //
 // Mount-order rules are load-bearing. Everything public (/api/auth,
 // /api/config, /api/access-requests) has to be registered before that /api 404
-// guard. /api/admin/media and /api/admin/access-requests have to come before
-// /api/admin because Express matches prefixes in registration order. Note that
-// most routers are gated by requireAuth/requireAdmin right here at the mount,
-// but the admin access-requests router applies requireAdmin internally instead,
-// which is why it looks unguarded below.
+// guard. /api/admin/media, /api/admin/blocklist, and
+// /api/admin/access-requests have to come before /api/admin because Express
+// matches prefixes in registration order. Note that most routers are gated by
+// requireAuth/requireAdmin right here at the mount, but the admin
+// access-requests router applies requireAdmin internally instead, which is why
+// it looks unguarded below.
 //
 // In production this same process serves the built React app from
 // ../../web/dist, with a splat route sending every unmatched path to index.html
@@ -42,6 +43,7 @@ import { createSharedServerAccessResolver } from "./plex/sharedServerAccess";
 import { createTransientTokenMinter } from "./plex/transientToken";
 import { createAccessRequestsRouter } from "./routes/accessRequests";
 import { createAdminAccessRequestsRouter } from "./routes/adminAccessRequests";
+import { createAdminBlocklistRouter } from "./routes/adminBlocklist";
 import { createAdminMediaRouter } from "./routes/adminMedia";
 import { createAdminRouter } from "./routes/admin";
 import { createAuthRouter } from "./routes/auth";
@@ -258,6 +260,14 @@ async function start(): Promise<void> {
     "/api/admin/media",
     requireAdmin(config.sessionSecret, seerr, sessionRevocation),
     createAdminMediaRouter({ seerr, mediaStatus, mediaEnrichment }),
+  );
+
+  // More specific than /api/admin — mount before it. requireAdmin at the mount;
+  // handlers also check isAdmin themselves.
+  app.use(
+    "/api/admin/blocklist",
+    requireAdmin(config.sessionSecret, seerr, sessionRevocation),
+    createAdminBlocklistRouter({ seerr, mediaEnrichment }),
   );
 
   // More specific than /api/admin — mount before it. Same ACCESS_REQUESTS_FILE
