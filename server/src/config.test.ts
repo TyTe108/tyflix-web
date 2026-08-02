@@ -12,6 +12,8 @@ const validEnv = {
   SESSION_SECRET: "sixteen-chars!!!",
   SEERR_URL: "http://seerr:5055",
   SEERR_API_KEY: "seerr-api-key",
+  SONARR_URL: "http://sonarr:8989",
+  SONARR_API_KEY: "sonarr-api-key",
   DASHBOARD_URL: "http://dashboard:8787",
   TMDB_API_KEY: "tmdb-api-key",
   SESSION_REVOCATION_FILE: "/data/session-revocation.json",
@@ -30,6 +32,8 @@ describe("loadConfig", () => {
       sessionSecret: "sixteen-chars!!!",
       seerrUrl: "http://seerr:5055",
       seerrApiKey: "seerr-api-key",
+      sonarrUrl: "http://sonarr:8989",
+      sonarrApiKey: "sonarr-api-key",
       dashboardUrl: "http://dashboard:8787",
       tmdbApiKey: "tmdb-api-key",
       sessionRevocationFile: "/data/session-revocation.json",
@@ -235,6 +239,50 @@ describe("loadConfig", () => {
       () => loadConfig({ ...validEnv, TMDB_API_KEY: "" }),
       (err: unknown) =>
         err instanceof Error && err.message.includes("TMDB_API_KEY"),
+    );
+  });
+
+  it("strips trailing slashes from SONARR_URL", () => {
+    const config = loadConfig({
+      ...validEnv,
+      SONARR_URL: "http://sonarr:8989///",
+    });
+    assert.equal(config.sonarrUrl, "http://sonarr:8989");
+  });
+
+  it("throws naming SONARR_URL when missing or empty", () => {
+    assert.throws(
+      () => loadConfig({ ...validEnv, SONARR_URL: undefined }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("SONARR_URL"),
+    );
+    assert.throws(
+      () => loadConfig({ ...validEnv, SONARR_URL: "" }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("SONARR_URL"),
+    );
+    assert.throws(
+      () => loadConfig({ ...validEnv, SONARR_URL: "  " }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("SONARR_URL"),
+    );
+  });
+
+  it("throws naming SONARR_API_KEY when missing or empty", () => {
+    assert.throws(
+      () => loadConfig({ ...validEnv, SONARR_API_KEY: undefined }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("SONARR_API_KEY"),
+    );
+    assert.throws(
+      () => loadConfig({ ...validEnv, SONARR_API_KEY: "" }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("SONARR_API_KEY"),
+    );
+    assert.throws(
+      () => loadConfig({ ...validEnv, SONARR_API_KEY: "  " }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("SONARR_API_KEY"),
     );
   });
 

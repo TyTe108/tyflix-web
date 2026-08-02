@@ -39,6 +39,8 @@ export type AppConfig = {
   sessionSecret: string;
   seerrUrl: string; // no trailing slash
   seerrApiKey: string;
+  sonarrUrl: string; // no trailing slash
+  sonarrApiKey: string;
   dashboardUrl: string; // host-metrics service for the admin views, no trailing slash
   tmdbApiKey: string;
   /** Absolute path to the access-requests JSON file. Absent = feature off. */
@@ -137,10 +139,9 @@ function parseSessionSecret(raw: string | undefined): string {
   });
 }
 
-// Trailing slashes get stripped here and in the other two URL parsers, so
-// callers can build paths as `${baseUrl}/whatever` without producing a double
-// slash. None of the three check that the value parses as a URL, only that it's
-// present.
+// Trailing slashes get stripped here and in the other URL parsers, so callers
+// can build paths as `${baseUrl}/whatever` without producing a double slash.
+// None of them check that the value parses as a URL, only that it's present.
 function parseSeerrUrl(raw: string | undefined): string {
   const validated = validate("SEERR_URL", raw, () => null);
   return validated.replace(/\/+$/, "");
@@ -148,6 +149,15 @@ function parseSeerrUrl(raw: string | undefined): string {
 
 function parseSeerrApiKey(raw: string | undefined): string {
   return validate("SEERR_API_KEY", raw, () => null);
+}
+
+function parseSonarrUrl(raw: string | undefined): string {
+  const validated = validate("SONARR_URL", raw, () => null);
+  return validated.replace(/\/+$/, "");
+}
+
+function parseSonarrApiKey(raw: string | undefined): string {
+  return validate("SONARR_API_KEY", raw, () => null);
 }
 
 function parsePlexBaseUrl(raw: string | undefined): string {
@@ -221,6 +231,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     sessionSecret: parseSessionSecret(env.SESSION_SECRET),
     seerrUrl: parseSeerrUrl(env.SEERR_URL),
     seerrApiKey: parseSeerrApiKey(env.SEERR_API_KEY),
+    sonarrUrl: parseSonarrUrl(env.SONARR_URL),
+    sonarrApiKey: parseSonarrApiKey(env.SONARR_API_KEY),
     dashboardUrl: parseDashboardUrl(env.DASHBOARD_URL),
     tmdbApiKey: parseTmdbApiKey(env.TMDB_API_KEY),
     sessionRevocationFile: parseSessionRevocationFile(
