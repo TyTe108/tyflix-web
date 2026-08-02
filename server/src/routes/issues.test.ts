@@ -168,6 +168,9 @@ function createApp(
         async getRatingKey() {
           return null;
         },
+        async getMediaRow() {
+          return null;
+        },
       },
       mediaEnrichment,
     }),

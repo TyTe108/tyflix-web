@@ -79,6 +79,9 @@ function baseDeps(): WatchRouterDeps {
       async getRatingKey() {
         return "12345";
       },
+      async getMediaRow() {
+        return null;
+      },
     } as MediaStatusProvider,
     transientMinter: {
       async mint() {
@@ -165,6 +168,9 @@ describe("GET /api/watch/movie/:tmdbId", () => {
       async getRatingKey() {
         return null;
       },
+      async getMediaRow() {
+        return null;
+      },
     } as MediaStatusProvider;
 
     const app = createApp(deps);
@@ -192,6 +198,9 @@ describe("GET /api/watch/movie/:tmdbId", () => {
       async getRatingKey(mediaType: "movie" | "tv", tmdbId: number) {
         ratingKeyArgs = [mediaType, tmdbId];
         return "12345";
+      },
+      async getMediaRow() {
+        return null;
       },
     } as MediaStatusProvider;
     deps.transientMinter = {
@@ -524,6 +533,9 @@ describe("GET /api/watch/tv/:tmdbId/episodes", () => {
       async getRatingKey() {
         return null;
       },
+      async getMediaRow() {
+        return null;
+      },
     } as MediaStatusProvider;
 
     const app = createApp(deps);
@@ -568,6 +580,9 @@ describe("GET /api/watch/tv/:tmdbId/episodes", () => {
       async getRatingKey(mediaType: "movie" | "tv", tmdbId: number) {
         ratingKeyArgs = [mediaType, tmdbId];
         return "9000";
+      },
+      async getMediaRow() {
+        return null;
       },
     } as MediaStatusProvider;
     deps.plexServer = {

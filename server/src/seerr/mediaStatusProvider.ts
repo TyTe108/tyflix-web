@@ -2,8 +2,9 @@
 //
 // Discovery is keyed by TMDB id. Plex is keyed by its own ratingKey. Seerr's
 // media table is the only thing that knows which is which, so this file pulls
-// that table once a minute and turns it into three lookups: is this title
-// available, what's its Seerr media id, and what's its Plex ratingKey.
+// that table once a minute and turns it into lookups: is this title available,
+// what's its Seerr media id, what's its Plex ratingKey, and what's the full
+// Seerr media row (for callers that need tvdbId / externalServiceId / seasons).
 //
 // A lot of the apparent complexity elsewhere in the codebase is that join.
 // /api/discover asks it for availability badges, /api/watch asks it for the
@@ -18,6 +19,7 @@ import {
   mediaStatusFromCode,
   type MediaAvailability,
   type SeerrClient,
+  type SeerrMediaListItem,
 } from "./client";
 
 // One minute is the compromise: /api/v1/media is fully paged on every refresh,
@@ -25,7 +27,7 @@ import {
 // long.
 const MEDIA_STATUS_TTL_MS = 60_000;
 
-// The three lookups routers depend on. Keys are `${mediaType}:${tmdbId}`.
+// The lookups routers depend on. Keys are `${mediaType}:${tmdbId}`.
 export type MediaStatusProvider = {
   getStatusMap(): Promise<ReadonlyMap<string, MediaAvailability>>;
   getMediaId(
@@ -36,6 +38,10 @@ export type MediaStatusProvider = {
     mediaType: "movie" | "tv",
     tmdbId: number,
   ): Promise<string | null>;
+  getMediaRow(
+    mediaType: "movie" | "tv",
+    tmdbId: number,
+  ): Promise<SeerrMediaListItem | null>;
 };
 
 /**
@@ -49,14 +55,15 @@ export type MediaStatusProvider = {
 export function createMediaStatusProvider(
   seerr: Pick<SeerrClient, "listMedia">,
 ): MediaStatusProvider {
-  // All three maps are built from the same page walk and expire together, so
-  // they can never disagree about a title.
+  // All maps are built from the same page walk and expire together, so they
+  // can never disagree about a title.
   let cache:
     | {
         expiresAt: number;
         statuses: ReadonlyMap<string, MediaAvailability>;
         mediaIds: ReadonlyMap<string, number>;
         ratingKeys: ReadonlyMap<string, string>;
+        mediaRows: ReadonlyMap<string, SeerrMediaListItem>;
       }
     | undefined;
 
@@ -73,13 +80,16 @@ export function createMediaStatusProvider(
       const statuses = new Map<string, MediaAvailability>();
       const mediaIds = new Map<string, number>();
       const ratingKeys = new Map<string, string>();
-      // Three maps, one pass. A title always gets a mediaId, but the other two
-      // entries are conditional: no Plex ratingKey means nothing to play, and
-      // an unrecognized status code is left out entirely so the UI falls back
-      // to "not tracked" instead of showing something wrong.
+      const mediaRows = new Map<string, SeerrMediaListItem>();
+      // One pass fills every map. A title always gets a mediaId and a media
+      // row, but the other two entries are conditional: no Plex ratingKey
+      // means nothing to play, and an unrecognized status code is left out
+      // entirely so the UI falls back to "not tracked" instead of showing
+      // something wrong.
       for (const item of media) {
         const key = `${item.mediaType}:${item.tmdbId}`;
         mediaIds.set(key, item.id);
+        mediaRows.set(key, item);
         if (item.ratingKey !== null) {
           ratingKeys.set(key, item.ratingKey);
         }
@@ -93,6 +103,7 @@ export function createMediaStatusProvider(
         statuses,
         mediaIds,
         ratingKeys,
+        mediaRows,
       };
       return cache;
     } catch (err) {
@@ -146,5 +157,21 @@ export function createMediaStatusProvider(
     );
   }
 
-  return { getStatusMap, getMediaId, getRatingKey };
+  /**
+   * The full Seerr media row for a TMDB id, off the same cached walk as the
+   * other lookups. Carries tvdbId, externalServiceId and seasons for callers
+   * that need the Sonarr/Radarr join key.
+   *
+   * @returns null when Seerr isn't tracking the title (or is unreachable).
+   */
+  async function getMediaRow(
+    mediaType: "movie" | "tv",
+    tmdbId: number,
+  ): Promise<SeerrMediaListItem | null> {
+    return (
+      (await loadCache())?.mediaRows.get(`${mediaType}:${tmdbId}`) ?? null
+    );
+  }
+
+  return { getStatusMap, getMediaId, getRatingKey, getMediaRow };
 }

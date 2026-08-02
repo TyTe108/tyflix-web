@@ -64,6 +64,43 @@ export type SeerrMediaListItem = {
   mediaType: "movie" | "tv";
   status: number; // MEDIA_STATUS code
   ratingKey: string | null; // normalized to a string even when Seerr sends a number
+  // Best-effort like ratingKey: missing/odd values become null / [] and never
+  // drop the row. externalServiceId is the Sonarr or Radarr internal id.
+  tvdbId: number | null;
+  externalServiceId: number | null;
+  seasons: Array<{ seasonNumber: number; status: number }>;
+};
+
+/** One row from GET /api/v1/blocklist. */
+export type SeerrBlocklistItem = {
+  id: number;
+  tmdbId: number;
+  mediaType: "movie" | "tv";
+  title: string;
+};
+
+/** One page of blocklist rows. Unlike listMedia, the client does not walk pages. */
+export type SeerrBlocklistPage = {
+  results: SeerrBlocklistItem[];
+  total: number; // pageInfo.results from Seerr
+};
+
+export type AddToBlocklistInput = {
+  tmdbId: number;
+  mediaType: "movie" | "tv";
+  title?: string;
+  userId: number; // sent in the body as `user`, not as X-API-User
+};
+
+/**
+ * Result of DELETE /api/v1/blocklist/{tmdbId}.
+ *
+ * `mediaRowDeleted` is true on a clean 204. It is false on 404, which (live-
+ * probed) means Seerr already removed the blocklist row and then failed to
+ * find a Media row to delete.
+ */
+export type RemoveFromBlocklistResult = {
+  mediaRowDeleted: boolean;
 };
 
 // One title on a user's Plex Watchlist, as Seerr mirrors it.
@@ -158,10 +195,12 @@ export type CreateSeerrIssueInput = {
 /**
  * Any failure talking to Seerr, whether Seerr answered badly or never answered.
  *
- * `status` is Seerr's own status code when there was a response, and 502 when
- * the fetch threw or the body didn't parse into the shape we expect. Routes
- * read it to decide what to send the browser: /api/requests turns a 409 into
- * "already requested", the auth router turns 401/403/422 into a 403.
+ * `status` is Seerr's own status code when there was a response, 504 when an
+ * optional request timeout fired, and 502 when the fetch threw or the body
+ * didn't parse into the shape we expect. Routes read it to decide what to send
+ * the browser: /api/requests turns a 409 into "already requested", the auth
+ * router turns 401/403/422 into a 403. A 412 from addToBlocklist means the
+ * title is already on the blocklist.
  */
 export class SeerrUpstreamError extends Error {
   readonly status: number;
@@ -184,6 +223,11 @@ export type SeerrClientOptions = {
 // every authenticated request and median latency on the wire is ~6ms.
 const GET_USER_BY_ID_TIMEOUT_MS = 5_000;
 
+// Default cap for DELETE /api/v1/media/{id}/file. Live-probed: when no default
+// Radarr/Sonarr instance matches the media's serviceId, Seerr logs a warning
+// and does a bare `return` with no response, so the request never completes.
+const DELETE_MEDIA_FILE_TIMEOUT_MS = 15_000;
+
 /**
  * Builds the Seerr client. One instance is created at startup and shared by
  * every router that needs Seerr.
@@ -198,16 +242,28 @@ export function createSeerrClient(options: SeerrClientOptions) {
   // Single fetch chokepoint. Every Seerr call funnels through here so the API
   // key, JSON headers and error translation are written once.
   async function requestJson(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "DELETE",
     path: string,
     query: Record<string, string> = {},
     body?: unknown,
     extraHeaders: Record<string, string> = {},
+    timeoutMs?: number,
   ): Promise<unknown> {
     const url = new URL(`${baseUrl}${path}`);
     for (const [key, value] of Object.entries(query)) {
       url.searchParams.set(key, value);
     }
+
+    const controller =
+      timeoutMs === undefined ? undefined : new AbortController();
+    let timedOut = false;
+    const timeout =
+      controller === undefined || timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+          }, timeoutMs);
 
     let res: Response;
     try {
@@ -220,17 +276,30 @@ export function createSeerrClient(options: SeerrClientOptions) {
           ...extraHeaders,
         },
         body: body === undefined ? undefined : JSON.stringify(body),
+        ...(controller === undefined ? {} : { signal: controller.signal }),
       });
     } catch (err) {
+      // A fired timeout is 504 so callers can tell "Seerr hung" from "Seerr
+      // refused" (non-2xx) or "Seerr never answered" (502).
+      if (timedOut) {
+        const message =
+          err instanceof Error ? err.message : "Seerr request timed out";
+        throw new SeerrUpstreamError(message, 504);
+      }
       // Seerr never answered (DNS, connection refused, container down). There's
       // no upstream status to forward, so call it a gateway failure.
       const message =
         err instanceof Error ? err.message : "Seerr request failed";
       throw new SeerrUpstreamError(message, 502);
+    } finally {
+      if (timeout !== undefined) {
+        clearTimeout(timeout);
+      }
     }
 
     // Seerr answered but refused. Keep its status so callers can distinguish a
-    // 409 duplicate from a 403 permission problem from a 503 outage.
+    // 409 duplicate from a 403 permission problem from a 503 outage. A 412 from
+    // POST /api/v1/blocklist means the title is already blocklisted.
     if (!res.ok) {
       throw new SeerrUpstreamError(
         `Seerr ${path} failed (${res.status})`,
@@ -238,7 +307,23 @@ export function createSeerrClient(options: SeerrClientOptions) {
       );
     }
 
-    return res.json();
+    // 204 and some success responses (POST /blocklist → 201) have an empty
+    // body. res.json() would throw on those.
+    if (res.status === 204) {
+      return null;
+    }
+    const text = await res.text();
+    if (text.trim() === "") {
+      return null;
+    }
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      throw new SeerrUpstreamError(
+        `Seerr ${path} returned non-JSON body`,
+        502,
+      );
+    }
   }
 
   function getJson(
@@ -254,6 +339,14 @@ export function createSeerrClient(options: SeerrClientOptions) {
     extraHeaders: Record<string, string> = {},
   ): Promise<unknown> {
     return requestJson("POST", path, {}, body, extraHeaders);
+  }
+
+  function deleteJson(
+    path: string,
+    query: Record<string, string> = {},
+    timeoutMs?: number,
+  ): Promise<unknown> {
+    return requestJson("DELETE", path, query, undefined, {}, timeoutMs);
   }
 
   /**
@@ -964,6 +1057,163 @@ export function createSeerrClient(options: SeerrClientOptions) {
     return requireSeerrRequest(body, "declineRequest");
   }
 
+  /**
+   * Deletes the on-disk files for a Seerr media row
+   * (`DELETE /api/v1/media/{mediaId}/file`), leaving the Seerr media row in
+   * place. Pass `is4k` only when the caller wants the 4K service path; it is
+   * sent as a query param and omitted otherwise.
+   *
+   * Uses a timeout (default 15000ms, overridable via `options.timeoutMs`).
+   * Live-probed: when no default Radarr/Sonarr instance matches the media's
+   * serviceId, Seerr logs a warning and does a bare `return` with no response
+   * body and no status, so the request never completes. The timeout is the
+   * only defense.
+   *
+   * @throws SeerrUpstreamError on a bad status, a fetch failure (502), or a
+   * timeout (504).
+   */
+  async function deleteMediaFile(
+    mediaId: number,
+    options?: { is4k?: boolean; timeoutMs?: number },
+  ): Promise<void> {
+    const query: Record<string, string> = {};
+    if (options?.is4k !== undefined) {
+      query.is4k = String(options.is4k);
+    }
+    await deleteJson(
+      `/api/v1/media/${mediaId}/file`,
+      query,
+      options?.timeoutMs ?? DELETE_MEDIA_FILE_TIMEOUT_MS,
+    );
+  }
+
+  /**
+   * Deletes a Seerr media row (`DELETE /api/v1/media/{mediaId}`).
+   *
+   * @throws SeerrUpstreamError on a bad status or a fetch failure.
+   */
+  async function deleteMedia(mediaId: number): Promise<void> {
+    await deleteJson(`/api/v1/media/${mediaId}`);
+  }
+
+  /**
+   * One page of the Seerr blocklist (`GET /api/v1/blocklist`).
+   *
+   * Does not walk pages: the caller paginates with take/skip. Rows that don't
+   * map cleanly are dropped rather than returned half-built.
+   *
+   * @throws SeerrUpstreamError on a bad status, a fetch failure, or an
+   * unexpected page shape.
+   */
+  async function listBlocklist(
+    options: { take?: number; skip?: number; search?: string } = {},
+  ): Promise<SeerrBlocklistPage> {
+    const query: Record<string, string> = {};
+    if (options.take !== undefined) {
+      query.take = String(options.take);
+    }
+    if (options.skip !== undefined) {
+      query.skip = String(options.skip);
+    }
+    if (options.search !== undefined) {
+      query.search = options.search;
+    }
+
+    const body = await getJson("/api/v1/blocklist", query);
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      typeof (body as { pageInfo?: unknown }).pageInfo !== "object" ||
+      (body as { pageInfo: unknown }).pageInfo === null ||
+      !Array.isArray((body as { results?: unknown }).results)
+    ) {
+      throw new SeerrUpstreamError(
+        "Seerr /api/v1/blocklist returned unexpected body",
+        502,
+      );
+    }
+
+    const pageInfo = (body as { pageInfo: { results?: unknown } }).pageInfo;
+    if (typeof pageInfo.results !== "number") {
+      throw new SeerrUpstreamError(
+        "Seerr /api/v1/blocklist returned unexpected pageInfo",
+        502,
+      );
+    }
+
+    const results: SeerrBlocklistItem[] = [];
+    for (const row of (body as { results: unknown[] }).results) {
+      const mapped = mapSeerrBlocklistItem(row);
+      if (mapped !== null) {
+        results.push(mapped);
+      }
+    }
+
+    return { results, total: pageInfo.results };
+  }
+
+  /**
+   * Adds a title to the Seerr blocklist (`POST /api/v1/blocklist`).
+   *
+   * The actor is sent as the body field `user` (Seerr's zod schema requires
+   * it). There is no X-API-User header: unlike createRequest and createIssue,
+   * this endpoint reads the actor from the body, not from the header.
+   *
+   * A duplicate is Seerr 412 ("Item already blocklisted"), surfaced as
+   * SeerrUpstreamError with status 412 so callers can tell it from other
+   * failures.
+   *
+   * @throws Error when userId isn't a positive integer, before any network
+   * call.
+   * @throws SeerrUpstreamError on a bad status (including 412) or a fetch
+   * failure.
+   */
+  async function addToBlocklist(input: AddToBlocklistInput): Promise<void> {
+    if (!Number.isInteger(input.userId) || input.userId <= 0) {
+      throw new Error(
+        `addToBlocklist requires a positive integer userId (got ${String(input.userId)})`,
+      );
+    }
+
+    await postJson("/api/v1/blocklist", {
+      tmdbId: input.tmdbId,
+      mediaType: input.mediaType,
+      ...(input.title === undefined ? {} : { title: input.title }),
+      user: input.userId,
+    });
+  }
+
+  /**
+   * Removes a title from the Seerr blocklist
+   * (`DELETE /api/v1/blocklist/{tmdbId}?mediaType=`).
+   *
+   * The path segment is a TMDB id even though Seerr's route names it `:id`; it
+   * is not a blocklist row id.
+   *
+   * Live-probed: Seerr deletes the blocklist row, then findOneOrFail's the
+   * Media row and deletes that too. If the Media row is already gone it
+   * returns 404 after the blocklist row was already removed. That 404 is
+   * resolved (not thrown) as `{ mediaRowDeleted: false }`. A clean 204 is
+   * `{ mediaRowDeleted: true }`. Every other status still throws.
+   *
+   * @throws SeerrUpstreamError on a bad status other than 404, or a fetch
+   * failure.
+   */
+  async function removeFromBlocklist(
+    tmdbId: number,
+    mediaType: "movie" | "tv",
+  ): Promise<RemoveFromBlocklistResult> {
+    try {
+      await deleteJson(`/api/v1/blocklist/${tmdbId}`, { mediaType });
+      return { mediaRowDeleted: true };
+    } catch (err) {
+      if (err instanceof SeerrUpstreamError && err.status === 404) {
+        return { mediaRowDeleted: false };
+      }
+      throw err;
+    }
+  }
+
   return {
     signInWithPlex,
     getUserById,
@@ -985,6 +1235,11 @@ export function createSeerrClient(options: SeerrClientOptions) {
     createRequest,
     approveRequest,
     declineRequest,
+    deleteMediaFile,
+    deleteMedia,
+    listBlocklist,
+    addToBlocklist,
+    removeFromBlocklist,
   };
 }
 
@@ -1087,7 +1342,8 @@ function mapSeerrMediaListItem(row: unknown): SeerrMediaListItem | null {
     return null;
   }
 
-  // ratingKey is best-effort: a missing/odd value must not drop the item.
+  // ratingKey, tvdbId, externalServiceId and seasons are best-effort: a
+  // missing/odd value must not drop the item.
   const ratingKeyRaw = (row as { ratingKey?: unknown }).ratingKey;
   const ratingKey =
     typeof ratingKeyRaw === "string"
@@ -1096,7 +1352,75 @@ function mapSeerrMediaListItem(row: unknown): SeerrMediaListItem | null {
         ? String(ratingKeyRaw)
         : null;
 
-  return { id, tmdbId, mediaType, status, ratingKey };
+  const tvdbIdRaw = (row as { tvdbId?: unknown }).tvdbId;
+  const tvdbId =
+    typeof tvdbIdRaw === "number" && Number.isFinite(tvdbIdRaw)
+      ? tvdbIdRaw
+      : null;
+
+  const externalServiceIdRaw = (row as { externalServiceId?: unknown })
+    .externalServiceId;
+  const externalServiceId =
+    typeof externalServiceIdRaw === "number" &&
+    Number.isFinite(externalServiceIdRaw)
+      ? externalServiceIdRaw
+      : null;
+
+  const seasons: Array<{ seasonNumber: number; status: number }> = [];
+  const seasonsRaw = (row as { seasons?: unknown }).seasons;
+  if (Array.isArray(seasonsRaw)) {
+    for (const season of seasonsRaw) {
+      if (typeof season !== "object" || season === null) {
+        continue;
+      }
+      const seasonNumber = (season as { seasonNumber?: unknown }).seasonNumber;
+      const seasonStatus = (season as { status?: unknown }).status;
+      if (
+        typeof seasonNumber === "number" &&
+        Number.isFinite(seasonNumber) &&
+        typeof seasonStatus === "number" &&
+        Number.isFinite(seasonStatus)
+      ) {
+        seasons.push({ seasonNumber, status: seasonStatus });
+      }
+    }
+  }
+
+  return {
+    id,
+    tmdbId,
+    mediaType,
+    status,
+    ratingKey,
+    tvdbId,
+    externalServiceId,
+    seasons,
+  };
+}
+
+// A blocklist row needs an id, tmdbId, movie/tv type and title. Anything else
+// is skipped, matching mapSeerrMediaListItem's drop-the-bad-row style.
+function mapSeerrBlocklistItem(row: unknown): SeerrBlocklistItem | null {
+  if (typeof row !== "object" || row === null) {
+    return null;
+  }
+
+  const id = (row as { id?: unknown }).id;
+  const tmdbId = (row as { tmdbId?: unknown }).tmdbId;
+  const mediaType = (row as { mediaType?: unknown }).mediaType;
+  const title = (row as { title?: unknown }).title;
+  if (
+    typeof id !== "number" ||
+    !Number.isFinite(id) ||
+    typeof tmdbId !== "number" ||
+    !Number.isFinite(tmdbId) ||
+    (mediaType !== "movie" && mediaType !== "tv") ||
+    typeof title !== "string"
+  ) {
+    return null;
+  }
+
+  return { id, tmdbId, mediaType, title };
 }
 
 // A watchlist row is only useful with a TMDB id and a media type we can browse,

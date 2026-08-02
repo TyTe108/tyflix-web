@@ -1,6 +1,20 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createMediaStatusProvider } from "./mediaStatusProvider";
+import type { SeerrMediaListItem } from "./client";
+
+function mediaRow(
+  overrides: Partial<SeerrMediaListItem> &
+    Pick<SeerrMediaListItem, "id" | "tmdbId" | "mediaType" | "status">,
+): SeerrMediaListItem {
+  return {
+    ratingKey: null,
+    tvdbId: null,
+    externalServiceId: null,
+    seasons: [],
+    ...overrides,
+  };
+}
 
 describe("createMediaStatusProvider", () => {
   it("builds the media status map and caches it within the TTL", async () => {
@@ -9,9 +23,30 @@ describe("createMediaStatusProvider", () => {
       async listMedia() {
         calls += 1;
         return [
-          { id: 10, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: "45678" },
-          { id: 20, tmdbId: 1396, mediaType: "tv", status: 4, ratingKey: null },
-          { id: 30, tmdbId: 1, mediaType: "movie", status: 99, ratingKey: "999" },
+          mediaRow({
+            id: 10,
+            tmdbId: 603,
+            mediaType: "movie",
+            status: 5,
+            ratingKey: "45678",
+            externalServiceId: 12,
+          }),
+          mediaRow({
+            id: 20,
+            tmdbId: 1396,
+            mediaType: "tv",
+            status: 4,
+            tvdbId: 81189,
+            externalServiceId: 97,
+            seasons: [{ seasonNumber: 1, status: 5 }],
+          }),
+          mediaRow({
+            id: 30,
+            tmdbId: 1,
+            mediaType: "movie",
+            status: 99,
+            ratingKey: "999",
+          }),
         ];
       },
     });
@@ -31,6 +66,27 @@ describe("createMediaStatusProvider", () => {
     assert.equal(await provider.getRatingKey("tv", 1396), null);
     // Untracked title → null.
     assert.equal(await provider.getRatingKey("movie", 999999), null);
+    assert.deepEqual(await provider.getMediaRow("movie", 603), {
+      id: 10,
+      tmdbId: 603,
+      mediaType: "movie",
+      status: 5,
+      ratingKey: "45678",
+      tvdbId: null,
+      externalServiceId: 12,
+      seasons: [],
+    });
+    assert.deepEqual(await provider.getMediaRow("tv", 1396), {
+      id: 20,
+      tmdbId: 1396,
+      mediaType: "tv",
+      status: 4,
+      ratingKey: null,
+      tvdbId: 81189,
+      externalServiceId: 97,
+      seasons: [{ seasonNumber: 1, status: 5 }],
+    });
+    assert.equal(await provider.getMediaRow("movie", 999999), null);
     assert.equal(calls, 1);
   });
 
@@ -47,6 +103,7 @@ describe("createMediaStatusProvider", () => {
       assert.equal(statuses.size, 0);
       assert.equal(await provider.getMediaId("movie", 603), null);
       assert.equal(await provider.getRatingKey("movie", 603), null);
+      assert.equal(await provider.getMediaRow("movie", 603), null);
     } finally {
       console.error = originalConsoleError;
     }

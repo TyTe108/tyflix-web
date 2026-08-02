@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, describe, it } from "node:test";
+import { afterEach, describe, it, mock } from "node:test";
 import {
   SeerrUpstreamError,
   createSeerrClient,
@@ -18,6 +18,7 @@ const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  mock.timers.reset();
 });
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -531,8 +532,26 @@ describe("Seerr media client", () => {
     });
 
     assert.deepEqual(await seerr.listMedia(), [
-      { id: 10, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: "12345" },
-      { id: 20, tmdbId: 1396, mediaType: "tv", status: 4, ratingKey: null },
+      {
+        id: 10,
+        tmdbId: 603,
+        mediaType: "movie",
+        status: 5,
+        ratingKey: "12345",
+        tvdbId: null,
+        externalServiceId: null,
+        seasons: [],
+      },
+      {
+        id: 20,
+        tmdbId: 1396,
+        mediaType: "tv",
+        status: 4,
+        ratingKey: null,
+        tvdbId: null,
+        externalServiceId: null,
+        seasons: [],
+      },
     ]);
     assert.deepEqual(calls, ["?take=100&skip=0", "?take=100&skip=100"]);
   });
@@ -565,10 +584,195 @@ describe("Seerr media client", () => {
     });
 
     assert.deepEqual(await seerr.listMedia(), [
-      { id: 1, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: "12345" },
-      { id: 2, tmdbId: 1396, mediaType: "tv", status: 4, ratingKey: "67890" },
-      { id: 3, tmdbId: 700, mediaType: "movie", status: 5, ratingKey: null },
-      { id: 4, tmdbId: 701, mediaType: "movie", status: 5, ratingKey: null },
+      {
+        id: 1,
+        tmdbId: 603,
+        mediaType: "movie",
+        status: 5,
+        ratingKey: "12345",
+        tvdbId: null,
+        externalServiceId: null,
+        seasons: [],
+      },
+      {
+        id: 2,
+        tmdbId: 1396,
+        mediaType: "tv",
+        status: 4,
+        ratingKey: "67890",
+        tvdbId: null,
+        externalServiceId: null,
+        seasons: [],
+      },
+      {
+        id: 3,
+        tmdbId: 700,
+        mediaType: "movie",
+        status: 5,
+        ratingKey: null,
+        tvdbId: null,
+        externalServiceId: null,
+        seasons: [],
+      },
+      {
+        id: 4,
+        tmdbId: 701,
+        mediaType: "movie",
+        status: 5,
+        ratingKey: null,
+        tvdbId: null,
+        externalServiceId: null,
+        seasons: [],
+      },
+    ]);
+  });
+
+  it("keeps a media row when tvdbId is entirely absent (tvdbId null)", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse(200, {
+        pageInfo: { results: 1 },
+        results: [
+          {
+            id: 11,
+            tmdbId: 604,
+            mediaType: "movie",
+            status: 5,
+            ratingKey: "1",
+          },
+        ],
+      });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    assert.deepEqual(await seerr.listMedia(), [
+      {
+        id: 11,
+        tmdbId: 604,
+        mediaType: "movie",
+        status: 5,
+        ratingKey: "1",
+        tvdbId: null,
+        externalServiceId: null,
+        seasons: [],
+      },
+    ]);
+  });
+
+  it("keeps a media row when tvdbId is a non-numeric string (tvdbId null)", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse(200, {
+        pageInfo: { results: 1 },
+        results: [
+          {
+            id: 10,
+            tmdbId: 603,
+            mediaType: "movie",
+            status: 5,
+            ratingKey: "1",
+            tvdbId: "nope",
+          },
+        ],
+      });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    assert.deepEqual(await seerr.listMedia(), [
+      {
+        id: 10,
+        tmdbId: 603,
+        mediaType: "movie",
+        status: 5,
+        ratingKey: "1",
+        tvdbId: null,
+        externalServiceId: null,
+        seasons: [],
+      },
+    ]);
+  });
+
+  it("maps tvdbId, externalServiceId, and seasons best-effort", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse(200, {
+        pageInfo: { results: 3 },
+        results: [
+          {
+            id: 317,
+            tmdbId: 83118,
+            tvdbId: 353544,
+            mediaType: "tv",
+            status: 4,
+            externalServiceId: 97,
+            ratingKey: "7171",
+            seasons: [
+              { id: 545, seasonNumber: 0, status: 1 },
+              { id: 546, seasonNumber: 1, status: 5 },
+              { seasonNumber: "bad", status: 5 },
+              { seasonNumber: 2 },
+            ],
+          },
+          {
+            id: 10,
+            tmdbId: 603,
+            mediaType: "movie",
+            status: 5,
+            tvdbId: "nope",
+            externalServiceId: { odd: true },
+            seasons: "nope",
+          },
+          {
+            id: 11,
+            tmdbId: 604,
+            mediaType: "movie",
+            status: 5,
+          },
+        ],
+      });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    assert.deepEqual(await seerr.listMedia(), [
+      {
+        id: 317,
+        tmdbId: 83118,
+        mediaType: "tv",
+        status: 4,
+        ratingKey: "7171",
+        tvdbId: 353544,
+        externalServiceId: 97,
+        seasons: [
+          { seasonNumber: 0, status: 1 },
+          { seasonNumber: 1, status: 5 },
+        ],
+      },
+      {
+        id: 10,
+        tmdbId: 603,
+        mediaType: "movie",
+        status: 5,
+        ratingKey: null,
+        tvdbId: null,
+        externalServiceId: null,
+        seasons: [],
+      },
+      {
+        id: 11,
+        tmdbId: 604,
+        mediaType: "movie",
+        status: 5,
+        ratingKey: null,
+        tvdbId: null,
+        externalServiceId: null,
+        seasons: [],
+      },
     ]);
   });
 
@@ -1102,6 +1306,392 @@ describe("createSeerrClient().getServiceProfiles", () => {
       () => seerr.getServiceProfiles("movie"),
       (err: unknown) =>
         err instanceof SeerrUpstreamError && err.status === 502,
+    );
+  });
+});
+
+describe("createSeerrClient().deleteMediaFile", () => {
+  it("DELETEs /api/v1/media/{id}/file and resolves on 204", async () => {
+    let call:
+      | {
+          url: string;
+          method: string | undefined;
+          headers: HeadersInit | undefined;
+        }
+      | undefined;
+    globalThis.fetch = async (input, init) => {
+      call = {
+        url: String(input),
+        method: init?.method,
+        headers: init?.headers,
+      };
+      return new Response(null, { status: 204 });
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    await seerr.deleteMediaFile(317);
+
+    assert.ok(call);
+    assert.equal(call.url, "http://seerr:5055/api/v1/media/317/file");
+    assert.equal(call.method, "DELETE");
+    assert.equal(new Headers(call.headers).get("X-Api-Key"), "k");
+  });
+
+  it("sends is4k as a query param only when passed", async () => {
+    const urls: string[] = [];
+    globalThis.fetch = async (input) => {
+      urls.push(String(input));
+      return new Response(null, { status: 204 });
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    await seerr.deleteMediaFile(317, { is4k: true });
+    await seerr.deleteMediaFile(317);
+
+    assert.equal(urls[0], "http://seerr:5055/api/v1/media/317/file?is4k=true");
+    assert.equal(urls[1], "http://seerr:5055/api/v1/media/317/file");
+  });
+
+  it("throws SeerrUpstreamError with status 504 when the request times out", async () => {
+    globalThis.fetch = async (_input, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+        });
+      });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    await assert.rejects(
+      () => seerr.deleteMediaFile(317, { timeoutMs: 20 }),
+      (err: unknown) =>
+        err instanceof SeerrUpstreamError && err.status === 504,
+    );
+  });
+
+  it("applies the default 15s timeout when called with no options", async (t) => {
+    // Default is 15s; mock timers so the suite does not wait wall-clock time.
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+
+    let signal: AbortSignal | undefined;
+    globalThis.fetch = async (_input, init) =>
+      new Promise((_resolve, reject) => {
+        signal = init?.signal ?? undefined;
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+        });
+      });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    const pending = seerr.deleteMediaFile(317);
+
+    assert.ok(signal);
+    assert.equal(signal.aborted, false);
+    t.mock.timers.tick(15_000);
+    assert.equal(signal.aborted, true);
+
+    await assert.rejects(
+      () => pending,
+      (err: unknown) =>
+        err instanceof SeerrUpstreamError && err.status === 504,
+    );
+  });
+
+  it("throws SeerrUpstreamError with upstream status on non-2xx", async () => {
+    globalThis.fetch = async () => jsonResponse(500, { message: "boom" });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    await assert.rejects(
+      () => seerr.deleteMediaFile(317),
+      (err: unknown) =>
+        err instanceof SeerrUpstreamError && err.status === 500,
+    );
+  });
+});
+
+describe("createSeerrClient().deleteMedia", () => {
+  it("DELETEs /api/v1/media/{id} and resolves on 204", async () => {
+    let call:
+      | { url: string; method: string | undefined }
+      | undefined;
+    globalThis.fetch = async (input, init) => {
+      call = { url: String(input), method: init?.method };
+      return new Response(null, { status: 204 });
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    await seerr.deleteMedia(317);
+
+    assert.ok(call);
+    assert.equal(call.url, "http://seerr:5055/api/v1/media/317");
+    assert.equal(call.method, "DELETE");
+  });
+});
+
+describe("createSeerrClient().listBlocklist", () => {
+  it("GETs one page, maps rows, skips malformed, and returns total", async () => {
+    let call:
+      | { url: string; method: string | undefined; headers: HeadersInit | undefined }
+      | undefined;
+    globalThis.fetch = async (input, init) => {
+      call = {
+        url: String(input),
+        method: init?.method,
+        headers: init?.headers,
+      };
+      return jsonResponse(200, {
+        pageInfo: { pages: 1, pageSize: 20, results: 3, page: 1 },
+        results: [
+          {
+            id: 1,
+            tmdbId: 603,
+            mediaType: "movie",
+            title: "The Matrix",
+            createdAt: "2026-08-01T00:00:00.000Z",
+          },
+          { id: 2, tmdbId: "bad", mediaType: "movie", title: "Nope" },
+          {
+            id: 3,
+            tmdbId: 1396,
+            mediaType: "tv",
+            title: "Breaking Bad",
+          },
+        ],
+      });
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "secret",
+    });
+    const page = await seerr.listBlocklist({
+      take: 20,
+      skip: 0,
+      search: "matrix",
+    });
+
+    assert.ok(call);
+    assert.equal(
+      call.url,
+      "http://seerr:5055/api/v1/blocklist?take=20&skip=0&search=matrix",
+    );
+    assert.equal(call.method, "GET");
+    assert.equal(new Headers(call.headers).get("X-Api-Key"), "secret");
+    assert.deepEqual(page, {
+      total: 3,
+      results: [
+        { id: 1, tmdbId: 603, mediaType: "movie", title: "The Matrix" },
+        { id: 3, tmdbId: 1396, mediaType: "tv", title: "Breaking Bad" },
+      ],
+    });
+  });
+
+  it("omits take, skip, and search when not passed", async () => {
+    let url = "";
+    globalThis.fetch = async (input) => {
+      url = String(input);
+      return jsonResponse(200, {
+        pageInfo: { results: 0 },
+        results: [],
+      });
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    await seerr.listBlocklist();
+
+    assert.equal(url, "http://seerr:5055/api/v1/blocklist");
+  });
+});
+
+describe("createSeerrClient().addToBlocklist", () => {
+  it("POSTs body with user (not userId) and no X-API-User header", async () => {
+    let call:
+      | {
+          url: string;
+          method: string | undefined;
+          body: string | undefined;
+          headers: HeadersInit | undefined;
+        }
+      | undefined;
+    globalThis.fetch = async (input, init) => {
+      call = {
+        url: String(input),
+        method: init?.method,
+        body: typeof init?.body === "string" ? init.body : undefined,
+        headers: init?.headers,
+      };
+      return new Response(null, { status: 201 });
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    await seerr.addToBlocklist({
+      tmdbId: 603,
+      mediaType: "movie",
+      title: "The Matrix",
+      userId: 7,
+    });
+
+    assert.ok(call);
+    assert.equal(call.url, "http://seerr:5055/api/v1/blocklist");
+    assert.equal(call.method, "POST");
+    const headers = new Headers(call.headers);
+    assert.equal(headers.get("X-Api-Key"), "k");
+    assert.equal(headers.get("X-API-User"), null);
+    assert.deepEqual(JSON.parse(call.body ?? ""), {
+      tmdbId: 603,
+      mediaType: "movie",
+      title: "The Matrix",
+      user: 7,
+    });
+  });
+
+  it("omits title when not provided", async () => {
+    let body: Record<string, unknown> | undefined;
+    globalThis.fetch = async (_input, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(null, { status: 201 });
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    await seerr.addToBlocklist({
+      tmdbId: 1396,
+      mediaType: "tv",
+      userId: 7,
+    });
+
+    assert.deepEqual(body, {
+      tmdbId: 1396,
+      mediaType: "tv",
+      user: 7,
+    });
+  });
+
+  it("throws before calling Seerr when userId is not a positive integer", async () => {
+    let called = false;
+    globalThis.fetch = async () => {
+      called = true;
+      return new Response(null, { status: 201 });
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    await assert.rejects(
+      () =>
+        seerr.addToBlocklist({
+          tmdbId: 603,
+          mediaType: "movie",
+          userId: 0,
+        }),
+      (err: unknown) =>
+        err instanceof Error &&
+        err.message.includes("addToBlocklist requires a positive integer userId"),
+    );
+    assert.equal(called, false);
+  });
+
+  it("throws SeerrUpstreamError with status 412 on duplicate", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse(412, { message: "Item already blocklisted" });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    await assert.rejects(
+      () =>
+        seerr.addToBlocklist({
+          tmdbId: 603,
+          mediaType: "movie",
+          userId: 7,
+        }),
+      (err: unknown) =>
+        err instanceof SeerrUpstreamError && err.status === 412,
+    );
+  });
+});
+
+describe("createSeerrClient().removeFromBlocklist", () => {
+  it("DELETEs /api/v1/blocklist/{tmdbId}?mediaType= and reports a clean 204", async () => {
+    let call:
+      | { url: string; method: string | undefined }
+      | undefined;
+    globalThis.fetch = async (input, init) => {
+      call = { url: String(input), method: init?.method };
+      return new Response(null, { status: 204 });
+    };
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    const result = await seerr.removeFromBlocklist(603, "movie");
+
+    assert.ok(call);
+    assert.equal(
+      call.url,
+      "http://seerr:5055/api/v1/blocklist/603?mediaType=movie",
+    );
+    assert.equal(call.method, "DELETE");
+    assert.deepEqual(result, { mediaRowDeleted: true });
+  });
+
+  it("resolves a 404 as mediaRowDeleted false (partial delete)", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse(404, { message: "Media not found" });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+    const result = await seerr.removeFromBlocklist(603, "movie");
+
+    assert.deepEqual(result, { mediaRowDeleted: false });
+  });
+
+  it("throws SeerrUpstreamError on other non-2xx statuses", async () => {
+    globalThis.fetch = async () => jsonResponse(500, { message: "boom" });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    await assert.rejects(
+      () => seerr.removeFromBlocklist(603, "tv"),
+      (err: unknown) =>
+        err instanceof SeerrUpstreamError && err.status === 500,
     );
   });
 });
