@@ -3949,6 +3949,83 @@ a {
   border-color: var(--accent);
 }
 
+.admin-blocklist-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1rem;
+  margin: 0 0 1rem;
+}
+
+.admin-blocklist-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  flex: 1 1 8rem;
+}
+
+.admin-blocklist-field span {
+  font-size: 0.875rem;
+}
+
+.admin-blocklist-field input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.admin-blocklist-field input:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.admin-blocklist-form .btn {
+  flex: 0 0 auto;
+}
+
+.admin-blocklist-form-message {
+  margin: 0 0 0.75rem;
+}
+
+.admin-blocklist-warnings {
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border-radius: var(--radius);
+}
+
+.admin-blocklist-warnings p {
+  margin: 0 0 0.5rem;
+}
+
+.admin-blocklist-warnings ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.admin-blocklist-warnings li {
+  margin: 0.25rem 0;
+}
+
+.admin-blocklist-warnings-partial {
+  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
+}
+
+.admin-blocklist-row .admin-request-actions .btn {
+  white-space: normal;
+  text-align: left;
+  max-width: 100%;
+}
+
 .btn:disabled {
   cursor: not-allowed;
   opacity: 0.55;
@@ -4579,7 +4656,7 @@ a {
 
 /*
  * Mobile admin + shared request filters (max-width: 48rem).
- * Tabs wrap so all seven stay on-screen; Users/Jobs/Containers keep horizontal
+ * Tabs wrap so all eight stay on-screen; Users/Jobs/Containers keep horizontal
  * scroll with a sticky identifying column. Breakpoint must match
  * MOBILE_MEDIA_QUERY in useIsMobile.ts.
  */

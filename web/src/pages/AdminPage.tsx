@@ -1,4 +1,4 @@
-// The admin console at /admin. One page, seven tabs, everything behind the
+// The admin console at /admin. One page, eight tabs, everything behind the
 // admin permission bit: AdminRoute gates the route on the client, and on the
 // server most of these endpoints sit behind requireAdmin. GET /api/issues/all
 // is the exception, mounted behind plain requireAuth with an inline admin check
@@ -11,6 +11,8 @@
 //               GET /api/requests/all, every 30s
 //   Issues      problem reports on titles, read-only from here
 //               GET /api/issues/all, every 60s
+//   Blocklist   titles an admin has removed or blocked by hand
+//               GET /api/admin/blocklist, every 60s
 //   Access      the self-serve access queue. Approving sends a real Plex invite
 //               GET /api/admin/access-requests, every 30s
 //   Users       per-user watched-versus-requested analytics
@@ -35,7 +37,7 @@
 // The active tab lives in ?tab= (replace, not push), so a refresh comes back
 // where you were and the browser Back button still leaves the page.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   accessRequestStatusBadgeClass,
@@ -47,10 +49,12 @@ import {
   type ShareableSection,
 } from "../api/accessRequests";
 import {
+  addToBlocklist,
   fetchAdminContainers,
   fetchAdminSystem,
   fetchAdminJobs,
   fetchAdminUsers,
+  fetchBlocklist,
   formatEpoch,
   formatPct,
   formatRate,
@@ -60,9 +64,12 @@ import {
   jobStatusBadgeClass,
   postureBadgeClass,
   rateBarClass,
+  removeFromBlocklist,
   stateBadgeClass,
   tempBarClass,
   usageBarClass,
+  type AdminBlocklistItem,
+  type AdminBlocklistRemoveResponse,
   type AdminContainersResponse,
   type AdminDockerRow,
   type AdminJob,
@@ -79,6 +86,7 @@ import {
   declineRequest,
   fetchAllRequests,
 } from "../api/requests";
+import { Dropdown } from "../components/Dropdown";
 import { RequestCard } from "../components/RequestCard";
 import { PaginationControls } from "../components/PaginationControls";
 import { RequestControls } from "../components/RequestControls";
@@ -101,6 +109,7 @@ import { usePagination } from "../hooks/usePagination";
 const ADMIN_TABS = [
   { id: "requests", label: "Requests" },
   { id: "issues", label: "Issues" },
+  { id: "blocklist", label: "Blocklist" },
   { id: "access", label: "Access" },
   { id: "users", label: "Users" },
   { id: "system", label: "System" },
@@ -129,8 +138,8 @@ export function AdminPage() {
   const rawTab = searchParams.get("tab");
   const activeTab: AdminTab = isAdminTab(rawTab) ? rawTab : DEFAULT_TAB;
 
-  // Switching tabs replaces the history entry instead of pushing one, so seven
-  // clicks around the console don't turn Back into seven presses. Other query
+  // Switching tabs replaces the history entry instead of pushing one, so eight
+  // clicks around the console don't turn Back into eight presses. Other query
   // params are carried through.
   const selectTab = useCallback(
     (tab: AdminTab) => {
@@ -182,6 +191,7 @@ export function AdminPage() {
             and throws away its data; coming back re-fetches. */}
         {activeTab === "requests" ? <RequestsPanel /> : null}
         {activeTab === "issues" ? <IssuesPanel /> : null}
+        {activeTab === "blocklist" ? <BlocklistPanel /> : null}
         {activeTab === "access" ? <AccessPanel /> : null}
         {activeTab === "users" ? <UsersPanel /> : null}
         {activeTab === "system" ? <SystemPanel /> : null}
@@ -431,6 +441,310 @@ function IssuesPanel() {
                 </li>
               ))}
             </ul>
+          )}
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+const BLOCKLIST_PAGE_SIZE = 25;
+
+const BLOCKLIST_MEDIA_TYPE_OPTIONS = [
+  { value: "movie", label: "Movie" },
+  { value: "tv", label: "TV" },
+] as const;
+
+type BlocklistArmedKey = string;
+
+function blocklistRowKey(item: AdminBlocklistItem): BlocklistArmedKey {
+  return `${item.mediaType}:${item.tmdbId}`;
+}
+
+// Blocklist: titles an admin has removed or blocked by hand, 60s poll. Longer
+// than the request queues because this changes rarely and the rate-limit
+// budget is shared with the 5s host-metrics pollers.
+//
+// Paging is server-side here (take/skip against Seerr) rather than usePagination
+// over a full in-memory list like the other admin panels: the blocklist can
+// grow without a bound the client should pull in one shot.
+//
+// Removing an entry is the dangerous half. Seerr deletes the matching media row
+// (and cascaded request history), and if the title is still on a Plex Watchlist
+// with Auto-Request on it can start downloading again within about three
+// minutes. The arm step warns before the click; the response warnings say so
+// again after.
+function BlocklistPanel() {
+  const [page, setPage] = useState(1);
+  const skipRef = useRef(0);
+
+  // usePolledResource needs a stable fetcher reference (it is an effect
+  // dependency). A ref is how the current page reaches it without making the
+  // fetcher identity change on every page turn.
+  const fetchPage = useCallback(
+    () =>
+      fetchBlocklist({
+        take: BLOCKLIST_PAGE_SIZE,
+        skip: skipRef.current,
+      }),
+    [],
+  );
+
+  const { data, status, error, lastUpdated, refresh } = usePolledResource(
+    fetchPage,
+    60000,
+  );
+
+  const pageRef = useRef(page);
+  useEffect(() => {
+    if (pageRef.current === page) {
+      return;
+    }
+    pageRef.current = page;
+    skipRef.current = (page - 1) * BLOCKLIST_PAGE_SIZE;
+    refresh();
+  }, [page, refresh]);
+
+  const [tmdbIdInput, setTmdbIdInput] = useState("");
+  const [mediaType, setMediaType] = useState<"movie" | "tv">("movie");
+  const [addBusy, setAddBusy] = useState(false);
+  const [addMessage, setAddMessage] = useState<string | null>(null);
+  const [addError, setAddError] = useState<string | null>(null);
+
+  const [armedKey, setArmedKey] = useState<BlocklistArmedKey | null>(null);
+  const [removeBusyKey, setRemoveBusyKey] = useState<BlocklistArmedKey | null>(
+    null,
+  );
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const [removeResult, setRemoveResult] = useState<
+    | { kind: "ok"; result: AdminBlocklistRemoveResponse }
+    | { kind: "partial"; result: AdminBlocklistRemoveResponse }
+    | null
+  >(null);
+
+  const total = data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / BLOCKLIST_PAGE_SIZE));
+  const results = data?.results ?? [];
+
+  async function onAdd(event: FormEvent) {
+    event.preventDefault();
+    setAddMessage(null);
+    setAddError(null);
+
+    const trimmed = tmdbIdInput.trim();
+    const parsed = Number(trimmed);
+    if (
+      !/^\d+$/.test(trimmed) ||
+      !Number.isInteger(parsed) ||
+      parsed < 1
+    ) {
+      setAddError("tmdbId must be a positive integer.");
+      return;
+    }
+
+    setAddBusy(true);
+    try {
+      const result = await addToBlocklist({ tmdbId: parsed, mediaType });
+      if (result.alreadyBlocklisted) {
+        setAddMessage("Already on the blocklist.");
+      } else {
+        setAddMessage("Added to the blocklist.");
+      }
+      setTmdbIdInput("");
+      refresh();
+    } catch (err: unknown) {
+      setAddError(
+        err instanceof Error ? err.message : "Failed to add to blocklist",
+      );
+    } finally {
+      setAddBusy(false);
+    }
+  }
+
+  async function confirmRemove(item: AdminBlocklistItem) {
+    const key = blocklistRowKey(item);
+    setArmedKey(null);
+    setRemoveBusyKey(key);
+    setRemoveError(null);
+    setRemoveResult(null);
+    try {
+      const result = await removeFromBlocklist(item.mediaType, item.tmdbId);
+      // mediaRowDeleted false is a warning, not a success and not a failure:
+      // Seerr removed the blocklist entry then failed to find a media row.
+      setRemoveResult({
+        kind: result.mediaRowDeleted ? "ok" : "partial",
+        result,
+      });
+      refresh();
+    } catch (err: unknown) {
+      setRemoveError(
+        err instanceof Error ? err.message : "Failed to remove from blocklist",
+      );
+    } finally {
+      setRemoveBusyKey(null);
+    }
+  }
+
+  return (
+    <section className="admin-section" aria-labelledby="blocklist-heading">
+      <h2 id="blocklist-heading">Blocklist</h2>
+
+      {status === "loading" ? (
+        <p className="muted">Loading blocklist…</p>
+      ) : null}
+
+      {status === "error" ? (
+        <div className="stats-error">
+          <p className="error">{error ?? "Failed to load blocklist"}</p>
+          <button type="button" className="btn secondary" onClick={refresh}>
+            Retry
+          </button>
+        </div>
+      ) : null}
+
+      {status === "ready" ? (
+        <>
+          <UpdatedLine lastUpdated={lastUpdated} refreshError={error} />
+
+          <form className="admin-blocklist-form" onSubmit={(e) => void onAdd(e)}>
+            <label className="admin-blocklist-field">
+              <span>TMDB ID</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={tmdbIdInput}
+                disabled={addBusy || removeBusyKey !== null}
+                onChange={(event) => setTmdbIdInput(event.target.value)}
+                autoComplete="off"
+              />
+            </label>
+            <label className="admin-blocklist-field">
+              <span>Media type</span>
+              <Dropdown
+                label="Media type"
+                value={mediaType}
+                options={[...BLOCKLIST_MEDIA_TYPE_OPTIONS]}
+                onChange={(value) => {
+                  if (value === "movie" || value === "tv") {
+                    setMediaType(value);
+                  }
+                }}
+                disabled={addBusy || removeBusyKey !== null}
+              />
+            </label>
+            <button
+              type="submit"
+              className="btn"
+              disabled={addBusy || removeBusyKey !== null}
+            >
+              {addBusy ? "Adding…" : "Add to blocklist"}
+            </button>
+          </form>
+
+          {addError ? (
+            <p className="error admin-blocklist-form-message">{addError}</p>
+          ) : null}
+          {addMessage ? (
+            <p className="admin-blocklist-form-message">{addMessage}</p>
+          ) : null}
+
+          {removeError ? (
+            <p className="error admin-requests-action-error">{removeError}</p>
+          ) : null}
+
+          {removeResult ? (
+            <div
+              className={
+                removeResult.kind === "partial"
+                  ? "admin-blocklist-warnings admin-blocklist-warnings-partial"
+                  : "admin-blocklist-warnings"
+              }
+              role="status"
+            >
+              <p>
+                {removeResult.kind === "partial"
+                  ? "Removed from the blocklist, but Seerr could not find a media row to delete."
+                  : "Removed from the blocklist."}
+              </p>
+              {removeResult.result.warnings.length > 0 ? (
+                <ul>
+                  {removeResult.result.warnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+
+          {results.length === 0 ? (
+            <p className="muted">No blocklist entries.</p>
+          ) : (
+            <>
+              <ul className="admin-requests-list">
+                {results.map((item) => {
+                  const key = blocklistRowKey(item);
+                  const armed = armedKey === key;
+                  const inFlight = removeBusyKey === key;
+                  return (
+                    <li
+                      key={key}
+                      className="admin-request-row admin-blocklist-row"
+                      onClick={() => {
+                        if (armedKey === key) {
+                          setArmedKey(null);
+                        }
+                      }}
+                    >
+                      <div className="admin-request-main">
+                        <span className="admin-request-title">{item.title}</span>
+                        <span className="stats-tag">{item.mediaType}</span>
+                        <span className="muted">TMDB {item.tmdbId}</span>
+                      </div>
+                      <div
+                        className="admin-request-actions"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          className={
+                            armed
+                              ? "btn secondary admin-access-confirm"
+                              : "btn secondary"
+                          }
+                          disabled={
+                            inFlight ||
+                            (removeBusyKey !== null && removeBusyKey !== key) ||
+                            addBusy
+                          }
+                          onClick={() => {
+                            if (armed) {
+                              void confirmRemove(item);
+                              return;
+                            }
+                            setArmedKey(key);
+                          }}
+                        >
+                          {inFlight
+                            ? "Removing…"
+                            : armed
+                              ? "Confirm remove? Title can be re-requested"
+                              : "Remove"}
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+              <PaginationControls
+                page={page}
+                pageCount={pageCount}
+                total={total}
+                canPrev={page > 1}
+                canNext={page < pageCount}
+                onPrev={() => setPage((p) => Math.max(1, p - 1))}
+                onNext={() => setPage((p) => Math.min(pageCount, p + 1))}
+              />
+            </>
           )}
         </>
       ) : null}

@@ -1,6 +1,7 @@
 // Client for admin routes mounted behind requireAdmin. Host-metrics reads
-// (/system, /users, /jobs, /containers) plus media removal
-// (DELETE /api/admin/media/:mediaType/:tmdbId).
+// (/system, /users, /jobs, /containers), media removal
+// (DELETE /api/admin/media/:mediaType/:tmdbId), and blocklist CRUD
+// (/api/admin/blocklist).
 //
 // The snake_case field names on the metrics payloads give the game away.
 // Those types mirror the metrics service's own JSON rather than anything this
@@ -491,6 +492,133 @@ export type AdminEpisodeRemoveResponse = {
   fileId: number | null;
   requestsLeftOpen: AdminRequestLeftOpen[];
 };
+
+// ---- /api/admin/blocklist ----
+
+export type AdminBlocklistItem = {
+  id: number;
+  tmdbId: number;
+  mediaType: "movie" | "tv";
+  title: string;
+};
+
+export type AdminBlocklistListResponse = {
+  results: AdminBlocklistItem[];
+  total: number;
+  take: number;
+  skip: number;
+};
+
+export type AdminBlocklistAddResponse = {
+  tmdbId: number;
+  mediaType: "movie" | "tv";
+  alreadyBlocklisted: boolean;
+};
+
+export type AdminBlocklistRemoveResponse = {
+  tmdbId: number;
+  mediaType: "movie" | "tv";
+  mediaRowDeleted: boolean;
+  willBeAutoRequested: boolean;
+  warnings: string[];
+};
+
+export type BlocklistQuery = {
+  take: number;
+  skip: number;
+  search?: string;
+};
+
+/**
+ * GET /api/admin/blocklist. One page of rows.
+ *
+ * take and skip are required: the caller owns paging. There is no module-level
+ * query fallback; a stable usePolledResource fetcher should close over a ref
+ * (see BlocklistPanel) rather than mutate shared module state during render.
+ *
+ * @throws Error on any non-2xx.
+ */
+export async function fetchBlocklist(
+  options: BlocklistQuery,
+): Promise<AdminBlocklistListResponse> {
+  const params = new URLSearchParams({
+    take: String(options.take),
+    skip: String(options.skip),
+  });
+  if (options.search !== undefined && options.search.length > 0) {
+    params.set("search", options.search);
+  }
+  return fetchAdminJson<AdminBlocklistListResponse>(
+    `/api/admin/blocklist?${params.toString()}`,
+  );
+}
+
+/**
+ * POST /api/admin/blocklist. Adds a title by tmdbId and media type.
+ *
+ * A 200 with alreadyBlocklisted true is a normal outcome (Seerr 412), not an
+ * error: the desired end state already holds. Returns the parsed body on both
+ * 201 and 200.
+ *
+ * @throws Error on any other non-2xx, or when the body is unusable.
+ */
+export async function addToBlocklist(input: {
+  tmdbId: number;
+  mediaType: "movie" | "tv";
+  title?: string;
+}): Promise<AdminBlocklistAddResponse> {
+  const res = await fetch("/api/admin/blocklist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tmdbId: input.tmdbId,
+      mediaType: input.mediaType,
+      ...(input.title === undefined ? {} : { title: input.title }),
+    }),
+  });
+
+  let body: AdminBlocklistAddResponse | null = null;
+  try {
+    body = (await res.json()) as AdminBlocklistAddResponse;
+  } catch {
+    body = null;
+  }
+
+  const usable =
+    body !== null &&
+    typeof body.tmdbId === "number" &&
+    (body.mediaType === "movie" || body.mediaType === "tv") &&
+    typeof body.alreadyBlocklisted === "boolean";
+
+  if ((res.status === 200 || res.status === 201) && usable && body !== null) {
+    return body;
+  }
+
+  throw new Error(`Failed to add to blocklist (${res.status})`);
+}
+
+/**
+ * DELETE /api/admin/blocklist/:mediaType/:tmdbId.
+ *
+ * The response carries willBeAutoRequested and warnings: removing a blocklist
+ * entry deletes the Seerr media row (and cascaded request history), and if the
+ * title is still on a Plex Watchlist with Auto-Request on it can start
+ * downloading again within about three minutes.
+ *
+ * @throws Error on any non-2xx.
+ */
+export async function removeFromBlocklist(
+  mediaType: "movie" | "tv",
+  tmdbId: number,
+): Promise<AdminBlocklistRemoveResponse> {
+  const res = await fetch(`/api/admin/blocklist/${mediaType}/${tmdbId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to remove from blocklist (${res.status})`);
+  }
+  return (await res.json()) as AdminBlocklistRemoveResponse;
+}
 
 // ---- Display helpers, all pure, all used only by AdminPage ----
 //
