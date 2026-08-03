@@ -6,6 +6,29 @@
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#0e1013" />
     <title>Tyflix</title>
+
+    <!-- Home-screen install. The manifest is the whole reason Chrome offers
+         "Install app" instead of a plain "Add to Home screen" bookmark, and
+         it's where Android reads the launcher icon from. Without it Chrome
+         has no icon to use and generates a letter tile from <title> instead.
+         Every icon the manifest lists has to actually exist in web/public/ or
+         Chrome reports an installability error and refuses to install, so
+         don't ship this until the PNGs are in place. Vite copies web/public/
+         to the dist root at build time, and express.static serves it
+         unauthenticated ahead of the SPA fallback (see server/src/index.ts),
+         which is what lets Chrome fetch the manifest while logged out. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <!-- iOS reads this rather than the manifest icons for its home screen, so
+         it stays even though Android doesn't need it. Status bar is "black"
+         and not "black-translucent" on purpose: styles.css only compensates
+         for safe-area-inset-bottom, so a translucent bar would let the header
+         slide up under the clock. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="Tyflix" />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
