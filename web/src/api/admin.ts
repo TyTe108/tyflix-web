@@ -366,6 +366,132 @@ export async function removeMedia(
   throw new Error(`Failed to remove media (${res.status})`);
 }
 
+/**
+ * GET /api/admin/media/tv/:tmdbId/seasons. Sonarr season/episode tree for one
+ * show, including specials (season 0) and per-episode file sizes.
+ *
+ * @throws Error on any non-2xx.
+ */
+export async function fetchSeasonTree(
+  tmdbId: number,
+): Promise<AdminSeasonTree> {
+  return fetchAdminJson<AdminSeasonTree>(
+    `/api/admin/media/tv/${tmdbId}/seasons`,
+  );
+}
+
+/**
+ * DELETE /api/admin/media/tv/:tmdbId/season/:seasonNumber. Unmonitors the
+ * season, then deletes its episode files one at a time.
+ *
+ * Returns the parsed body on both 200 and 500: a 500 carries filesDeleted and
+ * filesFailedToDelete so the UI can show a partial failure. Throws only when
+ * there is no usable JSON body.
+ */
+export async function removeSeason(
+  tmdbId: number,
+  seasonNumber: number,
+): Promise<RemoveSeasonResult> {
+  const path = `/api/admin/media/tv/${tmdbId}/season/${seasonNumber}`;
+  const res = await fetch(path, { method: "DELETE" });
+
+  let body: AdminSeasonRemoveResponse | null = null;
+  try {
+    body = (await res.json()) as AdminSeasonRemoveResponse;
+  } catch {
+    body = null;
+  }
+
+  const usable =
+    body !== null &&
+    typeof body.tmdbId === "number" &&
+    typeof body.seasonNumber === "number" &&
+    Array.isArray(body.filesDeleted) &&
+    Array.isArray(body.filesFailedToDelete) &&
+    Array.isArray(body.requestsLeftOpen);
+
+  if ((res.status === 200 || res.status === 500) && usable && body !== null) {
+    return {
+      ...body,
+      status: res.status as 200 | 500,
+    };
+  }
+
+  throw new Error(`Failed to remove season (${res.status})`);
+}
+
+/**
+ * DELETE /api/admin/media/tv/:tmdbId/episode/:episodeId. Unmonitors one
+ * episode and deletes its file when present.
+ *
+ * @throws Error on any non-2xx.
+ */
+export async function removeEpisode(
+  tmdbId: number,
+  episodeId: number,
+): Promise<AdminEpisodeRemoveResponse> {
+  const path = `/api/admin/media/tv/${tmdbId}/episode/${episodeId}`;
+  const res = await fetch(path, { method: "DELETE" });
+  if (!res.ok) {
+    throw new Error(`Failed to remove episode (${res.status})`);
+  }
+  return (await res.json()) as AdminEpisodeRemoveResponse;
+}
+
+export type AdminSeasonEpisode = {
+  id: number;
+  episodeNumber: number;
+  title: string;
+  monitored: boolean;
+  hasFile: boolean;
+  episodeFileId: number;
+  size: number;
+};
+
+export type AdminSeasonRow = {
+  seasonNumber: number;
+  monitored: boolean;
+  episodeCount: number;
+  episodeFileCount: number;
+  sizeOnDisk: number;
+  episodes: AdminSeasonEpisode[];
+};
+
+export type AdminSeasonTree = {
+  tmdbId: number;
+  sonarrSeriesId: number;
+  seasons: AdminSeasonRow[];
+};
+
+export type AdminRequestLeftOpen = {
+  id: number;
+  seasons: number[];
+};
+
+export type AdminSeasonRemoveResponse = {
+  tmdbId: number;
+  seasonNumber: number;
+  unmonitored: true;
+  filesDeleted: number[];
+  filesFailedToDelete: Array<{ fileId: number; error: string }>;
+  requestsDeclined: number[];
+  requestsLeftOpen: AdminRequestLeftOpen[];
+};
+
+export type RemoveSeasonResult = AdminSeasonRemoveResponse & {
+  status: 200 | 500;
+};
+
+export type AdminEpisodeRemoveResponse = {
+  tmdbId: number;
+  episodeId: number;
+  seasonNumber: number;
+  unmonitored: true;
+  fileDeleted: boolean;
+  fileId: number | null;
+  requestsLeftOpen: AdminRequestLeftOpen[];
+};
+
 // ---- Display helpers, all pure, all used only by AdminPage ----
 //
 // The formatters share one rule: a value that's null, undefined or NaN renders

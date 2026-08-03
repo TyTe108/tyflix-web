@@ -47,6 +47,13 @@ vi.mock("../api/requests", async (importOriginal) => {
 
 vi.mock("../api/admin", () => ({
   removeMedia: vi.fn(),
+  fetchSeasonTree: vi.fn().mockResolvedValue({
+    tmdbId: 1396,
+    sonarrSeriesId: 97,
+    seasons: [],
+  }),
+  removeSeason: vi.fn(),
+  removeEpisode: vi.fn(),
 }));
 
 vi.mock("../api/watch", () => ({
