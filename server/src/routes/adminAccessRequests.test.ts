@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
+import { format } from "node:util";
 import express from "express";
 import type {
   AccessRequest,
@@ -667,6 +668,114 @@ describe("admin access-requests routes", () => {
     assert.equal(response.status, 500);
     assert.equal(sharing.inviteCalls.length, 1);
     assert.equal(store.records[0]?.status, "pending");
+  });
+
+  it("logs a printf-like request id verbatim with the store error", async () => {
+    const id = "req-%s";
+    const store = createFakeStore([pendingRecord({ id })]);
+    store.failNextMarkInvited = new Error("disk full");
+    const app = buildApp(store, createFakeSharing());
+    const errorCalls: unknown[][] = [];
+    const originalConsoleError = console.error;
+    console.error = (...args: unknown[]) => {
+      errorCalls.push(args);
+    };
+
+    try {
+      const response = await request(
+        app,
+        "/api/admin/access-requests/req-%25s/approve",
+        {
+          method: "POST",
+          cookie: sessionCookie(ADMIN_PERMISSION),
+          body: {},
+        },
+      );
+
+      assert.equal(response.status, 500);
+      assert.deepEqual(await response.json(), {
+        error: "failed to record invite",
+      });
+      assert.equal(errorCalls.length, 1);
+      assert.equal(
+        format(...errorCalls[0]!),
+        "access request req-%s: Plex invite succeeded but store markInvited failed disk full",
+      );
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
+  it("keeps the ordinary request-id store failure log wording", async () => {
+    const id = "8e38bf06-6504-4d3d-bbd7-743b4e95a6bd";
+    const store = createFakeStore([pendingRecord({ id })]);
+    store.failNextMarkInvited = new Error("disk full");
+    const app = buildApp(store, createFakeSharing());
+    const errorCalls: unknown[][] = [];
+    const originalConsoleError = console.error;
+    console.error = (...args: unknown[]) => {
+      errorCalls.push(args);
+    };
+
+    try {
+      const response = await request(
+        app,
+        `/api/admin/access-requests/${id}/approve`,
+        {
+          method: "POST",
+          cookie: sessionCookie(ADMIN_PERMISSION),
+          body: {},
+        },
+      );
+
+      assert.equal(response.status, 500);
+      assert.deepEqual(await response.json(), {
+        error: "failed to record invite",
+      });
+      assert.equal(errorCalls.length, 1);
+      assert.equal(
+        format(...errorCalls[0]!),
+        "access request 8e38bf06-6504-4d3d-bbd7-743b4e95a6bd: Plex invite succeeded but store markInvited failed disk full",
+      );
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
+  it("returns 409 without logging when markInvited reports a transition", async () => {
+    const id = "req-1";
+    const store = createFakeStore([pendingRecord({ id })]);
+    store.failNextMarkInvited = new AccessRequestTransitionError(
+      id,
+      "pending",
+      "invited",
+    );
+    const app = buildApp(store, createFakeSharing());
+    const errorCalls: unknown[][] = [];
+    const originalConsoleError = console.error;
+    console.error = (...args: unknown[]) => {
+      errorCalls.push(args);
+    };
+
+    try {
+      const response = await request(
+        app,
+        "/api/admin/access-requests/req-1/approve",
+        {
+          method: "POST",
+          cookie: sessionCookie(ADMIN_PERMISSION),
+          body: {},
+        },
+      );
+
+      assert.equal(response.status, 409);
+      assert.deepEqual(await response.json(), {
+        error: "request is not pending",
+      });
+      assert.equal(errorCalls.length, 0);
+    } finally {
+      console.error = originalConsoleError;
+    }
   });
 
   it("fails approve when listShareableSections throws (no empty fallback)", async () => {

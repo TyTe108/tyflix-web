@@ -276,8 +276,10 @@ export function createAdminAccessRequestsRouter(
         res.status(409).json({ error: "request is not pending" });
         return;
       }
+      // Pass id separately because console.error treats its first argument as a format string.
       console.error(
-        `access request ${id}: Plex invite succeeded but store markInvited failed`,
+        "access request %s: Plex invite succeeded but store markInvited failed",
+        id,
         err instanceof Error ? err.message : err,
       );
       res.status(500).json({ error: "failed to record invite" });
