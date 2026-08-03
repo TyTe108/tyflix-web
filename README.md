@@ -62,6 +62,7 @@ Beyond what's in the screenshots:
 - Plex Watchlist, per-user request quotas, and quality-profile selection at request time.
 - Cast to a Chromecast from the player. Playback moves to the TV and keeps reporting progress to Plex. Stop casting and the browser picks up wherever the TV got to.
 - People who don't have access yet can ask for it. A short form at `/request-access` lands in the admin area, and one approval sends a real Plex library invite.
+- Admins can remove a title from the library: a whole movie or series, or just one season or episode. Removing something also blocklists it, so the watchlist sync that runs every few minutes doesn't quietly download it again. There's a blocklist view in the admin area to undo that.
 - The admin area also covers running jobs, container health, and user management.
 
 ## Architecture
@@ -122,7 +123,7 @@ npm run dev              # server on :4000, Vite on :5173
 TMDB credentials to do anything useful; see `.env.example` for the eleven keys.
 
 ```bash
-npm test -w server       # 328 tests, built-in Node runner
+npm test -w server       # 479 tests, built-in Node runner
 npm run build            # typecheck + Vite build + tsc
 ```
 
@@ -131,9 +132,9 @@ one process and one port.
 
 ## Status and roadmap
 
-Tyflix is deployed and in daily use on my home server, and it's still an active work in progress. It covers most of Seerr's user-facing surface plus a few things Seerr doesn't do, like the per-user watched-versus-requested analytics. The backend carries 328 tests.
+Tyflix is deployed and in daily use on my home server, and it's still an active work in progress. It covers most of Seerr's user-facing surface plus a few things Seerr doesn't do, like the per-user watched-versus-requested analytics. The backend carries 479 tests and the frontend 65.
 
-Recent work: search in the Library. Before that, self-serve access requests, where a stranger's form submission becomes a real Plex invite once I approve it, and casting to a Chromecast. Earlier came the in-player control bar, auto-advance with the Up Next card, hardware-accelerated transcoding on the server's Arc GPU, and progress sync back to Plex. That last one made watch state per-user instead of owner-based, which is what makes the Continue Watching rail and the per-poster progress bars mean anything.
+Recent work: admin media removal, including per-season and per-episode deletion that Seerr doesn't offer, and a blocklist so a removal actually sticks against the watchlist sync. Before that, a mobile overhaul, search in the Library, self-serve access requests where a stranger's form submission becomes a real Plex invite once I approve it, and casting to a Chromecast. Earlier came the in-player control bar, auto-advance with the Up Next card, hardware-accelerated transcoding on the server's Arc GPU, and progress sync back to Plex. That last one made watch state per-user instead of owner-based, which is what makes the Continue Watching rail and the per-poster progress bars mean anything.
 
 Next up: an automatic bitrate cap for constrained connections, and AirPlay, so casting also works from Safari and iOS.
 

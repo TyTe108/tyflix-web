@@ -1,15 +1,15 @@
 # Code tour
 
-_Last verified against `c6ad95c`, 2026-07-28._
+_Last verified against `aedb123`, 2026-08-03._
 
-Tyflix is 89 source files, about 26,500 lines, split across a Node/Express
-backend and a React SPA. Ten files carry the architecture (3,990 lines, 15% of
-the codebase), and the rest are leaves hanging off them; this doc surfaces
-those ten early and tiers everything else behind them. Worth knowing before you
-budget time: six files alone carry 8,174 lines, 31% of the repo (`AdminPage.tsx`
-1,807, `plex/server.ts` 1,503, `WatchPage.tsx` 1,469, `seerr/client.ts` 1,244,
-`tmdb/client.ts` 1,089, `PlayerControls.tsx` 1,062). The tiering below doesn't
-surface that concentration on its own.
+Tyflix is 101 source files, about 31,600 lines, split across a Node/Express
+backend and a React SPA. Ten files carry the architecture, and the rest are
+leaves hanging off them; this doc surfaces those ten early and tiers everything
+else behind them. Worth knowing before you budget time: six files alone carry
+9,447 lines, 30% of the repo (`AdminPage.tsx` 2,145, `WatchPage.tsx` 1,845,
+`seerr/client.ts` 1,679, `plex/server.ts` 1,503, `PlayerControls.tsx` 1,186,
+`tmdb/client.ts` 1,089). The tiering below doesn't surface that concentration
+on its own.
 
 Every file also has a header comment explaining what it is and where it sits,
 so once you're in the code you can keep orienting without coming back here.
@@ -292,7 +292,7 @@ HLS, because the Cast receiver couldn't play Plex's HLS output.
 `createSomething(deps)` returning an object of methods: `createPlexClient`,
 `createWatchRouter`, `createSeerrClient`. There's no DI container and no mocking
 framework. `index.ts` wires the real implementations; tests pass fakes to the same
-factories. That one pattern is why the backend has 328 tests and no `jest.mock`.
+factories. That one pattern is why the backend has 479 tests and no `jest.mock`.
 
 **Routers are built, not imported.** Each file in `routes/` exports
 `createXRouter(deps)`. Mount paths live only in `index.ts`, so that's where you
@@ -368,6 +368,9 @@ Grouped by concern. Open these when a path above leads you here.
 | `server/src/routes/adminAccessRequests.ts` | 513 | Approvals, which fire real Plex invites, plus reconciliation against Plex on read. |
 | `server/src/routes/accessRequests.ts` | 211 | The public submit endpoint. Honeypot, per-IP cap, identical responses either way. |
 | `server/src/routes/admin.ts` | 68 | Read-only proxy to the metrics service. |
+| `server/src/routes/adminMedia.ts` | 695 | Removing media: a whole title, one season, or one episode. The header explains what "remove" means across Radarr/Sonarr, Plex, Seerr's media row and its open requests. |
+| `server/src/routes/adminBlocklist.ts` | 332 | The blocklist, which is what stops a removed title being auto-requested again. Removing an entry is the undo, and it warns that the title becomes re-requestable. |
+| `server/src/sonarr/client.ts` | 434 | Sonarr v3, used only for what Seerr has no API for: per-season and per-episode removal. Two traps documented in the header, both live-tested. |
 | `server/src/dashboard/client.ts` | 91 | The metrics service client. |
 | `server/src/routes/me.ts` | 192 | Home-page stats and Seerr quota. |
 
@@ -381,6 +384,8 @@ Grouped by concern. Open these when a path above leads you here.
 | `web/src/pages/RequestAccessPage.tsx` | 495 | Four-step public wizard. |
 | `web/src/pages/DiscoverPage.tsx` | 406 | TMDB trending with availability layered on. |
 | `web/src/components/PlayerControls.tsx` | 1,062 | Custom control bar. Quality and audio changes restart the Plex transcode in place; subtitles are burned in. Both explained in the header. |
+| `web/src/components/ManageMediaModal.tsx` | 730 | The admin Manage view: a title's requests, whole-title removal, and for TV a collapsible season/episode tree. Every destructive control is two-click, and only one can be armed at a time. |
+| `web/src/components/Modal.tsx` | 106 | Generic dialog shell. No focus trap, deliberately, matching `BottomSheet`; the header says why rather than leaving it to look like an oversight. |
 | `web/src/hooks/usePolledResource.ts` | 147 | The polling hook every admin panel runs on. Stale data survives a failed poll. |
 | `web/src/api/watch.ts` | 441 | Play descriptors, episode lists, subtitle selection, timeline reporting. |
 | `web/src/api/discover.ts` | 440 | The TMDB half of the frontend, and the file carrying the shared fetch conventions the other clients reference. |
