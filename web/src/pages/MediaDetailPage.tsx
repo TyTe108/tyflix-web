@@ -19,6 +19,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type FormEvent,
 } from "react";
@@ -43,6 +44,7 @@ import {
   type IssueType,
 } from "../api/issues";
 import { Dropdown } from "../components/Dropdown";
+import { ManageMediaModal } from "../components/ManageMediaModal";
 import {
   createRequest,
   fetchRequestProfiles,
@@ -52,7 +54,6 @@ import {
 import { useAuth } from "../auth/AuthContext";
 import { EpisodeBrowser } from "../components/EpisodeBrowser";
 import { MediaCard } from "../components/MediaCard";
-
 type LoadStatus = "loading" | "ready" | "error";
 // The two detail shapes differ enough to be worth discriminating on
 // `mediaType` rather than flattening. Movies have runtime and a collection,
@@ -379,6 +380,10 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
           </p>
         ) : null}
 
+        {/* Admin-only Manage entry. Calls useAuth itself, same shape as
+            ReportIssueControls further down. */}
+        <ManageMediaControls detail={detail} />
+
         {/* The other half of the primary action. RequestControls decides for
             itself whether to render a button or just a status badge. Note
             this is the local component further down this file, not the
@@ -521,6 +526,40 @@ function CrewSummary({ crew }: { crew: CrewCredit[] }) {
   return parts.length > 0 ? (
     <p className="media-detail-crew muted">{parts.join(" · ")}</p>
   ) : null;
+}
+
+// Admin-only Manage button for the primary-action block. Renders nothing for
+// non-admins: no disabled control and no placeholder. Owns the modal open
+// state and the focus-return ref so DetailBody stays free of useAuth.
+function ManageMediaControls({ detail }: { detail: MediaDetail }) {
+  const { isAdmin } = useAuth();
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  if (!isAdmin) {
+    return null;
+  }
+
+  return (
+    <p className="media-detail-manage">
+      <button
+        ref={triggerRef}
+        type="button"
+        className="btn secondary"
+        onClick={() => setOpen(true)}
+      >
+        Manage
+      </button>
+      <ManageMediaModal
+        open={open}
+        onClose={() => setOpen(false)}
+        returnFocusRef={triggerRef}
+        mediaType={detail.mediaType}
+        tmdbId={detail.tmdbId}
+        title={detail.title}
+      />
+    </p>
+  );
 }
 
 // "Report an issue": collapsed to a button until clicked, then a type picker

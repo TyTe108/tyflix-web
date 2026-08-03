@@ -1,26 +1,28 @@
-// Client for the server's admin router (server/src/routes/admin.ts), mounted at
-// /api/admin behind requireAdmin. Four read-only endpoints, and all four are a
-// straight JSON pass-through of the host-metrics service that runs alongside
-// Plex: /system, /users, /jobs and /containers.
+// Client for admin routes mounted behind requireAdmin. Host-metrics reads
+// (/system, /users, /jobs, /containers) plus media removal
+// (DELETE /api/admin/media/:mediaType/:tmdbId).
 //
-// The snake_case field names below give the game away. These types mirror the
-// metrics service's own JSON rather than anything this codebase shapes, and
-// nothing in the middle renames or normalizes. Fields ending in _h are already
-// human-formatted strings ("1.4 TB") that come down that way.
+// The snake_case field names on the metrics payloads give the game away.
+// Those types mirror the metrics service's own JSON rather than anything this
+// codebase shapes, and nothing in the middle renames or normalizes. Fields
+// ending in _h are already human-formatted strings ("1.4 TB") that come down
+// that way.
 //
-// Errors follow the convention documented in api/discover.ts: throw on non-2xx,
-// status code only. The server collapses every upstream failure into a 502, so
-// a page gets "Failed to load /api/admin/system (502)" whether the metrics box
-// is down, unreachable, or answering nonsense.
+// Errors for the read endpoints follow the convention in api/discover.ts:
+// throw on non-2xx, status code only. removeMedia is the exception: it returns
+// the parsed body on both 200 and 500 so a partial failure (files gone,
+// blocklist not applied) can be shown.
 //
-// AdminPage drives all four through usePolledResource: /system and /containers
-// at 5s, /jobs at 30s, /users at 60s. The page is tabbed so only one is live at
-// a time, but a 5s poller on its own is 180 requests per 15-minute window,
-// which is why the general rate limit sits at 1000 per 15 minutes. The earlier
-// 200 threw 429s at the admin's own dashboard.
+// AdminPage drives the four metrics fetchers through usePolledResource:
+// /system and /containers at 5s, /jobs at 30s, /users at 60s. The page is
+// tabbed so only one is live at a time, but a 5s poller on its own is 180
+// requests per 15-minute window, which is why the general rate limit sits at
+// 1000 per 15 minutes. The earlier 200 threw 429s at the admin's own
+// dashboard.
 //
-// Below the fetchers is a pile of formatting and badge-class helpers. They only
-// exist to keep AdminPage's table cells declarative, and they're all pure.
+// Below the fetchers is a pile of formatting and badge-class helpers. They
+// only exist to keep AdminPage's table cells declarative, and they're all
+// pure.
 
 // ---- GET /api/admin/system: host CPU, memory, storage, GPU, services ----
 
@@ -300,6 +302,68 @@ export function fetchAdminJobs(): Promise<AdminJobsResponse> {
  */
 export function fetchAdminContainers(): Promise<AdminContainersResponse> {
   return fetchAdminJson<AdminContainersResponse>("/api/admin/containers");
+}
+
+// ---- DELETE /api/admin/media/:mediaType/:tmdbId ----
+
+export type AdminMediaRemoveResponse = {
+  tmdbId: number;
+  mediaType: "movie" | "tv";
+  filesDeleted: boolean;
+  /** true when blocklisted (including already-blocklisted). null when blocklist=false. */
+  blocklisted: boolean | null;
+  /** true when the Seerr media row was deleted. null when blocklisting. */
+  mediaRowDeleted: boolean | null;
+  requestsDeclined: number[];
+  requestsFailedToDecline: number[];
+  error?: string;
+};
+
+export type RemoveMediaResult = AdminMediaRemoveResponse & {
+  status: 200 | 500;
+};
+
+/**
+ * DELETE /api/admin/media/:mediaType/:tmdbId. Removes files via Seerr and
+ * either blocklists the title (default) or deletes the Seerr media row.
+ *
+ * Returns the parsed body on both 200 and 500: a 500 with filesDeleted true
+ * is a partial failure the UI has to show, not a throw. Throws only when
+ * there is no usable JSON body.
+ */
+export async function removeMedia(
+  mediaType: "movie" | "tv",
+  tmdbId: number,
+  options: { blocklist: boolean },
+): Promise<RemoveMediaResult> {
+  const params = new URLSearchParams({
+    blocklist: options.blocklist ? "true" : "false",
+  });
+  const path = `/api/admin/media/${mediaType}/${tmdbId}?${params.toString()}`;
+  const res = await fetch(path, { method: "DELETE" });
+
+  let body: AdminMediaRemoveResponse | null = null;
+  try {
+    body = (await res.json()) as AdminMediaRemoveResponse;
+  } catch {
+    body = null;
+  }
+
+  const usable =
+    body !== null &&
+    typeof body.tmdbId === "number" &&
+    typeof body.filesDeleted === "boolean" &&
+    Array.isArray(body.requestsDeclined) &&
+    Array.isArray(body.requestsFailedToDecline);
+
+  if ((res.status === 200 || res.status === 500) && usable && body !== null) {
+    return {
+      ...body,
+      status: res.status as 200 | 500,
+    };
+  }
+
+  throw new Error(`Failed to remove media (${res.status})`);
 }
 
 // ---- Display helpers, all pure, all used only by AdminPage ----

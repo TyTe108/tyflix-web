@@ -1,5 +1,6 @@
 // Season checklist behavior on MediaDetail: tapping a season's label toggles
-// its checkbox (the thumb-usable label pattern for 36.4).
+// its checkbox (the thumb-usable label pattern for 36.4). Also covers the
+// admin-only Manage entry point on the title page.
 import {
   cleanup,
   fireEvent,
@@ -35,9 +36,18 @@ vi.mock("../api/requests", async (importOriginal) => {
   return {
     ...actual,
     createRequest: vi.fn(),
-    fetchRequestProfiles: vi.fn(),
+    fetchRequestProfiles: vi.fn().mockResolvedValue({
+      serverId: 1,
+      defaultProfileId: 1,
+      profiles: [{ id: 1, name: "Any" }],
+    }),
+    fetchAllRequests: vi.fn().mockResolvedValue([]),
   };
 });
+
+vi.mock("../api/admin", () => ({
+  removeMedia: vi.fn(),
+}));
 
 vi.mock("../api/watch", () => ({
   fetchEpisodes: vi.fn().mockResolvedValue({ episodes: [] }),
@@ -65,34 +75,42 @@ const tvDetail: TvDetail = {
   tvdbId: 1,
 };
 
+function meUser(isAdmin: boolean) {
+  return {
+    isAdmin,
+    user: {
+      seerrUserId: 1,
+      plexId: 1,
+      plexUsername: "testuser",
+      displayName: "Test User",
+      avatar: null,
+      permissions: isAdmin ? 2 : 0,
+    },
+  };
+}
+
+function renderDetail() {
+  return render(
+    <MemoryRouter initialEntries={["/media/tv/1396"]}>
+      <AuthProvider>
+        <Routes>
+          <Route path="/media/:type/:id" element={<MediaDetailPage />} />
+        </Routes>
+      </AuthProvider>
+    </MemoryRouter>,
+  );
+}
+
 describe("MediaDetailPage season labels", () => {
   afterEach(() => {
     cleanup();
   });
 
   it("toggles a season checkbox when its label is clicked", async () => {
-    vi.mocked(fetchMe).mockResolvedValue({
-      isAdmin: false,
-      user: {
-        seerrUserId: 1,
-        plexId: 1,
-        plexUsername: "testuser",
-        displayName: "Test User",
-        avatar: null,
-        permissions: 0,
-      },
-    });
+    vi.mocked(fetchMe).mockResolvedValue(meUser(false));
     vi.mocked(fetchTv).mockResolvedValue(tvDetail);
 
-    render(
-      <MemoryRouter initialEntries={["/media/tv/1396"]}>
-        <AuthProvider>
-          <Routes>
-            <Route path="/media/:type/:id" element={<MediaDetailPage />} />
-          </Routes>
-        </AuthProvider>
-      </MemoryRouter>,
-    );
+    renderDetail();
 
     const checklist = await screen.findByRole("group", {
       name: "Select seasons to request",
@@ -105,5 +123,30 @@ describe("MediaDetailPage season labels", () => {
 
     fireEvent.click(season1.closest("label")!);
     expect(season1.checked).toBe(false);
+  });
+});
+
+describe("MediaDetailPage Manage entry", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("hides the Manage button for a non-admin", async () => {
+    vi.mocked(fetchMe).mockResolvedValue(meUser(false));
+    vi.mocked(fetchTv).mockResolvedValue(tvDetail);
+
+    renderDetail();
+    expect(await screen.findByRole("heading", { name: /Breaking Bad/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Manage" })).toBeNull();
+  });
+
+  it("shows the Manage button for an admin and opens the modal", async () => {
+    vi.mocked(fetchMe).mockResolvedValue(meUser(true));
+    vi.mocked(fetchTv).mockResolvedValue(tvDetail);
+
+    renderDetail();
+    const manage = await screen.findByRole("button", { name: "Manage" });
+    fireEvent.click(manage);
+    expect(await screen.findByRole("dialog")).toBeTruthy();
   });
 });
