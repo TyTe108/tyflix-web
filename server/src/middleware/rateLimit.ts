@@ -75,3 +75,29 @@ export const accessRequestLimiter = rateLimit({
   keyGenerator: clientIpKey,
   message: { error: "Too many requests, please try again later." },
 });
+
+// Covers the production-only static/SPA surface mounted in index.ts: the built
+// web assets plus the "/{*path}" splat that hands every unmatched path
+// index.html. That block sits outside /api, so apiRateLimiter never sees it --
+// CodeQL correctly flagged it as an unbounded filesystem read (alert #4,
+// js/missing-rate-limiting). Own bucket rather than reusing apiRateLimiter: a
+// single page load can fan out into a couple dozen JS/CSS/font requests, a
+// different shape than an API call, and sharing one bucket would make the
+// /api budget's existing tuning (see GENERAL_MAX_REQUESTS above) harder to
+// reason about.
+const STATIC_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const STATIC_MAX_REQUESTS = 1000; // same ceiling as apiRateLimiter to start -- this is DoS protection, not a throttle on real use
+
+/**
+ * Limiter for the production static/SPA-fallback block in index.ts. Mounted
+ * ahead of both express.static and the splat route, so it covers every
+ * filesystem read that block can trigger.
+ */
+export const staticRateLimiter = rateLimit({
+  windowMs: STATIC_WINDOW_MS,
+  limit: STATIC_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: clientIpKey,
+  message: { error: "Too many requests, please try again later." },
+});

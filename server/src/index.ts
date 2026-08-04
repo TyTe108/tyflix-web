@@ -34,6 +34,7 @@ import { requireAdmin, requireAuth } from "./middleware/auth";
 import {
   accessRequestLimiter,
   apiRateLimiter,
+  staticRateLimiter,
 } from "./middleware/rateLimit";
 import { createPlexClient } from "./plex/client";
 import { createPlexConnectionResolver } from "./plex/connection";
@@ -389,6 +390,13 @@ async function start(): Promise<void> {
     // index.html so a deep link like /library/movies survives a refresh. The
     // "/{*path}" spelling is Express 5's named splat, which replaced the bare
     // "*" that worked in Express 4.
+    //
+    // Rate-limited like everything else reachable through the tunnel: this
+    // whole block is a filesystem read on every request and was unbounded
+    // until CodeQL flagged it (js/missing-rate-limiting, alert #4). See
+    // staticRateLimiter in rateLimit.ts for why it's a separate bucket from
+    // apiRateLimiter.
+    app.use(staticRateLimiter);
     app.use(express.static(webDistPath));
     app.get("/{*path}", (_req, res) => {
       res.sendFile(path.join(webDistPath, "index.html"));
