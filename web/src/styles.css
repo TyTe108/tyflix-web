@@ -981,27 +981,37 @@ a {
   object-fit: contain;
 }
 
+/* Bound the settings panel by shell space, not a viewport fraction.
+   .watch-controls fills the shell; flex-end keeps the bar at the bottom;
+   .watch-settings shrinks into whatever remains above the bar and scrolls.
+   The fade sits on the bar (not this overlay) so it does not stretch with
+   the panel. */
 .watch-controls {
+  --watch-controls-pad: 0.75rem;
+  --watch-controls-fade: 2.5rem;
   position: absolute;
   left: 0;
   right: 0;
+  top: 0;
   bottom: 0;
   z-index: 3;
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 0.5rem;
-  padding: 2.5rem 0.75rem 0.75rem;
-  background: linear-gradient(
-    to top,
-    rgba(0, 0, 0, 0.85) 0%,
-    rgba(0, 0, 0, 0.45) 55%,
-    transparent 100%
-  );
+  padding: var(--watch-controls-pad);
+  /* Full-height overlay would steal media taps without this. */
+  pointer-events: none;
   opacity: 1;
   transform: translateY(0);
   transition:
     opacity var(--transition),
     transform var(--transition);
+}
+
+.watch-controls:not(.watch-controls--hidden) .watch-settings,
+.watch-controls:not(.watch-controls--hidden) .watch-controls-bar {
+  pointer-events: auto;
 }
 
 .watch-controls--hidden {
@@ -1028,10 +1038,32 @@ a {
 }
 
 .watch-controls-bar {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-wrap: nowrap;
+}
+
+/* Fade behind the bar only. 100% tracks the bar's own height across
+   breakpoints; --watch-controls-fade is the rise above the buttons. */
+.watch-controls-bar::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--watch-controls-pad));
+  right: calc(-1 * var(--watch-controls-pad));
+  bottom: calc(-1 * var(--watch-controls-pad));
+  height: calc(100% + var(--watch-controls-fade) + var(--watch-controls-pad));
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.85) 0%,
+    rgba(0, 0, 0, 0.45) 55%,
+    transparent 100%
+  );
+  pointer-events: none;
+  z-index: -1;
 }
 
 .watch-control-btn {
@@ -1112,8 +1144,15 @@ a {
 }
 
 .watch-settings {
+  position: relative;
+  /* Above .watch-controls-bar (z-index 1), whose ::before fade rises 2.5rem
+     past the bar. At equal z-index the bar wins on DOM order and the fade
+     tints the panel's lower edge. */
+  z-index: 2;
+  flex: 0 1 auto;
   align-self: flex-end;
   width: min(18rem, 100%);
+  min-height: 0;
   margin: 0 0 0.15rem;
   padding: 0.75rem 0.9rem;
   border: 1px solid var(--border);
@@ -1121,6 +1160,19 @@ a {
   background: var(--surface);
   box-shadow: var(--shadow-2);
   color: var(--text);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Visible thin scrollbar so overflow is obvious (macOS often hides it). */
+  scrollbar-width: thin;
+}
+
+.watch-settings::-webkit-scrollbar {
+  width: 6px;
+}
+
+.watch-settings::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-muted) 55%, transparent);
+  border-radius: 999px;
 }
 
 .watch-settings[hidden] {
@@ -4311,7 +4363,8 @@ a {
 
 /*
  * Mobile player chrome (max-width: 48rem). Two-row control bar, no volume
- * widgets, scrollable settings, Up Next clearance, edge-to-edge frame.
+ * widgets, larger settings tap targets, Up Next clearance, edge-to-edge
+ * frame. Settings shell-bounding and scroll live in the base .watch-* rules.
  * Breakpoint must match MOBILE_MEDIA_QUERY in useIsMobile.ts.
  */
 @media (max-width: 48rem) {
@@ -4350,32 +4403,8 @@ a {
     min-height: 44px;
   }
 
-  /* Bound the settings panel by shell space, not a viewport fraction.
-     .watch-controls fills the shell; flex-end keeps the bar at the bottom;
-     .watch-settings shrinks into whatever remains above the bar and scrolls. */
-  .watch-controls {
-    top: 0;
-    justify-content: flex-end;
-    /* Full-height overlay would steal media taps without this. */
-    pointer-events: none;
-  }
-
-  .watch-controls:not(.watch-controls--hidden) .watch-settings,
-  .watch-controls:not(.watch-controls--hidden) .watch-controls-bar {
-    pointer-events: auto;
-  }
-
-  .watch-controls-bar {
-    flex: 0 0 auto;
-  }
-
   .watch-settings {
-    flex: 0 1 auto;
-    align-self: flex-end;
     width: min(22rem, 100%);
-    min-height: 0;
-    max-height: none;
-    overflow-y: auto;
     -webkit-overflow-scrolling: touch;
   }
 
