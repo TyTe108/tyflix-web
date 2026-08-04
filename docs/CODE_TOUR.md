@@ -401,6 +401,13 @@ Grouped by concern. Open these when a path above leads you here.
 | `web/src/cast/subscribeSessionReady.ts` | 99 | Fires when a session can actually accept media. The obvious signal, `CAST_STATE_CHANGED` reaching `CONNECTED`, can arrive before the receiver will accept a load; this waits for `SESSION_STATE_CHANGED`'s `STARTED`/`RESUMED` instead. |
 | `web/src/cast/loadMediaOnCast.ts` | 115 | The only `loadMedia` call. DASH plus Plex's required `/decision` handshake. |
 
+**Installing as an app**
+
+| File | LOC | What it is |
+|---|---|---|
+| `web/index.html` | 148 | Mostly install plumbing now: the manifest link, the icons, and 40 `apple-touch-startup-image` links. iOS won't read the manifest's background color and won't generate a launch screen, so every screen size and orientation needs its own image. Two things in here look like mistakes and aren't, both commented in place. Landscape entries carry the *portrait* `device-width` and `device-height`, because Apple matches the physical screen rather than the current rotation. And `-webkit-device-pixel-ratio` is load-bearing, because `414x896` exists at both 2x and 3x and picks a different file at each. |
+| `web/public/manifest.webmanifest` | 33 | `display: standalone`, scope, theme and background color, and three icons, one of them `maskable` and inset to survive Android's adaptive-icon crop. Everything in `web/public/` gets copied to the build root by Vite and served by `express.static` ahead of the SPA fallback, which is what lets a browser fetch the manifest while logged out. |
+
 ### Leaves
 
 37 files not covered above: pages, components, API clients, and small modules.

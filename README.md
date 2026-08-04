@@ -52,6 +52,14 @@ Deployed, in daily use, still being built. Roadmap's at the bottom.
 
 ![Admin users](docs/screenshots/admin-users.jpg)
 
+**On a phone, installed.** It installs to the home screen and runs with no browser chrome, with its own icon and its own launch screen. The app switcher treats it as a separate app rather than a Safari tab. Shown on an iPhone here, and it behaves the same on Android, where Chrome offers a real Install button instead of burying it in a share sheet. Wallpaper and surrounding apps are blurred because the phone isn't mine.
+
+![Installed on a phone](docs/screenshots/pwa-strip.jpg)
+
+Cold launch, from tapping the icon to the launch screen:
+
+![Cold launch on an iPhone](docs/screenshots/pwa-launch.gif)
+
 ## Everything else in there
 
 Beyond what's in the screenshots:
@@ -102,6 +110,8 @@ It's the same shape as an enterprise pattern like SAP Cloud Connector reaching S
 
 **Joining two id systems.** Discovery is keyed by TMDB id. Plex is keyed by its own rating keys. Availability and playability come from matching the two through Seerr's media records, which is how the app shows accurate status instead of guessing by title.
 
+**Making it installable, and the forty images iOS wanted.** A web app manifest does most of the work: Chrome starts offering a real Install button, and the app launches without any browser chrome. Android also generates the launch screen for you, straight from the manifest's background color. iOS supports neither, so an installed app flashed white on every launch until I added `apple-touch-startup-image` links, and those have to match the device's window size exactly. That means one image per screen size per orientation, which came to 40 files covering 20 device classes. I generated them from the icon and cut them to an 8-color palette, so the whole set is 533 KB rather than the 1.8 MB it started at. Before anyone had tested it on a real phone I checked the media queries by running them in WebKit under each device's metrics, which caught nothing but made the later confirmation on an actual iPhone a formality instead of a coin flip. No service worker, on purpose: Tyflix is a thin client over Plex and Seerr, every screen needs a live upstream, and an offline shell would only make the error page prettier while adding a cache to invalidate.
+
 ## Tech stack
 
 - TypeScript across frontend and backend
@@ -134,7 +144,7 @@ one process and one port.
 
 Tyflix is deployed and in daily use on my home server, and it's still an active work in progress. It covers most of Seerr's user-facing surface plus a few things Seerr doesn't do, like the per-user watched-versus-requested analytics. The backend carries 479 tests and the frontend 65.
 
-Recent work: admin media removal, including per-season and per-episode deletion that Seerr doesn't offer, and a blocklist so a removal actually sticks against the watchlist sync. Before that, a mobile overhaul, search in the Library, self-serve access requests where a stranger's form submission becomes a real Plex invite once I approve it, and casting to a Chromecast. Earlier came the in-player control bar, auto-advance with the Up Next card, hardware-accelerated transcoding on the server's Arc GPU, and progress sync back to Plex. That last one made watch state per-user instead of owner-based, which is what makes the Continue Watching rail and the per-poster progress bars mean anything.
+Recent work: making it installable on a phone, which turned out to mean 40 launch-screen images to satisfy iOS. Before that, admin media removal, including per-season and per-episode deletion that Seerr doesn't offer, and a blocklist so a removal actually sticks against the watchlist sync. Earlier still, a mobile overhaul, search in the Library, self-serve access requests where a stranger's form submission becomes a real Plex invite once I approve it, and casting to a Chromecast. Earlier came the in-player control bar, auto-advance with the Up Next card, hardware-accelerated transcoding on the server's Arc GPU, and progress sync back to Plex. That last one made watch state per-user instead of owner-based, which is what makes the Continue Watching rail and the per-poster progress bars mean anything.
 
 Next up: an automatic bitrate cap for constrained connections, and AirPlay, so casting also works from Safari and iOS.
 
