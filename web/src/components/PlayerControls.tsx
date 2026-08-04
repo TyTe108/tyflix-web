@@ -1,7 +1,7 @@
 // The custom control bar for the watch page, replacing the browser's native
 // <video controls>. Transport (play/pause, seek, volume, fullscreen), the
-// settings gear (speed, quality, audio track, subtitles, auto-play), and the
-// Cast button all live here.
+// settings gear (a two-level menu for speed, quality, audio, subtitles, and
+// auto-play), and the Cast button all live here.
 //
 // The <video> element itself is passed in as children and the parent owns the
 // ref, so this component reads and writes an element it doesn't render.
@@ -29,12 +29,24 @@ import {
   useState,
   type KeyboardEvent,
   type ReactNode,
+  type Ref,
   type RefObject,
 } from "react";
 import type { AudioStream, SubtitleStream } from "../api/watch";
 import type { RemotePlaybackControl } from "../cast/useCastPlayer";
 import { useCastState } from "../cast/useCastState";
 import { useIsMobile } from "../hooks/useIsMobile";
+
+/** Which settings submenu is open, or null for the root menu. */
+type SettingsSubmenu = "speed" | "quality" | "audio" | "subtitles";
+
+/** One option's raw label plus fields used to disambiguate root-row values. */
+type RootLabelSource = {
+  value: string;
+  label: string;
+  language?: string | null;
+  codec?: string | null;
+};
 
 // iPhone Safari exposes these on <video> instead of Element.requestFullscreen.
 type WebkitVideoElement = HTMLVideoElement & {
@@ -168,9 +180,8 @@ type SettingsOption<T extends string | number> = {
   label: string;
 };
 
-// One labelled row of pick-one buttons in the settings panel. Every group in
-// the panel (Speed, Quality, Audio, Subtitles) is an instance of this, so the
-// visual weight of a choice says nothing about how much work it costs.
+// One labelled column of pick-one buttons. Used inside a settings submenu so
+// each group gets the full panel width; the root menu lists groups, not options.
 function SettingsOptionGroup<T extends string | number>({
   label,
   options,
@@ -213,6 +224,101 @@ function SettingsOptionGroup<T extends string | number>({
       </div>
     </div>
   );
+}
+
+/**
+ * One root-menu row: group name, the active option's label (ellipsis + title),
+ * and a chevron. Clicking opens that group's submenu.
+ */
+function SettingsNavRow({
+  label,
+  value,
+  onClick,
+  buttonRef,
+}: {
+  label: string;
+  value: string;
+  onClick: () => void;
+  buttonRef?: Ref<HTMLButtonElement>;
+}) {
+  return (
+    <button
+      type="button"
+      className="watch-settings-nav"
+      onClick={onClick}
+      ref={buttonRef}
+    >
+      <span className="watch-settings-nav-label">{label}</span>
+      <span className="watch-settings-nav-value" title={value}>
+        {value}
+      </span>
+      <span className="watch-settings-nav-chevron" aria-hidden="true">
+        ›
+      </span>
+    </button>
+  );
+}
+
+/**
+ * Root-row labels for a pick-one group. Starts from each option's raw label,
+ * then appends language, codec, or index when the raw text collides with a
+ * sibling or omits an available language, so two tracks never share a value.
+ */
+function rootDisplayLabels(
+  items: ReadonlyArray<RootLabelSource>,
+): Map<string, string> {
+  const labelCounts = new Map<string, number>();
+  for (const item of items) {
+    labelCounts.set(item.label, (labelCounts.get(item.label) ?? 0) + 1);
+  }
+
+  const tentative = items.map((item, index) => {
+    const language =
+      typeof item.language === "string" && item.language.trim() !== ""
+        ? item.language.trim()
+        : null;
+    const codec =
+      typeof item.codec === "string" && item.codec.trim() !== ""
+        ? item.codec.trim()
+        : null;
+    const colliding = (labelCounts.get(item.label) ?? 0) > 1;
+    const omitsLanguage =
+      language !== null &&
+      !item.label.toLowerCase().includes(language.toLowerCase());
+
+    let display = item.label;
+    if (colliding || omitsLanguage) {
+      const extras: string[] = [];
+      if (omitsLanguage && language !== null) {
+        extras.push(language);
+      }
+      if (colliding && codec !== null) {
+        extras.push(codec);
+      }
+      if (colliding && extras.length === 0) {
+        extras.push(String(index + 1));
+      }
+      if (extras.length > 0) {
+        display = `${item.label} (${extras.join(" ")})`;
+      }
+    }
+    return { value: item.value, display };
+  });
+
+  const displayCounts = new Map<string, number>();
+  for (const row of tentative) {
+    displayCounts.set(row.display, (displayCounts.get(row.display) ?? 0) + 1);
+  }
+
+  const result = new Map<string, string>();
+  tentative.forEach((row, index) => {
+    let display = row.display;
+    if ((displayCounts.get(display) ?? 0) > 1) {
+      display = `${row.display} (${index + 1})`;
+    }
+    result.set(row.value, display);
+  });
+  return result;
 }
 
 /**
@@ -265,6 +371,12 @@ export function PlayerControls({
   const [muted, setMuted] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Which submenu is open. Stays on the chosen group after a pick so Quality /
+  // Audio / Subtitles can show their pending highlight until
+  // onStreamSettingsChange resolves; bouncing to root would hide that.
+  const [settingsSubmenu, setSettingsSubmenu] = useState<SettingsSubmenu | null>(
+    null,
+  );
   const cast = useCastState();
   const [controlsVisible, setControlsVisible] = useState(true);
   const [playbackRate, setPlaybackRate] = useState(1);
@@ -277,6 +389,12 @@ export function PlayerControls({
     initialSubtitleId,
   );
   const [fullscreenError, setFullscreenError] = useState<string | null>(null);
+  const settingsBackRef = useRef<HTMLButtonElement | null>(null);
+  const settingsNavRefs = useRef<
+    Partial<Record<SettingsSubmenu, HTMLButtonElement | null>>
+  >({});
+  // After Back, focus the root row that opened the submenu we just left.
+  const pendingNavFocusRef = useRef<SettingsSubmenu | null>(null);
 
   settingsOpenRef.current = settingsOpen;
   controlsVisibleRef.current = controlsVisible;
@@ -568,6 +686,60 @@ export function PlayerControls({
     };
   }, [settingsOpen]);
 
+  // Closing the panel (any path) returns to the root menu on the next open.
+  useEffect(() => {
+    if (!settingsOpen) {
+      setSettingsSubmenu(null);
+      pendingNavFocusRef.current = null;
+    }
+  }, [settingsOpen]);
+
+  // Escape closes the whole panel rather than stepping back a submenu level.
+  useEffect(() => {
+    if (!settingsOpen) {
+      return;
+    }
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      setSettingsOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [settingsOpen]);
+
+  // If the open submenu's group disappears (casting starts, tracks go empty),
+  // fall back to root rather than rendering an empty submenu.
+  useEffect(() => {
+    if (settingsSubmenu === null) {
+      return;
+    }
+    const speedOk = settingsSubmenu !== "speed" || !remoteActive;
+    const audioOk =
+      settingsSubmenu !== "audio" || audioTracks.length > 0;
+    const subsOk =
+      settingsSubmenu !== "subtitles" || subtitleTracks.length > 0;
+    if (!speedOk || !audioOk || !subsOk) {
+      setSettingsSubmenu(null);
+    }
+  }, [settingsSubmenu, remoteActive, audioTracks, subtitleTracks]);
+
+  // Focus Back when entering a submenu; focus the matching root row on Back.
+  useEffect(() => {
+    if (settingsSubmenu !== null) {
+      settingsBackRef.current?.focus();
+      return;
+    }
+    const pending = pendingNavFocusRef.current;
+    if (pending !== null) {
+      pendingNavFocusRef.current = null;
+      settingsNavRefs.current[pending]?.focus();
+    }
+  }, [settingsSubmenu]);
+
   // Don't leave a hide timer running after unmount.
   useEffect(() => {
     return () => {
@@ -768,6 +940,47 @@ export function PlayerControls({
     })),
   ];
 
+  const speedValueLabel =
+    SPEED_OPTIONS.find((option) => option.value === playbackRate)?.label ??
+    String(playbackRate);
+  const qualityValueLabel =
+    QUALITY_OPTIONS.find((option) => option.value === selectedQuality)
+      ?.label ?? selectedQuality;
+
+  const audioRootLabels = rootDisplayLabels(
+    audioTracks.map((track) => ({
+      value: track.id,
+      label: formatAudioLabel(track),
+      language: track.language,
+      codec: track.codec,
+    })),
+  );
+  const audioValueLabel =
+    (activeAudioId !== null
+      ? audioRootLabels.get(activeAudioId)
+      : undefined) ?? "";
+
+  const subtitleRootLabels = rootDisplayLabels([
+    { value: "", label: "Off" },
+    ...subtitleTracks.map((track) => ({
+      value: track.id,
+      label: formatSubtitleLabel(track),
+      language: track.language,
+      codec: track.codec,
+    })),
+  ]);
+  const subtitleValueLabel =
+    subtitleRootLabels.get(selectedSubtitleId ?? "") ?? "Off";
+
+  const openSubmenu = (submenu: SettingsSubmenu) => {
+    setSettingsSubmenu(submenu);
+  };
+
+  const leaveSubmenu = () => {
+    pendingNavFocusRef.current = settingsSubmenu;
+    setSettingsSubmenu(null);
+  };
+
   // Prefer shell fullscreen so the bar and overlays come along. Fall back to
   // video.webkitEnterFullscreen on iPhone Safari, which has no FS API on divs.
   const toggleFullscreen = () => {
@@ -857,61 +1070,125 @@ export function PlayerControls({
         }
       >
         {/* Settings panel. Always in the tree, toggled with `hidden` rather
-            than unmounted. Each group only renders when it has something to
-            offer, so a title with no subtitle streams shows no Subtitles row. */}
+            than unmounted. Root lists available groups; a submenu shows one
+            group's options. Groups with nothing to offer contribute no row. */}
         <div
           className="watch-settings"
           ref={settingsRef}
           hidden={!settingsOpen}
         >
-          <h2 className="watch-settings-title">Settings</h2>
-          {/* Speed is a local-only setting, so it drops off while casting. */}
-          {!remoteActive ? (
-            <SettingsOptionGroup
-              label="Speed"
-              options={SPEED_OPTIONS}
-              value={playbackRate}
-              onChange={setSpeed}
-            />
-          ) : null}
-          <SettingsOptionGroup
-            label="Quality"
-            options={QUALITY_OPTIONS}
-            value={selectedQuality}
-            onChange={selectQuality}
-          />
-          {audioOptions.length > 0 ? (
-            <SettingsOptionGroup
-              label="Audio"
-              options={audioOptions}
-              value={activeAudioId ?? ""}
-              onChange={selectAudio}
-            />
-          ) : null}
-          {subtitleTracks.length > 0 ? (
-            <SettingsOptionGroup
-              label="Subtitles"
-              options={subtitleOptions}
-              value={selectedSubtitleId ?? ""}
-              onChange={selectSubtitle}
-            />
-          ) : null}
-          {/* Auto Play drives the Up Next advance, so WatchPage only passes
-              these props for episodes. Movies have nothing to advance to. */}
-          {autoPlay !== undefined && onAutoPlayChange !== undefined ? (
-            <div className="watch-settings-group">
-              <label className="watch-settings-toggle">
-                <span className="watch-settings-toggle-text">Auto Play</span>
-                <input
-                  type="checkbox"
-                  checked={autoPlay}
-                  onChange={(event) => {
-                    onAutoPlayChange(event.currentTarget.checked);
+          {settingsSubmenu === null ? (
+            <>
+              <h2 className="watch-settings-title">Settings</h2>
+              <div className="watch-settings-root">
+                {/* Speed is a local-only setting, so it drops off while casting. */}
+                {!remoteActive ? (
+                  <SettingsNavRow
+                    label="Speed"
+                    value={speedValueLabel}
+                    onClick={() => {
+                      openSubmenu("speed");
+                    }}
+                    buttonRef={(node) => {
+                      settingsNavRefs.current.speed = node;
+                    }}
+                  />
+                ) : null}
+                <SettingsNavRow
+                  label="Quality"
+                  value={qualityValueLabel}
+                  onClick={() => {
+                    openSubmenu("quality");
+                  }}
+                  buttonRef={(node) => {
+                    settingsNavRefs.current.quality = node;
                   }}
                 />
-              </label>
-            </div>
-          ) : null}
+                {audioOptions.length > 0 ? (
+                  <SettingsNavRow
+                    label="Audio"
+                    value={audioValueLabel}
+                    onClick={() => {
+                      openSubmenu("audio");
+                    }}
+                    buttonRef={(node) => {
+                      settingsNavRefs.current.audio = node;
+                    }}
+                  />
+                ) : null}
+                {subtitleTracks.length > 0 ? (
+                  <SettingsNavRow
+                    label="Subtitles"
+                    value={subtitleValueLabel}
+                    onClick={() => {
+                      openSubmenu("subtitles");
+                    }}
+                    buttonRef={(node) => {
+                      settingsNavRefs.current.subtitles = node;
+                    }}
+                  />
+                ) : null}
+                {/* Auto Play drives the Up Next advance, so WatchPage only
+                    passes these props for episodes. Movies have nothing to
+                    advance to. Stays a toggle at root; no submenu. */}
+                {autoPlay !== undefined && onAutoPlayChange !== undefined ? (
+                  <label className="watch-settings-toggle">
+                    <span className="watch-settings-toggle-text">Auto Play</span>
+                    <input
+                      type="checkbox"
+                      checked={autoPlay}
+                      onChange={(event) => {
+                        onAutoPlayChange(event.currentTarget.checked);
+                      }}
+                    />
+                  </label>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="watch-settings-back"
+                ref={settingsBackRef}
+                onClick={leaveSubmenu}
+              >
+                Back
+              </button>
+              {settingsSubmenu === "speed" ? (
+                <SettingsOptionGroup
+                  label="Speed"
+                  options={SPEED_OPTIONS}
+                  value={playbackRate}
+                  onChange={setSpeed}
+                />
+              ) : null}
+              {settingsSubmenu === "quality" ? (
+                <SettingsOptionGroup
+                  label="Quality"
+                  options={QUALITY_OPTIONS}
+                  value={selectedQuality}
+                  onChange={selectQuality}
+                />
+              ) : null}
+              {settingsSubmenu === "audio" ? (
+                <SettingsOptionGroup
+                  label="Audio"
+                  options={audioOptions}
+                  value={activeAudioId ?? ""}
+                  onChange={selectAudio}
+                />
+              ) : null}
+              {settingsSubmenu === "subtitles" ? (
+                <SettingsOptionGroup
+                  label="Subtitles"
+                  options={subtitleOptions}
+                  value={selectedSubtitleId ?? ""}
+                  onChange={selectSubtitle}
+                />
+              ) : null}
+            </>
+          )}
         </div>
 
         {/* The bar itself: play, clock, seek, volume, fullscreen, cast, gear. */}
