@@ -46,6 +46,7 @@ function mediaRow(
     ratingKey: "45678",
     tvdbId: null,
     externalServiceId: 12,
+    updatedAt: null,
     seasons: [],
     ...overrides,
   };

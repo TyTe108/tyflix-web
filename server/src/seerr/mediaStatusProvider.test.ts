@@ -11,6 +11,7 @@ function mediaRow(
     ratingKey: null,
     tvdbId: null,
     externalServiceId: null,
+    updatedAt: null,
     seasons: [],
     ...overrides,
   };
@@ -74,6 +75,7 @@ describe("createMediaStatusProvider", () => {
       ratingKey: "45678",
       tvdbId: null,
       externalServiceId: 12,
+      updatedAt: null,
       seasons: [],
     });
     assert.deepEqual(await provider.getMediaRow("tv", 1396), {
@@ -84,6 +86,7 @@ describe("createMediaStatusProvider", () => {
       ratingKey: null,
       tvdbId: 81189,
       externalServiceId: 97,
+      updatedAt: null,
       seasons: [{ seasonNumber: 1, status: 5 }],
     });
     assert.equal(await provider.getMediaRow("movie", 999999), null);

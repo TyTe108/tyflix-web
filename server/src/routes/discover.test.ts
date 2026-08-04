@@ -247,8 +247,8 @@ describe("discovery media status annotation", () => {
         async listMedia() {
           mediaCalls += 1;
           return [
-            { id: 10, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: "45678", tvdbId: null, externalServiceId: null, seasons: [] },
-            { id: 20, tmdbId: 1396, mediaType: "tv", status: 4, ratingKey: null, tvdbId: null, externalServiceId: null, seasons: [] },
+            { id: 10, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: "45678", tvdbId: null, externalServiceId: null, updatedAt: null, seasons: [] },
+            { id: 20, tmdbId: 1396, mediaType: "tv", status: 4, ratingKey: null, tvdbId: null, externalServiceId: null, updatedAt: null, seasons: [] },
           ];
         },
       }),
@@ -349,8 +349,8 @@ describe("discover browse routes", () => {
       mediaStatus: createMediaStatusProvider({
         async listMedia() {
           return [
-            { id: 10, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: "45678", tvdbId: null, externalServiceId: null, seasons: [] },
-            { id: 20, tmdbId: 1396, mediaType: "tv", status: 4, ratingKey: null, tvdbId: null, externalServiceId: null, seasons: [] },
+            { id: 10, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: "45678", tvdbId: null, externalServiceId: null, updatedAt: null, seasons: [] },
+            { id: 20, tmdbId: 1396, mediaType: "tv", status: 4, ratingKey: null, tvdbId: null, externalServiceId: null, updatedAt: null, seasons: [] },
           ];
         },
       }),
@@ -479,7 +479,7 @@ describe("GET /api/discover/upcoming", () => {
       mediaStatus: createMediaStatusProvider({
         async listMedia() {
           return [
-            { id: 10, tmdbId: 123, mediaType: "movie", status: 5, ratingKey: null, tvdbId: null, externalServiceId: null, seasons: [] },
+            { id: 10, tmdbId: 123, mediaType: "movie", status: 5, ratingKey: null, tvdbId: null, externalServiceId: null, updatedAt: null, seasons: [] },
           ];
         },
       }),
@@ -718,7 +718,7 @@ describe("GET /api/discover/person/:id", () => {
       mediaStatus: createMediaStatusProvider({
         async listMedia() {
           return [
-            { id: 10, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: null, tvdbId: null, externalServiceId: null, seasons: [] },
+            { id: 10, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: null, tvdbId: null, externalServiceId: null, updatedAt: null, seasons: [] },
           ];
         },
       }),
@@ -833,7 +833,7 @@ describe("GET /api/discover/collection/:id", () => {
       mediaStatus: createMediaStatusProvider({
         async listMedia() {
           return [
-            { id: 10, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: null, tvdbId: null, externalServiceId: null, seasons: [] },
+            { id: 10, tmdbId: 603, mediaType: "movie", status: 5, ratingKey: null, tvdbId: null, externalServiceId: null, updatedAt: null, seasons: [] },
           ];
         },
       }),

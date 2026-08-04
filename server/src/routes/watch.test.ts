@@ -12,6 +12,7 @@ import {
 import type { SharedServerAccessResolver } from "../plex/sharedServerAccess";
 import type { TransientTokenMinter } from "../plex/transientToken";
 import type { MediaStatusProvider } from "../seerr/mediaStatusProvider";
+import type { SeerrMediaListItem } from "../seerr/client";
 import { issueSession, SESSION_COOKIE_NAME } from "../session";
 import { createWatchRouter, type WatchRouterDeps } from "./watch";
 
@@ -24,6 +25,28 @@ const CONNECTIONS = {
   local: "https://10-0-0-10.machine-abc.plex.direct:32400",
   remote: "https://1-2-3-4.machine-abc.plex.direct:32400",
 };
+
+// Mirrors the syncing 404 message from watch.ts. Kept as a literal here so the
+// test fails loudly if the route wording changes without the test noticing.
+const SYNCING_ERROR =
+  "just added or updated — may still be syncing to Plex";
+
+function seerrMediaRow(
+  overrides: Partial<SeerrMediaListItem> = {},
+): SeerrMediaListItem {
+  return {
+    id: 12,
+    tmdbId: 194916,
+    mediaType: "tv",
+    status: 4, // partially_available
+    ratingKey: null,
+    tvdbId: null,
+    externalServiceId: null,
+    updatedAt: null,
+    seasons: [],
+    ...overrides,
+  };
+}
 
 beforeEach(() => {
   clearPermissionCacheForTests();
@@ -547,6 +570,129 @@ describe("GET /api/watch/tv/:tmdbId/episodes", () => {
 
     assert.equal(response.status, 404);
     assert.deepEqual(await response.json(), { error: "not playable" });
+  });
+
+  it("returns a syncing 404 when Seerr recently marked the show partially available", async () => {
+    const deps = baseDeps();
+    deps.mediaStatus = {
+      async getStatusMap() {
+        return new Map();
+      },
+      async getMediaId() {
+        return null;
+      },
+      async getRatingKey() {
+        return null;
+      },
+      async getMediaRow() {
+        return seerrMediaRow({
+          status: 4, // partially_available
+          updatedAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+        });
+      },
+    } as MediaStatusProvider;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/tv/194916/episodes",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 404);
+    assert.deepEqual(await response.json(), { error: SYNCING_ERROR });
+  });
+
+  it("returns not playable when partially available but the Seerr row is stale", async () => {
+    const deps = baseDeps();
+    deps.mediaStatus = {
+      async getStatusMap() {
+        return new Map();
+      },
+      async getMediaId() {
+        return null;
+      },
+      async getRatingKey() {
+        return null;
+      },
+      async getMediaRow() {
+        return seerrMediaRow({
+          status: 4, // partially_available
+          // Well outside the 20-minute sync recency window.
+          updatedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        });
+      },
+    } as MediaStatusProvider;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/tv/194916/episodes",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 404);
+    assert.deepEqual(await response.json(), { error: "not playable" });
+  });
+
+  it("returns not playable when there is no Seerr media row at all", async () => {
+    const deps = baseDeps();
+    deps.mediaStatus = {
+      async getStatusMap() {
+        return new Map();
+      },
+      async getMediaId() {
+        return null;
+      },
+      async getRatingKey() {
+        return null;
+      },
+      async getMediaRow() {
+        return null;
+      },
+    } as MediaStatusProvider;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/tv/194916/episodes",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 404);
+    assert.deepEqual(await response.json(), { error: "not playable" });
+  });
+
+  it("returns not playable for deleted, blocklisted, or unknown status even when recent", async () => {
+    const recent = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    // MEDIA_STATUS: 1 unknown, 6 blocklisted, 7 deleted
+    for (const status of [1, 6, 7]) {
+      const deps = baseDeps();
+      deps.mediaStatus = {
+        async getStatusMap() {
+          return new Map();
+        },
+        async getMediaId() {
+          return null;
+        },
+        async getRatingKey() {
+          return null;
+        },
+        async getMediaRow() {
+          return seerrMediaRow({ status, updatedAt: recent });
+        },
+      } as MediaStatusProvider;
+
+      const app = createApp(deps);
+      const response = await fetchLocal(
+        app,
+        "/api/watch/tv/194916/episodes",
+        sessionCookie({ plexToken: USER_TOKEN }),
+      );
+
+      assert.equal(response.status, 404);
+      assert.deepEqual(await response.json(), { error: "not playable" });
+    }
   });
 
   it("returns the episode list for a resolved show ratingKey", async () => {

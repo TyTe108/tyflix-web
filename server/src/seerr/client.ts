@@ -68,6 +68,12 @@ export type SeerrMediaListItem = {
   // drop the row. externalServiceId is the Sonarr or Radarr internal id.
   tvdbId: number | null;
   externalServiceId: number | null;
+  /**
+   * Seerr's last-updated timestamp for this media row (ISO string), best-effort.
+   * Null when Seerr omits it or the value isn't a parseable date — callers must
+   * not treat null as "just updated".
+   */
+  updatedAt: string | null;
   seasons: Array<{ seasonNumber: number; status: number }>;
 };
 
@@ -1342,8 +1348,8 @@ function mapSeerrMediaListItem(row: unknown): SeerrMediaListItem | null {
     return null;
   }
 
-  // ratingKey, tvdbId, externalServiceId and seasons are best-effort: a
-  // missing/odd value must not drop the item.
+  // ratingKey, tvdbId, externalServiceId, updatedAt and seasons are
+  // best-effort: a missing/odd value must not drop the item.
   const ratingKeyRaw = (row as { ratingKey?: unknown }).ratingKey;
   const ratingKey =
     typeof ratingKeyRaw === "string"
@@ -1364,6 +1370,13 @@ function mapSeerrMediaListItem(row: unknown): SeerrMediaListItem | null {
     typeof externalServiceIdRaw === "number" &&
     Number.isFinite(externalServiceIdRaw)
       ? externalServiceIdRaw
+      : null;
+
+  const updatedAtRaw = (row as { updatedAt?: unknown }).updatedAt;
+  const updatedAt =
+    typeof updatedAtRaw === "string" &&
+    Number.isFinite(Date.parse(updatedAtRaw))
+      ? updatedAtRaw
       : null;
 
   const seasons: Array<{ seasonNumber: number; status: number }> = [];
@@ -1394,6 +1407,7 @@ function mapSeerrMediaListItem(row: unknown): SeerrMediaListItem | null {
     ratingKey,
     tvdbId,
     externalServiceId,
+    updatedAt,
     seasons,
   };
 }

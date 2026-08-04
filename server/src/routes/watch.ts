@@ -47,6 +47,7 @@ import type {
   SubtitleStream,
 } from "../plex/server";
 import type { MediaStatusProvider } from "../seerr/mediaStatusProvider";
+import { mediaStatusFromCode } from "../seerr/client";
 import { readPlexToken, type SessionPayload } from "../session";
 
 export type WatchRouterDeps = {
@@ -58,6 +59,11 @@ export type WatchRouterDeps = {
   sessionSecret: string;
   plexClientId: string;
 };
+
+// Seerr's plex-recently-added-scan job runs every 5 minutes; 20 minutes is a
+// small multiple that covers a couple of missed scans without treating a stale
+// Seerr row as "still syncing".
+const PLEX_SYNC_RECENCY_MS = 20 * 60 * 1000;
 
 // Everything the browser needs to start playing one item without asking again.
 // The `local` URLs are null when Plex advertises no LAN connection, so the
@@ -347,6 +353,32 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
       // fallback is a later increment, so treat that as not playable for now.
       const showRatingKey = await mediaStatus.getRatingKey("tv", tmdbId);
       if (showRatingKey === null) {
+        // Two 404 cases that used to look identical: Seerr may already know
+        // the title (pending / processing / partially_available) and have
+        // updated the row recently, which usually means Plex's library scan
+        // hasn't caught up yet — a transient sync lag the Retry button can
+        // clear. No row, an unusable timestamp, a stale update, or any other
+        // status is a real dead end, so keep the existing "not playable".
+        const row = await mediaStatus.getMediaRow("tv", tmdbId);
+        const availability =
+          row === null ? null : mediaStatusFromCode(row.status);
+        const updatedAtMs =
+          row?.updatedAt == null ? Number.NaN : Date.parse(row.updatedAt);
+        const isRecent =
+          Number.isFinite(updatedAtMs) &&
+          Date.now() - updatedAtMs <= PLEX_SYNC_RECENCY_MS;
+        const isSyncingStatus =
+          availability === "pending" ||
+          availability === "processing" ||
+          availability === "partially_available";
+
+        if (isSyncingStatus && isRecent) {
+          res.status(404).json({
+            error: "just added or updated — may still be syncing to Plex",
+          });
+          return;
+        }
+
         res.status(404).json({ error: "not playable" });
         return;
       }

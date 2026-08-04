@@ -540,6 +540,7 @@ describe("Seerr media client", () => {
         ratingKey: "12345",
         tvdbId: null,
         externalServiceId: null,
+        updatedAt: null,
         seasons: [],
       },
       {
@@ -550,6 +551,7 @@ describe("Seerr media client", () => {
         ratingKey: null,
         tvdbId: null,
         externalServiceId: null,
+        updatedAt: null,
         seasons: [],
       },
     ]);
@@ -592,6 +594,7 @@ describe("Seerr media client", () => {
         ratingKey: "12345",
         tvdbId: null,
         externalServiceId: null,
+        updatedAt: null,
         seasons: [],
       },
       {
@@ -602,6 +605,7 @@ describe("Seerr media client", () => {
         ratingKey: "67890",
         tvdbId: null,
         externalServiceId: null,
+        updatedAt: null,
         seasons: [],
       },
       {
@@ -612,6 +616,7 @@ describe("Seerr media client", () => {
         ratingKey: null,
         tvdbId: null,
         externalServiceId: null,
+        updatedAt: null,
         seasons: [],
       },
       {
@@ -622,6 +627,7 @@ describe("Seerr media client", () => {
         ratingKey: null,
         tvdbId: null,
         externalServiceId: null,
+        updatedAt: null,
         seasons: [],
       },
     ]);
@@ -656,6 +662,7 @@ describe("Seerr media client", () => {
         ratingKey: "1",
         tvdbId: null,
         externalServiceId: null,
+        updatedAt: null,
         seasons: [],
       },
     ]);
@@ -691,6 +698,7 @@ describe("Seerr media client", () => {
         ratingKey: "1",
         tvdbId: null,
         externalServiceId: null,
+        updatedAt: null,
         seasons: [],
       },
     ]);
@@ -748,6 +756,7 @@ describe("Seerr media client", () => {
         ratingKey: "7171",
         tvdbId: 353544,
         externalServiceId: 97,
+        updatedAt: null,
         seasons: [
           { seasonNumber: 0, status: 1 },
           { seasonNumber: 1, status: 5 },
@@ -761,6 +770,7 @@ describe("Seerr media client", () => {
         ratingKey: null,
         tvdbId: null,
         externalServiceId: null,
+        updatedAt: null,
         seasons: [],
       },
       {
@@ -771,6 +781,112 @@ describe("Seerr media client", () => {
         ratingKey: null,
         tvdbId: null,
         externalServiceId: null,
+        updatedAt: null,
+        seasons: [],
+      },
+    ]);
+  });
+
+  it("maps a valid updatedAt ISO string onto the media row", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse(200, {
+        pageInfo: { results: 1 },
+        results: [
+          {
+            id: 12,
+            tmdbId: 194916,
+            mediaType: "tv",
+            status: 4,
+            updatedAt: "2026-08-04T21:00:00.000Z",
+          },
+        ],
+      });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    assert.deepEqual(await seerr.listMedia(), [
+      {
+        id: 12,
+        tmdbId: 194916,
+        mediaType: "tv",
+        status: 4,
+        ratingKey: null,
+        tvdbId: null,
+        externalServiceId: null,
+        updatedAt: "2026-08-04T21:00:00.000Z",
+        seasons: [],
+      },
+    ]);
+  });
+
+  it("maps a missing or malformed updatedAt to null without dropping the row", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse(200, {
+        pageInfo: { results: 3 },
+        results: [
+          {
+            id: 1,
+            tmdbId: 100,
+            mediaType: "tv",
+            status: 4,
+          },
+          {
+            id: 2,
+            tmdbId: 101,
+            mediaType: "tv",
+            status: 4,
+            updatedAt: "not-a-date",
+          },
+          {
+            id: 3,
+            tmdbId: 102,
+            mediaType: "tv",
+            status: 4,
+            updatedAt: { odd: true },
+          },
+        ],
+      });
+
+    const seerr = createSeerrClient({
+      baseUrl: "http://seerr:5055",
+      apiKey: "k",
+    });
+
+    assert.deepEqual(await seerr.listMedia(), [
+      {
+        id: 1,
+        tmdbId: 100,
+        mediaType: "tv",
+        status: 4,
+        ratingKey: null,
+        tvdbId: null,
+        externalServiceId: null,
+        updatedAt: null,
+        seasons: [],
+      },
+      {
+        id: 2,
+        tmdbId: 101,
+        mediaType: "tv",
+        status: 4,
+        ratingKey: null,
+        tvdbId: null,
+        externalServiceId: null,
+        updatedAt: null,
+        seasons: [],
+      },
+      {
+        id: 3,
+        tmdbId: 102,
+        mediaType: "tv",
+        status: 4,
+        ratingKey: null,
+        tvdbId: null,
+        externalServiceId: null,
+        updatedAt: null,
         seasons: [],
       },
     ]);
