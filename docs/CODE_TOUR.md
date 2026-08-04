@@ -2,12 +2,12 @@
 
 _Last verified against `aedb123`, 2026-08-03._
 
-Tyflix is 101 source files, about 31,600 lines, split across a Node/Express
+Tyflix is 101 source files, about 31,900 lines, split across a Node/Express
 backend and a React SPA. Ten files carry the architecture, and the rest are
 leaves hanging off them; this doc surfaces those ten early and tiers everything
 else behind them. Worth knowing before you budget time: six files alone carry
-9,447 lines, 30% of the repo (`AdminPage.tsx` 2,145, `WatchPage.tsx` 1,845,
-`seerr/client.ts` 1,679, `plex/server.ts` 1,503, `PlayerControls.tsx` 1,186,
+9,724 lines, 30% of the repo (`AdminPage.tsx` 2,145, `WatchPage.tsx` 1,845,
+`seerr/client.ts` 1,679, `plex/server.ts` 1,503, `PlayerControls.tsx` 1,463,
 `tmdb/client.ts` 1,089). The tiering below doesn't surface that concentration
 on its own.
 
@@ -234,17 +234,17 @@ cover everything load-bearing.
 
 | # | File | LOC | Why it's here |
 |---|---|---|---|
-| 1 | [`server/src/index.ts`](../server/src/index.ts) | 380 | Composition root and routing table. Shows every upstream, every route, the middleware order, and which routes are public. Two mount-order rules are load-bearing: public routes (auth, config, access-requests) must mount before the catch-all `/api` 404 guard, and `/api/admin/access-requests` must mount before `/api/admin`, since Express matches path prefixes in registration order. |
+| 1 | [`server/src/index.ts`](../server/src/index.ts) | 423 | Composition root and routing table. Shows every upstream, every route, the middleware order, and which routes are public. Two mount-order rules are load-bearing: public routes (auth, config, access-requests) must mount before the catch-all `/api` 404 guard, and `/api/admin/access-requests` must mount before `/api/admin`, since Express matches path prefixes in registration order. |
 | 2 | [`web/src/App.tsx`](../web/src/App.tsx) | 94 | Every URL the app answers, and its three access tiers: public (`/login`, `/request-access`), authenticated (everything behind `ProtectedRoute`), and admin-only (`/admin`, behind `AdminRoute` stacked on top). |
-| 3 | [`server/src/session.ts`](../server/src/session.ts) | 410 | How a logged-in user is represented: signed cookie, and the Plex account token encrypted inside it with AES-256-GCM. Also `isAdmin`, the single place admin is decided. |
+| 3 | [`server/src/session.ts`](../server/src/session.ts) | 412 | How a logged-in user is represented: signed cookie, and the Plex account token encrypted inside it with AES-256-GCM. Also `isAdmin`, the single place admin is decided. |
 | 4 | [`server/src/routes/watch.ts`](../server/src/routes/watch.ts) | 810 | Playback, eight endpoints. The most interesting is `GET /movie/:tmdbId`, which resolves a TMDB id to a ratingKey, mints a short-lived Plex token, and hands back a direct address. |
-| 5 | [`server/src/seerr/mediaStatusProvider.ts`](../server/src/seerr/mediaStatusProvider.ts) | 150 | 150 lines that explain half the codebase: the TMDB-id to Plex-ratingKey join. In-memory cache, 60-second TTL, shared by the four routers that need it (discover, watchlist, issues, watch). A Seerr outage drops the cache rather than serving it stale, so availability reads as unknown instead of wrong. |
+| 5 | [`server/src/seerr/mediaStatusProvider.ts`](../server/src/seerr/mediaStatusProvider.ts) | 177 | 150 lines that explain half the codebase: the TMDB-id to Plex-ratingKey join. In-memory cache, 60-second TTL, shared by the four routers that need it (discover, watchlist, issues, watch). A Seerr outage drops the cache rather than serving it stale, so availability reads as unknown instead of wrong. |
 |  | *stop here if you have twenty minutes* | | |
 | 6 | [`server/src/plex/connection.ts`](../server/src/plex/connection.ts) | 267 | Resolves the `plex.direct` addresses a browser can stream from, local and remote, so the player picks whichever it can reach. |
 | 7 | [`server/src/plex/transientToken.ts`](../server/src/plex/transientToken.ts) | 136 | Trades the durable Plex token for a short-lived one, valid roughly 48 hours or until the PMS restarts. This is what lets video go direct without the real credential leaving the server. |
 | 8 | [`server/src/plex/resolvePmsToken.ts`](../server/src/plex/resolvePmsToken.ts) | 33 | 33 lines, and worth every one. A shared Plex user's account token is not their token for a specific server. Getting this wrong broke sign-in for all 14 shared accounts at once. |
-| 9 | [`web/src/pages/WatchPage.tsx`](../web/src/pages/WatchPage.tsx) | 1,469 | The client half of playback: hls.js, resume, Up Next auto-advance, cast handoff. Read its header first; it maps the twelve effects before you meet them. |
-| 10 | [`server/src/routes/auth.ts`](../server/src/routes/auth.ts) | 241 | Plex's PIN login flow end to end, and where the session cookie gets issued. |
+| 9 | [`web/src/pages/WatchPage.tsx`](../web/src/pages/WatchPage.tsx) | 1,845 | The client half of playback: hls.js, resume, Up Next auto-advance, cast handoff. Read its header first; it maps the twelve effects before you meet them. |
+| 10 | [`server/src/routes/auth.ts`](../server/src/routes/auth.ts) | 268 | Plex's PIN login flow end to end, and where the session cookie gets issued. |
 
 ## Reading paths by topic
 
@@ -324,14 +324,14 @@ Grouped by concern. Open these when a path above leads you here.
 
 | File | LOC | What it is |
 |---|---|---|
-| `server/src/config.ts` | 213 | Every env var, validated once at boot. Fails loud and exits rather than starting half-configured. |
+| `server/src/config.ts` | 243 | Every env var, validated once at boot. Fails loud and exits rather than starting half-configured. |
 
 **Auth and access control**
 
 | File | LOC | What it is |
 |---|---|---|
-| `server/src/middleware/auth.ts` | 60 | `requireAuth` and `requireAdmin`. The only two gates. |
-| `server/src/middleware/rateLimit.ts` | 77 | Two limiters, keyed on `CF-Connecting-IP`. |
+| `server/src/middleware/auth.ts` | 111 | `requireAuth` and `requireAdmin`. The only two gates. |
+| `server/src/middleware/rateLimit.ts` | 103 | Two limiters, keyed on `CF-Connecting-IP`. |
 | `server/src/plex/client.ts` | 223 | The plex.tv account API. Not to be confused with `plex/server.ts`. |
 | `web/src/auth/AuthContext.tsx` | 133 | The client's whole view of the session. |
 | `web/src/auth/ProtectedRoute.tsx` | 63 | `ProtectedRoute` and `AdminRoute`, both layout routes. |
@@ -351,11 +351,11 @@ Grouped by concern. Open these when a path above leads you here.
 
 | File | LOC | What it is |
 |---|---|---|
-| `server/src/seerr/client.ts` | 1,244 | The whole Seerr surface in one typed client. |
+| `server/src/seerr/client.ts` | 1,679 | The whole Seerr surface in one typed client. |
 | `server/src/tmdb/client.ts` | 1,089 | Read-only TMDB: search, trending, genres, credits, collections. |
 | `server/src/routes/discover.ts` | 463 | Twelve browse endpoints. Exports `annotateMediaStatus`, which other routers import. |
-| `server/src/routes/requests.ts` | 371 | Create a request, list your own, and the admin approve/decline queue. |
-| `server/src/routes/issues.ts` | 438 | Report-a-problem, with per-issue authorization rather than per-route. |
+| `server/src/routes/requests.ts` | 374 | Create a request, list your own, and the admin approve/decline queue. |
+| `server/src/routes/issues.ts` | 436 | Report-a-problem, with per-issue authorization rather than per-route. |
 | `server/src/seerr/issues.ts` | 248 | Seerr's issue enums and nested parsing, split out of the client. |
 | `server/src/tmdb/enrichment.ts` | 116 | Cached title-and-poster lookup for Seerr rows, which carry ids but no artwork. |
 
@@ -365,7 +365,7 @@ Grouped by concern. Open these when a path above leads you here.
 |---|---|---|
 | `server/src/analytics/watchedVsRequested.ts` | 214 | The watched-versus-requested numbers, weighted by bytes rather than title count. Pure function. |
 | `server/src/accessRequests/store.ts` | 483 | Access-request records: pending, approved, denied. The durable state discussed above. |
-| `server/src/routes/adminAccessRequests.ts` | 513 | Approvals, which fire real Plex invites, plus reconciliation against Plex on read. |
+| `server/src/routes/adminAccessRequests.ts` | 519 | Approvals, which fire real Plex invites, plus reconciliation against Plex on read. |
 | `server/src/routes/accessRequests.ts` | 211 | The public submit endpoint. Honeypot, per-IP cap, identical responses either way. |
 | `server/src/routes/admin.ts` | 68 | Read-only proxy to the metrics service. |
 | `server/src/routes/adminMedia.ts` | 695 | Removing media: a whole title, one season, or one episode. The header explains what "remove" means across Radarr/Sonarr, Plex, Seerr's media row and its open requests. |
@@ -378,12 +378,12 @@ Grouped by concern. Open these when a path above leads you here.
 
 | File | LOC | What it is |
 |---|---|---|
-| `web/src/pages/AdminPage.tsx` | 1,807 | Seven-tab admin console. Largest file in the repo; its header maps every tab with its endpoint and poll interval. |
-| `web/src/pages/LibraryPage.tsx` | 674 | Default landing page. Plex-side search, sort, genre and unwatched filters, A-Z rail. |
-| `web/src/pages/MediaDetailPage.tsx` | 871 | The title page and the Play-or-Request decision. |
+| `web/src/pages/AdminPage.tsx` | 2,145 | Seven-tab admin console. Largest file in the repo; its header maps every tab with its endpoint and poll interval. |
+| `web/src/pages/LibraryPage.tsx` | 767 | Default landing page. Plex-side search, sort, genre and unwatched filters, A-Z rail. |
+| `web/src/pages/MediaDetailPage.tsx` | 910 | The title page and the Play-or-Request decision. |
 | `web/src/pages/RequestAccessPage.tsx` | 495 | Four-step public wizard. |
 | `web/src/pages/DiscoverPage.tsx` | 406 | TMDB trending with availability layered on. |
-| `web/src/components/PlayerControls.tsx` | 1,062 | Custom control bar. Quality and audio changes restart the Plex transcode in place; subtitles are burned in. Both explained in the header. |
+| `web/src/components/PlayerControls.tsx` | 1,463 | Custom control bar. Quality and audio changes restart the Plex transcode in place; subtitles are burned in. Both explained in the header. |
 | `web/src/components/ManageMediaModal.tsx` | 730 | The admin Manage view: a title's requests, whole-title removal, and for TV a collapsible season/episode tree. Every destructive control is two-click, and only one can be armed at a time. |
 | `web/src/components/Modal.tsx` | 106 | Generic dialog shell. No focus trap, deliberately, matching `BottomSheet`; the header says why rather than leaving it to look like an oversight. |
 | `web/src/hooks/usePolledResource.ts` | 147 | The polling hook every admin panel runs on. Stale data survives a failed poll. |

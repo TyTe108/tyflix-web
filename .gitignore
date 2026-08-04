@@ -9,6 +9,9 @@ data/
 *.local.md
 
 # Design/handoff docs kept private (local-only). README + docs/screenshots stay public.
-docs/*.md
+# ** so a subdirectory cannot smuggle one out: `docs/*.md` is single-level, and a
+# docs/_to_delete/ folder slipped two symlinked phase specs into a public commit
+# before this was tightened.
+docs/**/*.md
 # ...except the code tour, which is written for people reading the public repo.
 !docs/CODE_TOUR.md
