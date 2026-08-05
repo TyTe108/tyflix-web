@@ -1,30 +1,56 @@
 // Per-user numbers for the Home page: what you asked for versus what you
 // actually watched, plus your Seerr request quota. Mounted at /api/me behind
-// requireAuth, with two endpoints, GET /stats and GET /quota.
+// requireAuth, with three endpoints: GET /stats, GET /quota, and
+// GET /badge-counts.
 //
-// Both upstreams show up here. Plex supplies the account list and the watch
-// history; Seerr supplies the requests and the quota. The analytics module does
-// the GB-weighting once the two sides are joined.
+// Both upstreams show up here. Plex supplies the account list and watch history;
+// Seerr supplies requests, issues, and quota. The optional local access-request
+// store contributes only its pending admin badge count. The analytics module
+// does the GB-weighting once the Plex and Seerr sides are joined.
 //
 // The Plex account list and history are shared across every user, so they're
 // cached for a minute at router scope. Without that, each dashboard poll would
 // re-pull the entire server history.
 
 import { Router } from "express";
+import type { AccessRequestStore } from "../accessRequests/store";
 import { computeWatchedVsRequested } from "../analytics/watchedVsRequested";
 import {
   PlexServerUpstreamError,
   type PlexServerClient,
   type PlexWatchedSets,
 } from "../plex/server";
-import { SeerrUpstreamError, type SeerrClient } from "../seerr/client";
-import type { SessionPayload } from "../session";
+import {
+  SeerrUpstreamError,
+  toRequestView,
+  type SeerrClient,
+  type SeerrRequest,
+} from "../seerr/client";
+import { isAdmin, type SessionPayload } from "../session";
 
 const SHARED_CACHE_TTL_MS = 60_000;
 
 export type MeRouterDeps = {
   plexServer: PlexServerClient;
   seerr: SeerrClient;
+  accessRequestStore?: Pick<AccessRequestStore, "list">;
+};
+
+export type BadgeCounts = {
+  mine: {
+    /** Caller requests pending approval, or non-dead requests with processing media. */
+    requests: number;
+    /** Caller-created issues whose status is open. */
+    issues: number;
+  };
+  admin: {
+    /** All users' requests whose request status is pending. */
+    requests: number;
+    /** All issues whose status is open. */
+    issues: number;
+    /** Access-request store rows whose status is pending. */
+    access: number;
+  } | null;
 };
 
 type CacheEntry<T> = {
@@ -33,7 +59,7 @@ type CacheEntry<T> = {
 };
 
 export function createMeRouter(deps: MeRouterDeps): Router {
-  const { plexServer, seerr } = deps;
+  const { plexServer, seerr, accessRequestStore } = deps;
   const router = Router();
 
   // Server-wide data, not per-user, so one cache serves every caller. Lives for
@@ -150,7 +176,82 @@ export function createMeRouter(deps: MeRouterDeps): Router {
     }
   });
 
+  /**
+   * GET /api/me/badge-counts
+   *
+   * Every nav badge count in one response, split into the caller's own work and
+   * admin-wide work. No params. `admin` is explicitly null for a non-admin so
+   * clients can distinguish insufficient permission from a missing field.
+   *
+   * 200 with BadgeCounts, 401 without a session, 502 if a Seerr list fails,
+   * and 503 when the auth guard cannot revalidate permissions against Seerr.
+   */
+  router.get("/badge-counts", async (_req, res) => {
+    const session = res.locals.session as SessionPayload | undefined;
+    if (!session) {
+      res.status(401).json({ error: "not authenticated" });
+      return;
+    }
+
+    try {
+      const admin = isAdmin(session.permissions);
+      const [mineRequests, issues, allRequests] = await Promise.all([
+        seerr.getRequestsByUser(session.seerrUserId),
+        seerr.listIssues(),
+        admin ? seerr.listAllRequests() : Promise.resolve(undefined),
+      ]);
+
+      /*
+       * Walked lists are deliberate: measured Seerr /count and request filter
+       * totals disagree with both the definitive walk and Tyflix's predicates.
+       */
+      const counts: BadgeCounts = {
+        mine: {
+          requests: mineRequests.filter(isMineActiveRequest).length,
+          issues: issues.filter(
+            (issue) =>
+              issue.createdBy.id === session.seerrUserId &&
+              issue.status === "open",
+          ).length,
+        },
+        admin: admin
+          ? {
+              requests: allRequests!.filter(isAdminPendingRequest).length,
+              issues: issues.filter((issue) => issue.status === "open").length,
+              access:
+                accessRequestStore
+                  ?.list()
+                  .filter((row) => row.status === "pending").length ?? 0,
+            }
+          : null,
+      };
+
+      res.json(counts);
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
   return router;
+}
+
+// The badge means "things you're still waiting on"; declined and failed
+// requests cannot deliver anything, even if Seerr still reports processing.
+function isMineActiveRequest(request: SeerrRequest): boolean {
+  const view = toRequestView(request, { title: "", posterUrl: null });
+  return (
+    view.requestStatus === "pending" ||
+    (view.mediaStatus === "processing" &&
+      view.requestStatus !== "declined" &&
+      view.requestStatus !== "failed")
+  );
+}
+
+function isAdminPendingRequest(request: SeerrRequest): boolean {
+  return (
+    toRequestView(request, { title: "", posterUrl: null }).requestStatus ===
+    "pending"
+  );
 }
 
 // Finds the caller's Plex accountID, which is the key watch history is filed

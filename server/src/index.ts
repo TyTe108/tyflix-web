@@ -257,7 +257,7 @@ async function start(): Promise<void> {
   app.use(
     "/api/me",
     requireAuth(config.sessionSecret, seerr, sessionRevocation),
-    createMeRouter({ plexServer, seerr }),
+    createMeRouter({ plexServer, seerr, accessRequestStore }),
   );
 
   // More specific than /api/admin — mount first. requireAdmin at the mount so
