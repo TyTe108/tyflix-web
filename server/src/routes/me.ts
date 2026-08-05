@@ -38,7 +38,7 @@ export type MeRouterDeps = {
 
 export type BadgeCounts = {
   mine: {
-    /** Caller requests pending approval, or non-dead requests with processing media. */
+    /** Caller requests whose request status is pending, at any media status. */
     requests: number;
     /** Caller-created issues whose status is open. */
     issues: number;
@@ -235,15 +235,18 @@ export function createMeRouter(deps: MeRouterDeps): Router {
   return router;
 }
 
-// The badge means "things you're still waiting on"; declined and failed
-// requests cannot deliver anything, even if Seerr still reports processing.
+// The badge counts only requests still awaiting an approval decision.
+//
+// It used to also count processing media, which does not mean "arriving soon" —
+// it means Radarr or Sonarr has been told about the title, and for unreleased
+// media that search never resolves. Ice Age: Boiling Point (2027) and Fall 2:
+// Deadpoint (2026), both approved and processing since 2026-06-18 and both
+// still in post-production, held the badge at 2 with nothing outstanding and
+// nothing that could ever clear it.
 function isMineActiveRequest(request: SeerrRequest): boolean {
-  const view = toRequestView(request, { title: "", posterUrl: null });
   return (
-    view.requestStatus === "pending" ||
-    (view.mediaStatus === "processing" &&
-      view.requestStatus !== "declined" &&
-      view.requestStatus !== "failed")
+    toRequestView(request, { title: "", posterUrl: null }).requestStatus ===
+    "pending"
   );
 }
 

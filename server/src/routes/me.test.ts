@@ -125,7 +125,7 @@ describe("GET /api/me/badge-counts", () => {
 
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), {
-      mine: { requests: 3, issues: 1 },
+      mine: { requests: 1, issues: 1 },
       admin: null,
     });
     assert.equal(fixture.issueCalls(), 1);
@@ -165,7 +165,7 @@ describe("GET /api/me/badge-counts", () => {
 
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), {
-      mine: { requests: 2, issues: 1 },
+      mine: { requests: 1, issues: 1 },
       admin: { requests: 2, issues: 2, access: 2 },
     });
     assert.equal(fixture.issueCalls(), 1);
