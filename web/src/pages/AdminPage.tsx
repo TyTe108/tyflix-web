@@ -27,6 +27,8 @@
 // The page itself also polls GET /api/me/badge-counts every 60s for the dots on
 // Requests, Issues, and Access. That is slower than the Requests/Access panel
 // pollers on purpose: AppShell already polls the same endpoint for the nav.
+// Successful approve/decline/deny on those two panels also poke the badge
+// refresh so an emptied queue clears its tab dot without waiting out the minute.
 //
 // Everything under /api/admin is a pass-through proxy to a small host-metrics
 // service. Tyflix itself has no idea how to read a CPU temperature; it
@@ -177,7 +179,7 @@ export function AdminPage() {
   const rawTab = searchParams.get("tab");
   const activeTab: AdminTab = isAdminTab(rawTab) ? rawTab : DEFAULT_TAB;
 
-  const { data: badgeCounts } = usePolledResource(
+  const { data: badgeCounts, refresh: refreshBadges } = usePolledResource(
     fetchBadgeCounts,
     BADGE_COUNT_POLL_MS,
   );
@@ -245,10 +247,14 @@ export function AdminPage() {
       >
         {/* One panel at a time, mounted fresh. Leaving a tab stops its poller
             and throws away its data; coming back re-fetches. */}
-        {activeTab === "requests" ? <RequestsPanel /> : null}
+        {activeTab === "requests" ? (
+          <RequestsPanel refreshBadges={refreshBadges} />
+        ) : null}
         {activeTab === "issues" ? <IssuesPanel /> : null}
         {activeTab === "blocklist" ? <BlocklistPanel /> : null}
-        {activeTab === "access" ? <AccessPanel /> : null}
+        {activeTab === "access" ? (
+          <AccessPanel refreshBadges={refreshBadges} />
+        ) : null}
         {activeTab === "users" ? <UsersPanel /> : null}
         {activeTab === "system" ? <SystemPanel /> : null}
         {activeTab === "jobs" ? <JobsPanel /> : null}
@@ -307,7 +313,7 @@ function SystemPanel() {
 // decline buttons that write back to Seerr. Filtering and sorting are shared
 // with the user-facing /requests page (applyRequestControls), then paginated at
 // 20 a page. Default landing tab.
-function RequestsPanel() {
+function RequestsPanel({ refreshBadges }: { refreshBadges: () => void }) {
   const { data, status, error, lastUpdated, refresh } = usePolledResource(
     fetchAllRequests,
     30000,
@@ -350,6 +356,9 @@ function RequestsPanel() {
         } else {
           await declineRequest(id);
         }
+        // Badge poll is a separate resource from this panel's list — poke both
+        // or the tab dot lags a minute behind the queue beside it.
+        refreshBadges();
       } catch (err: unknown) {
         setActionError(
           err instanceof Error ? err.message : `Failed to ${action} request`,
@@ -359,7 +368,7 @@ function RequestsPanel() {
         setActiveRequestId(null);
       }
     },
-    [refresh],
+    [refresh, refreshBadges],
   );
 
   return (
@@ -825,7 +834,7 @@ function BlocklistPanel() {
 // Both writes are deliberately two-click. The first press arms the button ("Send
 // invite?" / "Confirm deny?") and the second one commits, which is the only
 // thing standing between a stray click and an invitation.
-function AccessPanel() {
+function AccessPanel({ refreshBadges }: { refreshBadges: () => void }) {
   const { data, status, error, lastUpdated, refresh } = usePolledResource(
     fetchAccessRequests,
     30000,
@@ -943,6 +952,9 @@ function AccessPanel() {
         } else {
           await approveAccessRequest(id, sectionIds);
         }
+        // Badge poll is a separate resource from this panel's list — poke both
+        // or the tab dot lags a minute behind the queue beside it.
+        refreshBadges();
       } catch (err: unknown) {
         setActionError(
           err instanceof Error ? err.message : "Failed to approve request",
@@ -952,7 +964,7 @@ function AccessPanel() {
         setActiveId(null);
       }
     },
-    [refresh],
+    [refresh, refreshBadges],
   );
 
   // Deny is local. Plex is never contacted, the applicant isn't told, and the
@@ -965,6 +977,9 @@ function AccessPanel() {
       clearConfirm();
       try {
         await denyAccessRequest(id, note);
+        // Badge poll is a separate resource from this panel's list — poke both
+        // or the tab dot lags a minute behind the queue beside it.
+        refreshBadges();
       } catch (err: unknown) {
         setActionError(
           err instanceof Error ? err.message : "Failed to deny request",
@@ -974,7 +989,7 @@ function AccessPanel() {
         setActiveId(null);
       }
     },
-    [refresh],
+    [refresh, refreshBadges],
   );
 
   return (

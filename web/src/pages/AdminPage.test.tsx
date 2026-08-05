@@ -6,6 +6,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -16,7 +17,18 @@ import {
   removeFromBlocklist,
   type AdminBlocklistListResponse,
 } from "../api/admin";
+import {
+  approveAccessRequest,
+  fetchAccessRequestSections,
+  fetchAccessRequests,
+  type AccessRequestView,
+} from "../api/accessRequests";
 import { fetchBadgeCounts, type BadgeCounts } from "../api/badgeCounts";
+import {
+  approveRequest,
+  fetchAllRequests,
+  type RequestView,
+} from "../api/requests";
 import { AdminPage } from "./AdminPage";
 
 vi.mock("../api/admin", async (importOriginal) => {
@@ -41,6 +53,8 @@ vi.mock("../api/requests", async (importOriginal) => {
   return {
     ...actual,
     fetchAllRequests: vi.fn().mockResolvedValue([]),
+    approveRequest: vi.fn(),
+    declineRequest: vi.fn(),
   };
 });
 
@@ -61,6 +75,8 @@ vi.mock("../api/accessRequests", async (importOriginal) => {
       reconciledAt: Date.now(),
     }),
     fetchAccessRequestSections: vi.fn().mockResolvedValue([]),
+    approveAccessRequest: vi.fn(),
+    denyAccessRequest: vi.fn(),
   };
 });
 
@@ -431,5 +447,169 @@ describe("AdminPage tab badge dots", () => {
     expect(dot).not.toBeNull();
     expect(dot?.getAttribute("aria-hidden")).toBe("true");
     expect(dot?.textContent).toBe("");
+  });
+});
+
+const pendingRequest: RequestView = {
+  id: 99,
+  tmdbId: 603,
+  mediaType: "movie",
+  title: "The Matrix",
+  posterUrl: null,
+  seasons: [],
+  requestStatus: "pending",
+  mediaStatus: "unknown",
+  requestedById: 7,
+  requestedByName: "Alice",
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+};
+
+const pendingAccess: AccessRequestView = {
+  id: "acc-1",
+  email: "alice@example.com",
+  plexUsername: null,
+  name: "Alice",
+  note: "Please",
+  hasPlexAccount: false,
+  status: "pending",
+  createdAt: 1_700_000_000,
+  decidedAt: null,
+  invitedAt: null,
+  acceptedAt: null,
+  sectionIds: null,
+  adminNote: null,
+  sourceIp: null,
+};
+
+describe("AdminPage badge refresh after actions", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  beforeEach(() => {
+    vi.mocked(fetchBlocklist).mockReset();
+    vi.mocked(fetchBlocklist).mockResolvedValue(blocklistPage());
+    vi.mocked(fetchBadgeCounts).mockReset();
+    vi.mocked(fetchAllRequests).mockReset();
+    vi.mocked(approveRequest).mockReset();
+    vi.mocked(fetchAccessRequests).mockReset();
+    vi.mocked(fetchAccessRequestSections).mockReset();
+    vi.mocked(approveAccessRequest).mockReset();
+  });
+
+  it("refetches badge counts after a successful request approve", async () => {
+    vi.mocked(fetchBadgeCounts).mockResolvedValue({
+      mine: { requests: 0, issues: 0 },
+      admin: { requests: 1, issues: 0, access: 0 },
+    });
+    vi.mocked(fetchAllRequests).mockResolvedValue([pendingRequest]);
+    vi.mocked(approveRequest).mockResolvedValue({
+      ...pendingRequest,
+      requestStatus: "approved",
+    });
+
+    renderAdmin("requests");
+    await screen.findByRole("tab", { name: "Requests, 1 pending" });
+    expect(fetchBadgeCounts).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+
+    await waitFor(() => {
+      expect(fetchBadgeCounts).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("refetches badge counts after a successful access approve", async () => {
+    vi.mocked(fetchBadgeCounts).mockResolvedValue({
+      mine: { requests: 0, issues: 0 },
+      admin: { requests: 0, issues: 0, access: 1 },
+    });
+    vi.mocked(fetchAccessRequests).mockResolvedValue({
+      requests: [pendingAccess],
+      reconciledAt: Math.floor(Date.now() / 1000),
+    });
+    vi.mocked(fetchAccessRequestSections).mockResolvedValue([
+      { id: 1, key: 1, title: "Movies", type: "movie" },
+    ]);
+    vi.mocked(approveAccessRequest).mockResolvedValue({
+      ...pendingAccess,
+      status: "invited",
+      decidedAt: 1_700_000_100,
+      invitedAt: 1_700_000_100,
+      sectionIds: [1],
+    });
+
+    renderAdmin("access");
+    await screen.findByRole("tab", { name: "Access, 1 pending" });
+    expect(fetchBadgeCounts).toHaveBeenCalledTimes(1);
+
+    await waitFor(() => {
+      expect(
+        (screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send invite?" }));
+
+    await waitFor(() => {
+      expect(fetchBadgeCounts).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("does not refetch badge counts when a request action fails", async () => {
+    vi.mocked(fetchBadgeCounts).mockResolvedValue({
+      mine: { requests: 0, issues: 0 },
+      admin: { requests: 1, issues: 0, access: 0 },
+    });
+    vi.mocked(fetchAllRequests).mockResolvedValue([pendingRequest]);
+    vi.mocked(approveRequest).mockRejectedValue(new Error("approve failed"));
+
+    renderAdmin("requests");
+    await screen.findByRole("tab", { name: "Requests, 1 pending" });
+    expect(fetchBadgeCounts).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    expect(await screen.findByText("approve failed")).toBeTruthy();
+
+    // Give any accidental success-path refresh a turn to fire.
+    await waitFor(() => {
+      expect(approveRequest).toHaveBeenCalled();
+    });
+    expect(fetchBadgeCounts).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears the Requests dot when the follow-up badge fetch returns zero", async () => {
+    let badgeCalls = 0;
+    vi.mocked(fetchBadgeCounts).mockImplementation(async () => {
+      badgeCalls += 1;
+      return {
+        mine: { requests: 0, issues: 0 },
+        admin: {
+          requests: badgeCalls === 1 ? 1 : 0,
+          issues: 0,
+          access: 0,
+        },
+      };
+    });
+    vi.mocked(fetchAllRequests).mockResolvedValue([pendingRequest]);
+    vi.mocked(approveRequest).mockResolvedValue({
+      ...pendingRequest,
+      requestStatus: "approved",
+    });
+
+    renderAdmin("requests");
+    const badged = await screen.findByRole("tab", {
+      name: "Requests, 1 pending",
+    });
+    expect(badged.querySelector(".admin-tab-badge")).not.toBeNull();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+
+    await waitFor(() => {
+      const tab = screen.getByRole("tab", { name: "Requests" });
+      expect(tab.querySelector(".admin-tab-badge")).toBeNull();
+    });
   });
 });
