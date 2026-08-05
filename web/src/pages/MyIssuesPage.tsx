@@ -137,6 +137,7 @@ export function MyIssuesPage() {
                         with a higher z-index so it still goes to media detail. */}
                     <Link
                       to={`/issues/${issue.id}`}
+                      state={{ from: "/issues" }}
                       className="my-issues-view-link"
                     >
                       View issue

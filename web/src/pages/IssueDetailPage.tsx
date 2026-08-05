@@ -1,6 +1,7 @@
 // One reported problem with its comment thread, plus the buttons to comment on
 // it or resolve it. Rendered at /issues/:id by App.tsx, inside ProtectedRoute
-// and AppShell. MyIssuesPage and the admin issues table both link here.
+// and AppShell. MyIssuesPage and the admin issues table both link here, each
+// passing router state so the back link can return to that list.
 //
 // Three calls, all through api/issues.ts and all Seerr underneath: GET
 // /api/issues/:id to load, POST /api/issues/:id/comment, and POST
@@ -18,7 +19,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import {
   addIssueComment,
   fetchIssue,
@@ -34,6 +35,15 @@ import { useAuth } from "../auth/AuthContext";
 // Drives which of the three mutually exclusive body states renders below.
 type LoadStatus = "loading" | "ready" | "error";
 
+// Known list destinations callers may put in Link state. Router state is
+// user-controllable via history, so anything outside this set is ignored.
+const BACK_FROM_ADMIN_ISSUES = "/admin?tab=issues";
+const BACK_FROM_MY_ISSUES = "/issues";
+const ALLOWED_BACK_FROM = new Set([
+  BACK_FROM_ADMIN_ISSUES,
+  BACK_FROM_MY_ISSUES,
+]);
+
 // Rejects anything that isn't a plain positive integer, so a junk URL segment
 // renders "not found" without firing a request.
 function parseIssueId(raw: string | undefined): number | null {
@@ -42,6 +52,32 @@ function parseIssueId(raw: string | undefined): number | null {
   }
   const id = Number(raw);
   return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+/**
+ * Resolves the back-link destination from router state.
+ *
+ * A bookmark, refresh, or pasted URL has no state, so "/issues" is the safe
+ * default — a working link to a list the visitor can always reach. Unknown
+ * `from` values fall back the same way because history state is untrusted.
+ */
+function resolveBackFrom(state: unknown): string {
+  if (
+    typeof state === "object" &&
+    state !== null &&
+    "from" in state &&
+    typeof (state as { from?: unknown }).from === "string" &&
+    ALLOWED_BACK_FROM.has((state as { from: string }).from)
+  ) {
+    return (state as { from: string }).from;
+  }
+  return BACK_FROM_MY_ISSUES;
+}
+
+function backLinkLabel(from: string): string {
+  return from === BACK_FROM_ADMIN_ISSUES
+    ? "← Back to Issues"
+    : "← Back to My Issues";
 }
 
 /**
@@ -54,6 +90,8 @@ function parseIssueId(raw: string | undefined): number | null {
 export function IssueDetailPage() {
   const { id: rawId } = useParams<{ id: string }>();
   const id = parseIssueId(rawId);
+  const location = useLocation();
+  const backFrom = resolveBackFrom(location.state);
   const { isAdmin, user } = useAuth();
   const [issue, setIssue] = useState<IssueView | null>(null);
   const [status, setStatus] = useState<LoadStatus>("loading");
@@ -194,11 +232,11 @@ export function IssueDetailPage() {
   return (
     <main className="page page-wide">
       <header className="row">
-        <Link to="/issues" className="back-link">
-          ← Back to My Issues
+        <Link to={backFrom} className="back-link">
+          {backLinkLabel(backFrom)}
         </Link>
         {isAdmin ? (
-          <Link to="/admin" className="issue-detail-admin-link">
+          <Link to="/admin?tab=issues" className="issue-detail-admin-link">
             Admin
           </Link>
         ) : null}

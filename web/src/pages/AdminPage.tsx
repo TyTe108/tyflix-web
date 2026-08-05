@@ -477,7 +477,11 @@ function IssuesPanel() {
             <ul className="admin-requests-list">
               {issues.map((issue) => (
                 <li key={issue.id} className="admin-request-row">
-                  <Link to={`/issues/${issue.id}`} className="admin-issue-link">
+                  <Link
+                    to={`/issues/${issue.id}`}
+                    state={{ from: "/admin?tab=issues" }}
+                    className="admin-issue-link"
+                  >
                     <div className="admin-request-main">
                       <span className="admin-request-title">
                         {issue.media.title ?? `TMDB #${issue.media.tmdbId}`}
