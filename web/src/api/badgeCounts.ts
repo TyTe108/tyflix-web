@@ -1,9 +1,9 @@
-// Client for GET /api/me/badge-counts (server/src/routes/me.ts). AppShell is
-// the only caller: it polls once a minute for every signed-in user and feeds
-// the result into the desktop sidebar and MobileNav badges.
+// Client for GET /api/me/badge-counts (server/src/routes/me.ts). AppShell polls
+// it for the primary-nav badges; AdminPage polls it for the Requests / Issues /
+// Access tab dots. Both use the same 60s interval.
 //
-// Errors follow the api/ convention: throw on non-2xx. AppShell catches and
-// leaves the last good counts alone rather than blanking the nav mid-session.
+// Errors follow the api/ convention: throw on non-2xx. Callers catch and leave
+// the last good counts alone rather than blanking badges mid-session.
 
 export type BadgeCounts = {
   mine: { requests: number; issues: number };

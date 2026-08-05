@@ -24,6 +24,10 @@
 //   Containers  Docker containers and native systemd units
 //               GET /api/admin/containers, every 5s
 //
+// The page itself also polls GET /api/me/badge-counts every 60s for the dots on
+// Requests, Issues, and Access. That is slower than the Requests/Access panel
+// pollers on purpose: AppShell already polls the same endpoint for the nav.
+//
 // Everything under /api/admin is a pass-through proxy to a small host-metrics
 // service. Tyflix itself has no idea how to read a CPU temperature; it
 // re-serves that service's JSON behind an admin check and nothing more.
@@ -81,6 +85,7 @@ import {
   type AdminUser,
   type AdminUsersResponse,
 } from "../api/admin";
+import { fetchBadgeCounts } from "../api/badgeCounts";
 import {
   approveRequest,
   declineRequest,
@@ -106,11 +111,12 @@ import { usePolledResource } from "../hooks/usePolledResource";
 import { usePagination } from "../hooks/usePagination";
 
 // Tab order as rendered. Also the allowlist for ?tab=, via isAdminTab.
+// badgeKey maps to admin.{key} on GET /api/me/badge-counts when present.
 const ADMIN_TABS = [
-  { id: "requests", label: "Requests" },
-  { id: "issues", label: "Issues" },
+  { id: "requests", label: "Requests", badgeKey: "requests" },
+  { id: "issues", label: "Issues", badgeKey: "issues" },
   { id: "blocklist", label: "Blocklist" },
-  { id: "access", label: "Access" },
+  { id: "access", label: "Access", badgeKey: "access" },
   { id: "users", label: "Users" },
   { id: "system", label: "System" },
   { id: "jobs", label: "Jobs" },
@@ -118,8 +124,10 @@ const ADMIN_TABS = [
 ] as const;
 
 type AdminTab = (typeof ADMIN_TABS)[number]["id"];
+type AdminBadgeKey = "requests" | "issues" | "access";
 
 const DEFAULT_TAB: AdminTab = "requests";
+const BADGE_COUNT_POLL_MS = 60_000;
 
 // Anything else in ?tab= falls back to DEFAULT_TAB rather than rendering an
 // empty panel.
@@ -127,16 +135,52 @@ function isAdminTab(value: string | null): value is AdminTab {
   return ADMIN_TABS.some((tab) => tab.id === value);
 }
 
+function adminTabBadgeCount(
+  admin: { requests: number; issues: number; access: number } | null | undefined,
+  badgeKey: AdminBadgeKey | undefined,
+): number {
+  if (admin === null || admin === undefined || badgeKey === undefined) {
+    return 0;
+  }
+  return admin[badgeKey];
+}
+
+function adminTabBadgeLabel(
+  badgeKey: AdminBadgeKey,
+  count: number,
+): string {
+  if (badgeKey === "issues") {
+    return `, ${count} open`;
+  }
+  return `, ${count} pending`;
+}
+
+/**
+ * Decorative attention dot inside a tab. Absolutely positioned in the tab's
+ * existing right padding because an inline badge of any width costs the strip
+ * a wrap row (measured: +1 row at 294/390/414/768px; 800px horizontal scroll
+ * grew from 21px to 129px). An 8px absolute dot did not.
+ */
+function AdminTabBadgeDot() {
+  return <span className="admin-tab-badge" aria-hidden="true" />;
+}
+
 /**
  * The admin console. Renders the tab strip and exactly one panel.
  *
- * Holds no data of its own. Every panel below fetches and polls for itself,
- * which is what keeps the unmounted tabs off the network.
+ * Panel data stays in the panels. The page-level poll is only for the tab-strip
+ * dots (Requests / Issues / Access), at 60s so it stays cheaper than sitting on
+ * a 30s panel poller while AppShell also hits the same endpoint.
  */
 export function AdminPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const rawTab = searchParams.get("tab");
   const activeTab: AdminTab = isAdminTab(rawTab) ? rawTab : DEFAULT_TAB;
+
+  const { data: badgeCounts } = usePolledResource(
+    fetchBadgeCounts,
+    BADGE_COUNT_POLL_MS,
+  );
 
   // Switching tabs replaces the history entry instead of pushing one, so eight
   // clicks around the console don't turn Back into eight presses. Other query
@@ -164,6 +208,10 @@ export function AdminPage() {
       <div className="admin-tabs" role="tablist" aria-label="Admin sections">
         {ADMIN_TABS.map((tab) => {
           const selected = activeTab === tab.id;
+          const count =
+            "badgeKey" in tab
+              ? adminTabBadgeCount(badgeCounts?.admin, tab.badgeKey)
+              : 0;
           return (
             <button
               key={tab.id}
@@ -176,6 +224,14 @@ export function AdminPage() {
               onClick={() => selectTab(tab.id)}
             >
               {tab.label}
+              {count > 0 && "badgeKey" in tab ? (
+                <>
+                  <AdminTabBadgeDot />
+                  <span className="visually-hidden">
+                    {adminTabBadgeLabel(tab.badgeKey, count)}
+                  </span>
+                </>
+              ) : null}
             </button>
           );
         })}

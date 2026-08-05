@@ -1,5 +1,6 @@
 // Blocklist tab on the admin console: listing with server-side paging, the
 // add form, and the two-click remove path that surfaces Auto-Request warnings.
+// Also covers the admin tab-strip dots driven by GET /api/me/badge-counts.
 import {
   cleanup,
   fireEvent,
@@ -15,6 +16,7 @@ import {
   removeFromBlocklist,
   type AdminBlocklistListResponse,
 } from "../api/admin";
+import { fetchBadgeCounts, type BadgeCounts } from "../api/badgeCounts";
 import { AdminPage } from "./AdminPage";
 
 vi.mock("../api/admin", async (importOriginal) => {
@@ -62,6 +64,21 @@ vi.mock("../api/accessRequests", async (importOriginal) => {
   };
 });
 
+// AdminPage polls fetchBadgeCounts at the page level. Keep adminBadgeRollup
+// real; replace only the network call so every mount has a resolved mock.
+vi.mock("../api/badgeCounts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/badgeCounts")>();
+  return {
+    ...actual,
+    fetchBadgeCounts: vi.fn(),
+  };
+});
+
+const ZERO_BADGE_COUNTS: BadgeCounts = {
+  mine: { requests: 0, issues: 0 },
+  admin: { requests: 0, issues: 0, access: 0 },
+};
+
 function blocklistPage(
   overrides: Partial<AdminBlocklistListResponse> = {},
 ): AdminBlocklistListResponse {
@@ -106,6 +123,8 @@ describe("AdminPage blocklist tab", () => {
     vi.mocked(addToBlocklist).mockReset();
     vi.mocked(removeFromBlocklist).mockReset();
     vi.mocked(fetchBlocklist).mockResolvedValue(blocklistPage());
+    vi.mocked(fetchBadgeCounts).mockReset();
+    vi.mocked(fetchBadgeCounts).mockResolvedValue(ZERO_BADGE_COUNTS);
   });
 
   it("shows a Blocklist tab and selects it via ?tab=blocklist", async () => {
@@ -293,5 +312,124 @@ describe("AdminPage blocklist tab", () => {
       within(panel).getByText(/auto-request|watchlist|re-request/i),
     ).toBeTruthy();
     expect(removeFromBlocklist).toHaveBeenCalledWith("movie", 603);
+  });
+});
+
+describe("AdminPage tab badge dots", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  beforeEach(() => {
+    vi.mocked(fetchBlocklist).mockReset();
+    vi.mocked(fetchBlocklist).mockResolvedValue(blocklistPage());
+    vi.mocked(fetchBadgeCounts).mockReset();
+  });
+
+  it("dots Requests, Issues, and Access when their admin counts are above zero", async () => {
+    // Distinct non-zero values so wiring the wrong field to a tab fails.
+    vi.mocked(fetchBadgeCounts).mockResolvedValue({
+      mine: { requests: 0, issues: 0 },
+      admin: { requests: 4, issues: 7, access: 2 },
+    });
+
+    renderAdmin("blocklist");
+
+    const requests = await screen.findByRole("tab", {
+      name: "Requests, 4 pending",
+    });
+    expect(requests.querySelector(".admin-tab-badge")).not.toBeNull();
+
+    const issues = screen.getByRole("tab", { name: "Issues, 7 open" });
+    expect(issues.querySelector(".admin-tab-badge")).not.toBeNull();
+
+    const access = screen.getByRole("tab", { name: "Access, 2 pending" });
+    expect(access.querySelector(".admin-tab-badge")).not.toBeNull();
+  });
+
+  it("omits the dot on a zero-count tab while keeping dots on non-zero ones", async () => {
+    vi.mocked(fetchBadgeCounts).mockResolvedValue({
+      mine: { requests: 0, issues: 0 },
+      admin: { requests: 3, issues: 0, access: 1 },
+    });
+
+    renderAdmin("blocklist");
+
+    const requests = await screen.findByRole("tab", {
+      name: "Requests, 3 pending",
+    });
+    expect(requests.querySelector(".admin-tab-badge")).not.toBeNull();
+
+    const issues = screen.getByRole("tab", { name: "Issues" });
+    expect(issues.querySelector(".admin-tab-badge")).toBeNull();
+
+    const access = screen.getByRole("tab", { name: "Access, 1 pending" });
+    expect(access.querySelector(".admin-tab-badge")).not.toBeNull();
+  });
+
+  it("never dots Blocklist, Users, System, Jobs, or Containers", async () => {
+    vi.mocked(fetchBadgeCounts).mockResolvedValue({
+      mine: { requests: 9, issues: 9 },
+      admin: { requests: 9, issues: 9, access: 9 },
+    });
+
+    renderAdmin("blocklist");
+
+    await screen.findByRole("tab", { name: "Requests, 9 pending" });
+
+    for (const label of [
+      "Blocklist",
+      "Users",
+      "System",
+      "Jobs",
+      "Containers",
+    ] as const) {
+      const tab = screen.getByRole("tab", { name: label });
+      expect(tab.querySelector(".admin-tab-badge")).toBeNull();
+    }
+  });
+
+  it("renders no dots and no error text when fetchBadgeCounts rejects", async () => {
+    vi.mocked(fetchBadgeCounts).mockRejectedValue(new Error("upstream down"));
+
+    renderAdmin("blocklist");
+
+    const blocklist = await screen.findByRole("tab", { name: "Blocklist" });
+    expect(blocklist.getAttribute("aria-selected")).toBe("true");
+
+    for (const label of [
+      "Requests",
+      "Issues",
+      "Access",
+      "Blocklist",
+      "Users",
+      "System",
+      "Jobs",
+      "Containers",
+    ] as const) {
+      const tab = screen.getByRole("tab", { name: label });
+      expect(tab.querySelector(".admin-tab-badge")).toBeNull();
+    }
+
+    const tablist = screen.getByRole("tablist", { name: "Admin sections" });
+    expect(within(tablist).queryByText(/upstream down/i)).toBeNull();
+    expect(within(tablist).queryByText(/error/i)).toBeNull();
+  });
+
+  it("puts the count into the tab's accessible name, not on the decorative dot", async () => {
+    vi.mocked(fetchBadgeCounts).mockResolvedValue({
+      mine: { requests: 0, issues: 0 },
+      admin: { requests: 4, issues: 0, access: 0 },
+    });
+
+    renderAdmin("blocklist");
+
+    const tab = await screen.findByRole("tab", {
+      name: "Requests, 4 pending",
+    });
+    const dot = tab.querySelector(".admin-tab-badge");
+    expect(dot).not.toBeNull();
+    expect(dot?.getAttribute("aria-hidden")).toBe("true");
+    expect(dot?.textContent).toBe("");
   });
 });
