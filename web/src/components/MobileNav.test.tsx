@@ -4,7 +4,9 @@
 //
 // Viewport control comes from src/test/setup.ts (setViewport). Auth is the
 // real AuthProvider with fetchMe mocked at api/auth — same boundary as
-// AppShell.test.tsx, since AuthContext is not exported.
+// AppShell.test.tsx, since AuthContext is not exported. Badge counts are
+// passed in as props (AppShell owns the /api/me/badge-counts poll); sheet
+// behavior tests keep counts null / zero so exact accessible names stay valid.
 import {
   cleanup,
   fireEvent,
@@ -14,6 +16,7 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { BadgeCounts } from "../api/badgeCounts";
 import { fetchMe, type MeResponse } from "../api/auth";
 import { AuthProvider } from "../auth/AuthContext";
 import { setViewport } from "../test/setup";
@@ -49,14 +52,14 @@ function meResponse(overrides: {
   };
 }
 
-function renderMobileNav(pendingAccessCount: number | null = null) {
+function renderMobileNav(badgeCounts: BadgeCounts | null = null) {
   return render(
     <MemoryRouter initialEntries={["/library"]}>
       <AuthProvider>
         <Routes>
           <Route
             path="*"
-            element={<MobileNav pendingAccessCount={pendingAccessCount} />}
+            element={<MobileNav badgeCounts={badgeCounts} />}
           />
         </Routes>
       </AuthProvider>
@@ -171,16 +174,27 @@ describe("MobileNav", () => {
     expect(document.activeElement).not.toBe(more);
   });
 
-  it("renders the pending badge on More and on Admin in the sheet when pending > 0", async () => {
+  it("badges My Requests on the tab, More as a sheet rollup, and Admin inside the sheet", async () => {
     vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: true }));
-    renderMobileNav(1);
+    renderMobileNav({
+      mine: { requests: 2, issues: 1 },
+      // Distinct non-zero fields so a rollup that drops one still fails.
+      admin: { requests: 2, issues: 3, access: 5 },
+    });
 
-    const more = await screen.findByRole("button", { name: /More/ });
-    within(more).getByLabelText("1 pending access request");
+    const nav = await screen.findByRole("navigation", { name: "Primary" });
+    const requests = within(nav).getByRole("link", { name: /My Requests/ });
+    within(requests).getByLabelText("2 requests in progress");
+
+    // More = mine.issues (1) + admin rollup (10) = 11.
+    const more = within(nav).getByRole("button", { name: /More/ });
+    within(more).getByLabelText("11 items needing attention");
 
     fireEvent.click(more);
     const dialog = await screen.findByRole("dialog");
+    const issues = within(dialog).getByRole("link", { name: /My Issues/ });
+    within(issues).getByLabelText("1 open issue");
     const admin = within(dialog).getByRole("link", { name: /Admin/ });
-    within(admin).getByLabelText("1 pending access request");
+    within(admin).getByLabelText("10 admin items needing attention");
   });
 });

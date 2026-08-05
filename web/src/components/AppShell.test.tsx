@@ -1,5 +1,5 @@
 // Characterization test for AppShell's sidebar nav: which links each role sees,
-// and when the pending-access badge appears on Admin.
+// and when badges appear on My Requests, My Issues, and Admin.
 //
 // This file is the web harness's proof-of-life (vitest + jsdom + Testing
 // Library wired into `npm test -w web`) and the regression net for the mobile
@@ -9,13 +9,15 @@
 // Session state is driven by mocking fetchMe at api/auth (AuthProvider's only
 // network read on mount). AuthContext is not exported, so that boundary is the
 // supported way to put the provider into "authed" without changing production
-// code. The pending-count call and its 60s setInterval are mocked at
-// api/accessRequests so an admin mount cannot leave a live timer that would
-// hang the suite.
+// code. The badge-count call and its 60s setInterval are mocked at
+// api/badgeCounts so any signed-in mount cannot leave a live timer that would
+// hang the suite. Link-inventory and viewport tests keep every count at 0 so
+// exact accessible-name assertions stay valid; badge-specific tests alone use
+// regex names when a badge's aria-label joins the link's accessible name.
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchAccessRequestPendingCount } from "../api/accessRequests";
+import { fetchBadgeCounts, type BadgeCounts } from "../api/badgeCounts";
 import { fetchMe, type MeResponse } from "../api/auth";
 import { AuthProvider } from "../auth/AuthContext";
 import { setViewport } from "../test/setup";
@@ -28,12 +30,16 @@ vi.mock("../api/auth", () => ({
   logoutRequest: vi.fn(),
 }));
 
-// AppShell calls fetchAccessRequestPendingCount on admin mount and again on a
-// 60s interval. The mock both supplies the badge number and avoids a real
-// timer against a live network.
-vi.mock("../api/accessRequests", () => ({
-  fetchAccessRequestPendingCount: vi.fn(),
-}));
+// AppShell calls fetchBadgeCounts on every signed-in mount and again on a 60s
+// interval. Keep the real helpers (adminBadgeRollup) while replacing only the
+// network call so mounts cannot leave a live timer against a live network.
+vi.mock("../api/badgeCounts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/badgeCounts")>();
+  return {
+    ...actual,
+    fetchBadgeCounts: vi.fn(),
+  };
+});
 
 const NON_ADMIN_LABELS = [
   "Library",
@@ -43,6 +49,11 @@ const NON_ADMIN_LABELS = [
   "My Requests",
   "My Issues",
 ] as const;
+
+const ZERO_COUNTS: BadgeCounts = {
+  mine: { requests: 0, issues: 0 },
+  admin: { requests: 0, issues: 0, access: 0 },
+};
 
 function meResponse(overrides: {
   isAdmin: boolean;
@@ -78,16 +89,23 @@ function renderAppShell() {
 describe("AppShell", () => {
   beforeEach(() => {
     vi.mocked(fetchMe).mockReset();
-    vi.mocked(fetchAccessRequestPendingCount).mockReset();
+    vi.mocked(fetchBadgeCounts).mockReset();
+    // Every AppShell mount polls; default to zeros so link-inventory tests keep
+    // exact accessible names and no test leaves an unresolved fetch behind.
+    vi.mocked(fetchBadgeCounts).mockResolvedValue(ZERO_COUNTS);
   });
 
   afterEach(() => {
-    // Unmount clears AppShell's pending-count interval before the next test.
+    // Unmount clears AppShell's badge-count interval before the next test.
     cleanup();
   });
 
   it("shows the six non-admin nav links and hides Admin for a non-admin", async () => {
     vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: false }));
+    vi.mocked(fetchBadgeCounts).mockResolvedValue({
+      mine: { requests: 0, issues: 0 },
+      admin: null,
+    });
 
     renderAppShell();
 
@@ -109,7 +127,6 @@ describe("AppShell", () => {
 
   it("shows Admin in addition to the six non-admin links for an admin", async () => {
     vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: true }));
-    vi.mocked(fetchAccessRequestPendingCount).mockResolvedValue({ pending: 0 });
 
     renderAppShell();
 
@@ -126,18 +143,93 @@ describe("AppShell", () => {
     expect(adminLink).toBe(within(nav).getByRole("link", { name: "Admin" }));
   });
 
-  it("renders the pending-access badge with the count when pending > 0", async () => {
-    // pending: 1 is the boundary the > 0 check must accept. A mutated
-    // threshold of > 1 would hide this badge and fail the find below.
+  it("renders My Requests, My Issues, and Admin badges with the right counts and labels", async () => {
     vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: true }));
-    vi.mocked(fetchAccessRequestPendingCount).mockResolvedValue({ pending: 1 });
+    vi.mocked(fetchBadgeCounts).mockResolvedValue({
+      mine: { requests: 3, issues: 1 },
+      admin: { requests: 2, issues: 3, access: 5 },
+    });
 
     renderAppShell();
 
     await screen.findByText("Test User");
 
-    const badge = await screen.findByLabelText("1 pending access request");
-    expect(badge.textContent).toBe("1");
+    const requestsBadge = await screen.findByLabelText(
+      "3 requests in progress",
+    );
+    expect(requestsBadge.textContent).toBe("3");
+
+    const issuesBadge = screen.getByLabelText("1 open issue");
+    expect(issuesBadge.textContent).toBe("1");
+
+    // 2 + 3 + 5 — a badge that only reflected one of the three fields fails.
+    const adminBadge = screen.getByLabelText(
+      "10 admin items needing attention",
+    );
+    expect(adminBadge.textContent).toBe("10");
+  });
+
+  it("renders no badge when every count is 0", async () => {
+    vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: true }));
+
+    renderAppShell();
+
+    await screen.findByText("Test User");
+    await screen.findByRole("link", { name: "Admin" });
+
+    expect(screen.queryByLabelText(/in progress/)).toBeNull();
+    expect(screen.queryByLabelText(/open issue/)).toBeNull();
+    expect(screen.queryByLabelText(/needing attention/)).toBeNull();
+  });
+
+  it("caps badge text at 99+", async () => {
+    vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: true }));
+    vi.mocked(fetchBadgeCounts).mockResolvedValue({
+      mine: { requests: 100, issues: 0 },
+      admin: { requests: 0, issues: 0, access: 0 },
+    });
+
+    renderAppShell();
+
+    await screen.findByText("Test User");
+    const badge = await screen.findByLabelText("100 requests in progress");
+    expect(badge.textContent).toBe("99+");
+  });
+
+  it("renders no badge and no error text when the badge fetch rejects", async () => {
+    vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: true }));
+    vi.mocked(fetchBadgeCounts).mockRejectedValue(new Error("upstream down"));
+
+    renderAppShell();
+
+    await screen.findByText("Test User");
+    await screen.findByRole("link", { name: "Admin" });
+
+    expect(screen.queryByLabelText(/in progress/)).toBeNull();
+    expect(screen.queryByLabelText(/open issue/)).toBeNull();
+    expect(screen.queryByLabelText(/needing attention/)).toBeNull();
+    expect(screen.queryByText(/upstream down/i)).toBeNull();
+    expect(screen.queryByText(/error/i)).toBeNull();
+  });
+
+  it("badges My Requests and My Issues for a non-admin without an Admin row", async () => {
+    vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: false }));
+    vi.mocked(fetchBadgeCounts).mockResolvedValue({
+      mine: { requests: 2, issues: 4 },
+      admin: null,
+    });
+
+    renderAppShell();
+
+    await screen.findByText("Test User");
+
+    const nav = screen.getByRole("navigation", { name: "Primary" });
+    expect(within(nav).queryByRole("link", { name: /Admin/ })).toBeNull();
+
+    expect(
+      (await screen.findByLabelText("2 requests in progress")).textContent,
+    ).toBe("2");
+    expect(screen.getByLabelText("4 open issues").textContent).toBe("4");
   });
 
   it("renders the sidebar and not the mobile tab bar above 48rem", async () => {

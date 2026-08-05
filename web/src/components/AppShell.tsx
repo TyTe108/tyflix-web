@@ -7,19 +7,65 @@
 // /request-access. Pages come through <Outlet />. Nothing here knows or cares
 // which page is showing.
 //
-// The one piece of live data it owns is the pending access-request count, shown
-// as a badge on the Admin link (desktop) or the More tab / Admin sheet row
-// (mobile). That endpoint is admin-only and can be switched off, so a failure
-// just leaves the badge absent.
+// The one piece of live data it owns is the badge-count poll for My Requests,
+// My Issues, and Admin (a rollup). That endpoint is behind requireAuth and can
+// fail; a failure leaves the last good counts alone and never surfaces an
+// error in the nav.
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { fetchAccessRequestPendingCount } from "../api/accessRequests";
+import {
+  adminBadgeRollup,
+  fetchBadgeCounts,
+  type BadgeCounts,
+} from "../api/badgeCounts";
 import { useAuth } from "../auth/AuthContext";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { MobileNav } from "./MobileNav";
+import { NavBadge } from "./NavBadge";
 import { LogoutIcon, NAV_ITEMS } from "./navItems";
 
-const PENDING_COUNT_POLL_MS = 60_000;
+const BADGE_COUNT_POLL_MS = 60_000;
+
+function badgeForPath(
+  path: string,
+  counts: BadgeCounts | null,
+): { count: number; label: string } | null {
+  if (counts === null) {
+    return null;
+  }
+
+  if (path === "/requests") {
+    const count = counts.mine.requests;
+    return {
+      count,
+      label:
+        count === 1
+          ? "1 request in progress"
+          : `${count} requests in progress`,
+    };
+  }
+
+  if (path === "/issues") {
+    const count = counts.mine.issues;
+    return {
+      count,
+      label: count === 1 ? "1 open issue" : `${count} open issues`,
+    };
+  }
+
+  if (path === "/admin") {
+    const count = adminBadgeRollup(counts.admin);
+    return {
+      count,
+      label:
+        count === 1
+          ? "1 admin item needing attention"
+          : `${count} admin items needing attention`,
+    };
+  }
+
+  return null;
+}
 
 /**
  * Layout route for the whole authenticated app: sidebar or mobile nav, plus an
@@ -31,42 +77,34 @@ const PENDING_COUNT_POLL_MS = 60_000;
 export function AppShell() {
   const { user, isAdmin, logout } = useAuth();
   const isMobile = useIsMobile();
-  const [pendingAccessCount, setPendingAccessCount] = useState<number | null>(
-    null,
-  );
+  const [badgeCounts, setBadgeCounts] = useState<BadgeCounts | null>(null);
 
-  // Poll the pending access-request count for the Admin / More badge, once a
-  // minute for as long as an admin is signed in. Re-runs when the admin flag
-  // changes, which covers a logout landing on a non-admin session.
+  // Poll badge counts for every signed-in user, once a minute. A failed poll
+  // leaves the previous value alone so a blip does not blank the nav.
   useEffect(() => {
-    if (!isAdmin) {
-      setPendingAccessCount(null);
-      return;
-    }
-
     let cancelled = false;
 
     const load = async () => {
       try {
-        const { pending } = await fetchAccessRequestPendingCount();
+        const next = await fetchBadgeCounts();
         if (!cancelled) {
-          setPendingAccessCount(pending);
+          setBadgeCounts(next);
         }
       } catch {
-        // Feature off (404) or transient failure: leave the nav looking normal.
+        // Transient failure: leave the last good counts (or none) alone.
       }
     };
 
     void load();
     const intervalId = window.setInterval(() => {
       void load();
-    }, PENDING_COUNT_POLL_MS);
+    }, BADGE_COUNT_POLL_MS);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [isAdmin]);
+  }, []);
 
   if (isMobile) {
     return (
@@ -74,7 +112,7 @@ export function AppShell() {
         <div className="app-content">
           <Outlet />
         </div>
-        <MobileNav pendingAccessCount={pendingAccessCount} />
+        <MobileNav badgeCounts={badgeCounts} />
       </div>
     );
   }
@@ -91,14 +129,11 @@ export function AppShell() {
           </span>
         </div>
 
-        {/* Primary nav. Admin-only rows are filtered out, and the Admin row
-            carries the pending-request badge when there's anything waiting. */}
+        {/* Primary nav. Admin-only rows are filtered out; Requests, Issues,
+            and Admin carry badges when their counts are above zero. */}
         <nav className="sidebar-nav" aria-label="Primary">
           {NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin).map((item) => {
-            const showBadge =
-              item.to === "/admin" &&
-              pendingAccessCount !== null &&
-              pendingAccessCount > 0;
+            const badge = badgeForPath(item.to, badgeCounts);
             return (
               <NavLink
                 key={item.to}
@@ -110,15 +145,12 @@ export function AppShell() {
               >
                 <span className="sidebar-link-icon">
                   {item.icon}
-                  {showBadge ? (
-                    <span
+                  {badge ? (
+                    <NavBadge
+                      count={badge.count}
+                      label={badge.label}
                       className="sidebar-badge"
-                      aria-label={`${pendingAccessCount} pending access ${
-                        pendingAccessCount === 1 ? "request" : "requests"
-                      }`}
-                    >
-                      {pendingAccessCount > 99 ? "99+" : pendingAccessCount}
-                    </span>
+                    />
                   ) : null}
                 </span>
                 <span className="sidebar-link-label">{item.label}</span>
