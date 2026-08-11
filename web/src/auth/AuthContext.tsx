@@ -2,11 +2,13 @@
 // router's route table, so every page can ask who's signed in without doing its
 // own fetch.
 //
-// The browser never sees a Plex token. All it holds is a signed, httpOnly
-// cookie it can't read from JavaScript, which means the only way this app can
-// answer "who am I" is to ask the server. That's what refresh() does: one call
-// to /api/auth/me, which the server answers straight out of the cookie with no
-// upstream calls at all. Cheap enough to run on every page load.
+// The user's own Plex token transits their browser in memory during login only
+// (see LoginPage + lib/plexOauth.ts), is posted once to the server, and after
+// that the browser holds nothing but a signed httpOnly cookie it can't read
+// from JavaScript. The only way this app can answer "who am I" is to ask the
+// server. That's what refresh() does: one call to /api/auth/me, which the
+// server answers straight out of the cookie with no upstream calls at all.
+// Cheap enough to run on every page load.
 //
 // Status is a three-way, and the third value is the one that matters.
 // "loading" is not a detail to skip past: treating it as anonymous would bounce

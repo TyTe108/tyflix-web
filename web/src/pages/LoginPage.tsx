@@ -2,11 +2,11 @@
 // session. Rendered at /login by App.tsx, outside ProtectedRoute and outside
 // AppShell, so there's no sidebar here.
 //
-// Drives Plex's PIN flow through api/auth.ts: POST /api/auth/plex/start hands
-// back a pinId and a plex.tv auth URL, that URL opens in a popup, and this
-// page polls GET /api/auth/plex/check?pinId until Plex says the PIN was
-// claimed. The server does the token exchange and sets the session cookie;
-// the browser never sees a Plex token. It also reads the public config through
+// Drives Plex's PIN flow in the browser: opens a popup, creates a PIN against
+// plex.tv (so the PIN is born from the user's IP), navigates the popup to
+// Plex's auth page, polls the PIN, then posts the authToken once to
+// POST /api/auth/plex/complete. The server validates membership and sets the
+// session cookie. It also reads the public config through
 // useAccessRequestsEnabled to decide whether to offer the request-access link.
 //
 // The popup is why the app's Cross-Origin-Opener-Policy is loosened. This page
@@ -15,9 +15,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router";
-import { checkPlexLogin, startPlexLogin } from "../api/auth";
+import { completePlexLogin } from "../api/auth";
 import { useAuth } from "../auth/AuthContext";
 import { useAccessRequestsEnabled } from "../hooks/useAccessRequestsEnabled";
+import {
+  buildPlexAuthUrl,
+  checkPlexPin,
+  createPlexPin,
+  getPlexClientId,
+} from "../lib/plexOauth";
 
 const POLL_MS = 2000;
 // Plex PINs are short-lived, so give up after two and a half minutes rather
@@ -77,8 +83,8 @@ export function LoginPage() {
   }
 
   /**
-   * The Sign in button. Mints a PIN, opens Plex in a popup, then polls until
-   * Plex reports it claimed.
+   * The Sign in button. Opens the Plex popup synchronously (to beat blockers),
+   * creates a PIN in this browser, then polls until Plex attaches a token.
    *
    * Starts with stopPolling so a second click can't leave two intervals
    * racing each other.
@@ -88,10 +94,32 @@ export function LoginPage() {
     setPhase("waiting");
     setMessage(null);
 
-    let start;
+    // Popup must open synchronously on the click stack or browsers block it.
+    // about:blank first; we navigate to the real auth URL once the PIN exists.
+    const popup = window.open(
+      "about:blank",
+      "plex-auth",
+      "width=600,height=750,menubar=no,toolbar=no",
+    );
+    if (popup === null) {
+      setPhase("error");
+      setMessage(
+        "Pop-up blocked. Allow pop-ups for this site and try signing in again.",
+      );
+      return;
+    }
+    popupRef.current = popup;
+
+    let clientId: string;
+    let pin: { id: number; code: string };
     try {
-      start = await startPlexLogin();
+      clientId = getPlexClientId();
+      pin = await createPlexPin(clientId);
     } catch (err) {
+      if (popupRef.current && !popupRef.current.closed) {
+        popupRef.current.close();
+      }
+      popupRef.current = null;
       setPhase("error");
       setMessage(
         err instanceof Error ? err.message : "Could not start Plex login.",
@@ -99,36 +127,51 @@ export function LoginPage() {
       return;
     }
 
-    // Popup rather than a redirect, which is what keeps this page alive to do
-    // the polling. A blocked popup isn't handled: the poll still runs and the
-    // user just waits out the timeout.
-    const popup = window.open(
-      start.authUrl,
-      "plex-auth",
-      "width=600,height=750,menubar=no,toolbar=no",
-    );
-    popupRef.current = popup;
+    try {
+      popup.location.href = buildPlexAuthUrl(pin.code, clientId);
+    } catch {
+      // Cross-origin or closed already — polling still proceeds; timeout covers it.
+    }
 
-    // Captured out of `start` so the closure below doesn't hold the whole
-    // response, and so a later beginLogin can't repoint it.
-    const pinId = start.pinId;
+    const pinId = pin.id;
 
-    // Poll the PIN every two seconds. checkPlexLogin never throws, it returns
-    // a discriminated result, so "pending" simply means keep waiting and the
-    // other three kinds all end the flow. On success the session cookie is
-    // already set server-side, so refresh() just re-reads /api/auth/me.
+    // Poll the PIN every two seconds against plex.tv. When a token arrives we
+    // hand it to completePlexLogin once; that call never throws, it returns a
+    // discriminated result. On success the session cookie is already set
+    // server-side, so refresh() just re-reads /api/auth/me.
     pollRef.current = window.setInterval(() => {
       void (async () => {
-        const result = await checkPlexLogin(pinId);
-        if (result.kind === "pending") {
+        let authToken: string | null;
+        try {
+          const pinStatus = await checkPlexPin(pinId, clientId);
+          authToken = pinStatus.authToken;
+        } catch (err) {
+          stopPolling();
+          if (popupRef.current && !popupRef.current.closed) {
+            popupRef.current.close();
+          }
+          popupRef.current = null;
+          setPhase("error");
+          setMessage(
+            err instanceof Error
+              ? err.message
+              : "Plex sign-in failed while checking the PIN.",
+          );
           return;
         }
 
+        if (authToken === null) {
+          return;
+        }
+
+        // Token stays in this function scope only — never storage or globals.
         stopPolling();
         if (popupRef.current && !popupRef.current.closed) {
           popupRef.current.close();
         }
         popupRef.current = null;
+
+        const result = await completePlexLogin(authToken);
 
         if (result.kind === "ok") {
           await refresh();
@@ -143,7 +186,11 @@ export function LoginPage() {
         }
 
         setPhase("error");
-        setMessage(result.message);
+        setMessage(
+          result.kind === "error"
+            ? result.message
+            : "Unexpected response from Plex login.",
+        );
       })();
     }, POLL_MS);
 
@@ -164,11 +211,6 @@ export function LoginPage() {
     <main className="page login">
       <h1>Tyflix</h1>
       <p className="muted">Sign in with your Plex account to continue.</p>
-      <p className="muted">
-        Plex will show a &ldquo;Security Alert&rdquo; pop-up during sign-in.
-        That&rsquo;s expected and not a problem with Tyflix. Just continue and
-        sign in as normal.
-      </p>
 
       {phase === "waiting" ? (
         <p>Waiting for approval…</p>
