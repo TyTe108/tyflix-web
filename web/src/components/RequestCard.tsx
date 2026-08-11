@@ -7,7 +7,7 @@
 //
 // Everything links back to /media/:type/:tmdbId, since a request is keyed by
 // TMDB id whether or not Plex has the title yet.
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import {
   formatRequestDate,
   mediaStatusLabel,

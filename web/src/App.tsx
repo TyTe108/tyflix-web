@@ -37,7 +37,7 @@
 // unmatched to "/" as well. That catch-all sits outside ProtectedRoute, so a
 // stale bookmark from a logged-out browser still ends up at /login.
 
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router";
 import { AppShell } from "./components/AppShell";
 import { AdminRoute, ProtectedRoute } from "./auth/ProtectedRoute";
 import { AdminPage } from "./pages/AdminPage";

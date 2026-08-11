@@ -5,6 +5,9 @@
     "server",
     "web"
   ],
+  "engines": {
+    "node": ">=22.22.0"
+  },
   "scripts": {
     "dev": "concurrently -n server,web -c blue,green \"npm run dev -w server\" \"npm run dev -w web\"",
     "build": "npm run build -w web && npm run build -w server",

@@ -7,7 +7,7 @@
 // These exist so people see the right thing, not so the wrong people can't
 // reach the data.
 
-import { Navigate, Outlet } from "react-router-dom";
+import { Navigate, Outlet } from "react-router";
 import { useAuth } from "./AuthContext";
 
 /**

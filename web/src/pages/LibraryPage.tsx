@@ -22,7 +22,7 @@
 // instead of theirs.
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router";
 import {
   fetchLibraryItems,
   fetchSectionFirstCharacters,

@@ -8,7 +8,7 @@
 //
 // The status corner is where the two id systems meet: TMDB gives the poster,
 // Seerr's media records say whether that TMDB id is on the server.
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import {
   mediaStatusBadgeClass,
   type MediaType,

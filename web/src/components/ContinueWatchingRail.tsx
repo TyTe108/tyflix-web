@@ -9,7 +9,7 @@
 // Renders nothing at all when the list is empty or hasn't loaded, so the
 // Library page doesn't reserve space for a rail that may never appear.
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { libraryImageUrl } from "../api/library";
 import { fetchContinueWatching, type ContinueItem } from "../api/watch";
 
