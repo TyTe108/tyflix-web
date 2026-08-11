@@ -34,6 +34,7 @@ import { requireAdmin, requireAuth } from "./middleware/auth";
 import {
   accessRequestLimiter,
   apiRateLimiter,
+  plexCompleteLimiter,
   staticRateLimiter,
 } from "./middleware/rateLimit";
 import { createPlexClient } from "./plex/client";
@@ -172,6 +173,8 @@ async function start(): Promise<void> {
   // Plex's direct-connection hosts (…plex.direct:32400) the browser streams HLS
   // from — needed for both the manifest fetch (connect-src) and playback (media-src).
   const PLEX_DIRECT_ORIGIN = "https://*.plex.direct:32400";
+  // Browser-side PIN create/poll calls need connect-src access to plex.tv.
+  const PLEX_TV_ORIGIN = "https://plex.tv";
   // Google Cast Application Framework (CAF) web sender SDK + its injected iframe.
   const GSTATIC_ORIGIN = "https://www.gstatic.com";
 
@@ -189,7 +192,12 @@ async function start(): Promise<void> {
           "style-src": ["'self'", "'unsafe-inline'", GOOGLE_FONTS_STYLESHEET_ORIGIN],
           "font-src": ["'self'", GOOGLE_FONTS_FILE_ORIGIN],
           "img-src": ["'self'", "data:", TMDB_IMAGE_ORIGIN, PLEX_DIRECT_ORIGIN],
-          "connect-src": ["'self'", PLEX_DIRECT_ORIGIN, GSTATIC_ORIGIN],
+          "connect-src": [
+            "'self'",
+            PLEX_DIRECT_ORIGIN,
+            PLEX_TV_ORIGIN,
+            GSTATIC_ORIGIN,
+          ],
           "media-src": ["'self'", "blob:", PLEX_DIRECT_ORIGIN],
           "object-src": ["'none'"],
           "base-uri": ["'self'"],
@@ -230,6 +238,7 @@ async function start(): Promise<void> {
       sessionSecret: config.sessionSecret,
       secureCookies,
       sessionRevocation,
+      completeLimiter: plexCompleteLimiter,
     }),
   );
 

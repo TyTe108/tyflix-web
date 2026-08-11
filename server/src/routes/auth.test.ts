@@ -7,7 +7,11 @@ import { beforeEach, describe, it } from "node:test";
 import express from "express";
 import { requireAuth } from "../middleware/auth";
 import { clearPermissionCacheForTests } from "../middleware/revalidatePermissions";
-import type { PlexClient, PlexUser } from "../plex/client";
+import {
+  PlexUpstreamError,
+  type PlexClient,
+  type PlexUser,
+} from "../plex/client";
 import {
   SeerrUpstreamError,
   type SeerrClient,
@@ -61,6 +65,7 @@ function seerrUser(overrides: Partial<SeerrUser> = {}): SeerrUser {
 type Calls = {
   signInTokens: string[];
   getUserPlexIds: number[];
+  getUserTokens: string[];
 };
 
 function buildApp(
@@ -72,13 +77,18 @@ function buildApp(
     sessionRevocation?: SessionRevocationStore;
   } = {},
 ): { app: express.Express; calls: Calls; sessionRevocation: SessionRevocationStore } {
-  const calls: Calls = { signInTokens: [], getUserPlexIds: [] };
+  const calls: Calls = {
+    signInTokens: [],
+    getUserPlexIds: [],
+    getUserTokens: [],
+  };
 
   const plex = {
     async checkPin() {
       return { authToken: "plex-token-abc" };
     },
-    async getUser() {
+    async getUser(authToken: string) {
+      calls.getUserTokens.push(authToken);
       return plexUser();
     },
     ...overrides.plex,
@@ -486,6 +496,184 @@ function cookieHeaderFromSetCookie(setCookie: string): string {
   // Keep only name=value; drop Path/HttpOnly/etc. attributes.
   return setCookie.split(";")[0]!;
 }
+
+describe("POST /api/auth/plex/complete", () => {
+  async function completePlex(
+    app: express.Express,
+    body: unknown,
+    init: { omitContentType?: boolean } = {},
+  ): Promise<Response> {
+    const headers: Record<string, string> = {};
+    if (!init.omitContentType) {
+      headers["content-type"] = "application/json";
+    }
+    return fetchLocal(app, "/api/auth/plex/complete", {
+      method: "POST",
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  }
+
+  it("mints a session and returns the same ok body as /plex/check", async () => {
+    const { app, calls } = buildApp({
+      seerr: {
+        async signInWithPlex(authToken: string) {
+          calls.signInTokens.push(authToken);
+          return seerrUser({ id: 42, plexId: 100, permissions: 0 });
+        },
+      },
+    });
+
+    const response = await completePlex(app, { authToken: "client-token-xyz" });
+
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      status: string;
+      user: {
+        seerrUserId: number;
+        plexId: number;
+        plexUsername: string;
+        displayName: string;
+        email: string | null;
+        avatar: string | null;
+        permissions: number;
+      };
+      isAdmin: boolean;
+    };
+    assert.equal(body.status, "ok");
+    assert.deepEqual(body.user, {
+      seerrUserId: 42,
+      plexId: 100,
+      plexUsername: "alice",
+      displayName: "Alice",
+      email: "a@example.com",
+      avatar: "https://plex/avatar.png",
+      permissions: 0,
+    });
+    assert.equal(body.isAdmin, false);
+    assert.deepEqual(calls.getUserTokens, ["client-token-xyz"]);
+    assert.deepEqual(calls.signInTokens, ["client-token-xyz"]);
+    assert.notEqual(sessionCookieValue(response), null);
+  });
+
+  it("rejects malformed bodies with 400 and never calls upstream", async () => {
+    const cases: Array<{
+      label: string;
+      body: unknown;
+      omitContentType?: boolean;
+    }> = [
+      // No Content-Type -> express.json leaves req.body undefined.
+      { label: "missing body", body: undefined, omitContentType: true },
+      // Arrays parse under express.json strict mode; our handler still rejects.
+      { label: "non-object body", body: [] },
+      { label: "missing authToken", body: {} },
+      { label: "non-string authToken", body: { authToken: 123 } },
+      { label: "empty authToken", body: { authToken: "" } },
+      { label: "whitespace authToken", body: { authToken: "   " } },
+      {
+        label: "authToken longer than 1024",
+        body: { authToken: "x".repeat(1025) },
+      },
+    ];
+
+    for (const { label, body, omitContentType } of cases) {
+      const { app, calls } = buildApp();
+      const response = await completePlex(app, body, { omitContentType });
+      assert.equal(response.status, 400, label);
+      const json = (await response.json()) as { error?: unknown };
+      assert.equal(typeof json.error, "string", label);
+      assert.deepEqual(calls.getUserTokens, [], label);
+      assert.deepEqual(calls.signInTokens, [], label);
+      assert.equal(sessionCookieValue(response), null, label);
+    }
+  });
+
+  it("returns 401 when plex.getUser rejects the token and sets no cookie", async () => {
+    const { app } = buildApp({
+      plex: {
+        async getUser() {
+          throw new PlexUpstreamError("Plex getUser failed (401)", 401);
+        },
+      },
+    });
+
+    const response = await completePlex(app, { authToken: "bad-token" });
+
+    assert.equal(response.status, 401);
+    const body = (await response.json()) as { error?: unknown };
+    assert.equal(typeof body.error, "string");
+    assert.equal(sessionCookieValue(response), null);
+  });
+
+  it("returns 403 when Seerr denies access and sets no cookie", async () => {
+    for (const status of [401, 403, 422] as const) {
+      const { app } = buildApp({
+        seerr: {
+          async signInWithPlex() {
+            throw new SeerrUpstreamError(
+              `Seerr /api/v1/auth/plex failed (${status})`,
+              status,
+            );
+          },
+        },
+      });
+
+      const response = await completePlex(app, { authToken: "valid-looking" });
+
+      assert.equal(response.status, 403, `Seerr ${status}`);
+      assert.deepEqual(await response.json(), {
+        status: "forbidden",
+        message: "Your Plex account isn't a Tyflix member.",
+      });
+      assert.equal(sessionCookieValue(response), null, `Seerr ${status}`);
+    }
+  });
+
+  it("returns 502 for other upstream failures and sets no cookie", async () => {
+    const cases: Array<{
+      label: string;
+      plex?: Partial<PlexClient>;
+      seerr?: Partial<SeerrClient>;
+    }> = [
+      {
+        label: "plex.getUser non-401",
+        plex: {
+          async getUser() {
+            throw new PlexUpstreamError("Plex getUser failed (500)", 500);
+          },
+        },
+      },
+      {
+        label: "Seerr 500",
+        seerr: {
+          async signInWithPlex() {
+            throw new SeerrUpstreamError(
+              "Seerr /api/v1/auth/plex failed (500)",
+              500,
+            );
+          },
+        },
+      },
+      {
+        label: "network throw",
+        plex: {
+          async getUser() {
+            throw new Error("connection refused");
+          },
+        },
+      },
+    ];
+
+    for (const { label, plex, seerr } of cases) {
+      const { app } = buildApp({ plex, seerr });
+      const response = await completePlex(app, { authToken: "valid-looking" });
+      assert.equal(response.status, 502, label);
+      const body = (await response.json()) as { error?: unknown };
+      assert.equal(typeof body.error, "string", label);
+      assert.equal(sessionCookieValue(response), null, label);
+    }
+  });
+});
 
 describe("POST /api/auth/logout", () => {
   it("returns 200 {ok:true} even when there is no session", async () => {

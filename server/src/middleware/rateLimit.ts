@@ -1,6 +1,7 @@
-// The two rate limiters, both mounted in index.ts. apiRateLimiter covers the
-// whole /api surface. accessRequestLimiter stacks on top of it for the one
-// public write endpoint, /api/access-requests.
+// Rate limiters mounted in index.ts. apiRateLimiter covers the whole /api
+// surface. accessRequestLimiter and plexCompleteLimiter stack on top of it for
+// the unauthenticated write endpoints (/api/access-requests and
+// /api/auth/plex/complete).
 //
 // Everything here is in-process memory, which is fine for a single container
 // and would need a shared store the moment there's a second one. Counters reset
@@ -62,14 +63,30 @@ const ACCESS_REQUEST_MAX = 5;
  * Limiter for the public access-request form, stacked on top of apiRateLimiter
  * at that mount so both budgets apply.
  *
- * This is the only unauthenticated write endpoint in the app (the /api/auth
- * routes, /api/config and /healthz are anonymous too, but none of them create
- * anything), which makes it the one worth abusing. Paired with a honeypot field
- * in the router, it takes the place of a CAPTCHA.
+ * Unauthenticated write endpoint (alongside /api/auth/plex/complete). Paired
+ * with a honeypot field in the router, it takes the place of a CAPTCHA.
  */
 export const accessRequestLimiter = rateLimit({
   windowMs: ACCESS_REQUEST_WINDOW_MS,
   limit: ACCESS_REQUEST_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: clientIpKey,
+  message: { error: "Too many requests, please try again later." },
+});
+
+// Browser-completed Plex login: 20/15min/IP. Tighter than apiRateLimiter —
+// each hit fans out to plex.tv and Seerr and can mint a session.
+const PLEX_COMPLETE_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const PLEX_COMPLETE_MAX = 20;
+
+/**
+ * Limiter for POST /api/auth/plex/complete. Injected into createAuthRouter as
+ * completeLimiter (tests omit it so the suite never trips 429s).
+ */
+export const plexCompleteLimiter = rateLimit({
+  windowMs: PLEX_COMPLETE_WINDOW_MS,
+  limit: PLEX_COMPLETE_MAX,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: clientIpKey,

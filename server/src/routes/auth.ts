@@ -1,5 +1,5 @@
-// Login. Mounted at /api/auth with four endpoints: POST /plex/start,
-// GET /plex/check, GET /me and POST /logout.
+// Login. Mounted at /api/auth with five endpoints: POST /plex/start,
+// GET /plex/check, POST /plex/complete, GET /me and POST /logout.
 //
 // Public by necessity. This is the surface that creates a session, so it can't
 // sit behind requireAuth. GET /me reads and verifies the cookie itself instead
@@ -12,11 +12,16 @@
 // upstreams: Plex for the PIN and the account, Seerr to confirm the account is
 // actually a member and to pull permissions.
 //
-// The Plex token that comes back never reaches the browser. issueSession
+// POST /plex/complete exists for the browser-side handshake cutover: the SPA
+// creates and polls the PIN itself, then posts the resulting authToken here.
+// /plex/start and /plex/check stay until that cutover lands.
+//
+// The Plex token that comes back never reaches the browser via /plex/check.
+// /plex/complete accepts a token the browser already holds. issueSession
 // encrypts it into the signed httpOnly cookie, and only server code ever
-// decrypts it.
+// decrypts it afterward.
 
-import { Router } from "express";
+import { Router, type RequestHandler, type Response } from "express";
 import { revalidateSessionPermissions } from "../middleware/revalidatePermissions";
 import { PlexUpstreamError, type PlexClient } from "../plex/client";
 import {
@@ -32,6 +37,10 @@ import {
   readSession,
 } from "../session";
 
+// Upper bound on a client-supplied Plex auth token. Real tokens are far
+// shorter; this only stops oversized request bodies from reaching upstream.
+const MAX_AUTH_TOKEN_LENGTH = 1024;
+
 export type AuthRouterDeps = {
   plex: PlexClient;
   seerr: SeerrClient;
@@ -39,10 +48,20 @@ export type AuthRouterDeps = {
   // False in development so the cookie survives plain http://localhost.
   secureCookies: boolean;
   sessionRevocation: SessionRevocationStore;
+  // Optional; production mounts plexCompleteLimiter. Tests omit it so the
+  // suite never trips 429s.
+  completeLimiter?: RequestHandler;
 };
 
 export function createAuthRouter(deps: AuthRouterDeps): Router {
-  const { plex, seerr, sessionSecret, secureCookies, sessionRevocation } = deps;
+  const {
+    plex,
+    seerr,
+    sessionSecret,
+    secureCookies,
+    sessionRevocation,
+    completeLimiter,
+  } = deps;
   const router = Router();
 
   /**
@@ -101,76 +120,69 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         return;
       }
 
-      const plexUser = await plex.getUser(authToken);
-
-      // Sign the user into Seerr via its own Plex sign-in. This onboards a
-      // brand-new Plex-server member and refreshes an existing user's stored
-      // Plex token so Watchlist auto-request works. Seerr rejects anyone
-      // without Plex-server access (401/403/422), which stays a 403 for us.
-      let signedInUser: SeerrUser | null;
-      try {
-        signedInUser = await seerr.signInWithPlex(authToken);
-      } catch (err) {
-        if (
-          err instanceof SeerrUpstreamError &&
-          isSeerrAccessDenied(err.status)
-        ) {
-          res.status(403).json({
-            status: "forbidden",
-            message: "Your Plex account isn't a Tyflix member.",
-          });
-          return;
-        }
-        throw err;
-      }
-
-      // Seerr's sign-in response omits plexId, so resolve the authoritative
-      // user record (which carries plexId + permissions) when needed.
-      const seerrUser =
-        signedInUser ?? (await seerr.getUserByPlexId(plexUser.id));
-
-      if (seerrUser === null) {
-        res.status(403).json({
-          status: "forbidden",
-          message: "Your Plex account isn't a Tyflix member.",
-        });
-        return;
-      }
-
-      // Membership is settled, so mint the session. The raw Plex auth token
-      // goes in here and gets encrypted inside the cookie; the response below
-      // deliberately carries identity fields only.
-      issueSession(
-        res,
-        {
-          seerrUserId: seerrUser.id,
-          plexId: seerrUser.plexId,
-          plexUsername: seerrUser.plexUsername,
-          displayName: seerrUser.displayName,
-          avatar: plexUser.thumb,
-          permissions: seerrUser.permissions,
-          plexToken: authToken,
-        },
-        { secret: sessionSecret, secure: secureCookies },
-      );
-
-      res.json({
-        status: "ok",
-        user: {
-          seerrUserId: seerrUser.id,
-          plexId: seerrUser.plexId,
-          plexUsername: seerrUser.plexUsername,
-          displayName: seerrUser.displayName,
-          email: seerrUser.email,
-          avatar: plexUser.thumb,
-          permissions: seerrUser.permissions,
-        },
-        isAdmin: isAdmin(seerrUser.permissions),
+      await establishSessionFromPlexToken(res, authToken, {
+        plex,
+        seerr,
+        sessionSecret,
+        secureCookies,
       });
     } catch (err) {
       respondUpstreamError(res, err);
     }
   });
+
+  /**
+   * POST /api/auth/plex/complete
+   *
+   * Accepts a Plex authToken the browser obtained itself (PIN create + poll
+   * against plex.tv) and finishes the same membership check + session mint as
+   * /plex/check. Body: `{ authToken: string }`.
+   *
+   * 200 `{ status: "ok", user, isAdmin }` plus the session cookie on success.
+   * 400 for a missing/non-object body or a missing/non-string/empty/whitespace/
+   * overlong authToken (no upstream call). 401 when plex.tv rejects the token.
+   * 403 `{ status: "forbidden" }` when the account isn't a Tyflix member.
+   * 502 for any other upstream failure. A 4xx issues no cookie.
+   */
+  const completeHandlers: RequestHandler[] = [];
+  if (completeLimiter !== undefined) {
+    completeHandlers.push(completeLimiter);
+  }
+  completeHandlers.push(async (req, res) => {
+    const body = req.body;
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      res.status(400).json({ error: "authToken is required" });
+      return;
+    }
+
+    const authToken = (body as { authToken?: unknown }).authToken;
+    if (typeof authToken !== "string" || authToken.trim() === "") {
+      res.status(400).json({ error: "authToken is required" });
+      return;
+    }
+    if (authToken.length > MAX_AUTH_TOKEN_LENGTH) {
+      res.status(400).json({ error: "authToken is too long" });
+      return;
+    }
+
+    try {
+      await establishSessionFromPlexToken(res, authToken, {
+        plex,
+        seerr,
+        sessionSecret,
+        secureCookies,
+      });
+    } catch (err) {
+      // Client-supplied token: a plex.tv 401 is an expected input error, not an
+      // upstream outage, so it must not fall into the 502 path.
+      if (err instanceof PlexUpstreamError && err.status === 401) {
+        res.status(401).json({ error: "invalid authToken" });
+        return;
+      }
+      respondUpstreamError(res, err);
+    }
+  });
+  router.post("/plex/complete", ...completeHandlers);
 
   /**
    * GET /api/auth/me
@@ -239,6 +251,87 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   });
 
   return router;
+}
+
+// Shared by /plex/check (once a PIN yields a token) and /plex/complete (token
+// already in hand): validate with plex.getUser, confirm membership via Seerr,
+// mint the session cookie, and write the ok body. Callers own the outer
+// try/catch so /plex/complete can map a plex.tv 401 to 401 instead of 502.
+async function establishSessionFromPlexToken(
+  res: Response,
+  authToken: string,
+  deps: {
+    plex: PlexClient;
+    seerr: SeerrClient;
+    sessionSecret: string;
+    secureCookies: boolean;
+  },
+): Promise<void> {
+  const { plex, seerr, sessionSecret, secureCookies } = deps;
+
+  const plexUser = await plex.getUser(authToken);
+
+  // Sign the user into Seerr via its own Plex sign-in. This onboards a
+  // brand-new Plex-server member and refreshes an existing user's stored
+  // Plex token so Watchlist auto-request works. Seerr rejects anyone
+  // without Plex-server access (401/403/422), which stays a 403 for us.
+  let signedInUser: SeerrUser | null;
+  try {
+    signedInUser = await seerr.signInWithPlex(authToken);
+  } catch (err) {
+    if (err instanceof SeerrUpstreamError && isSeerrAccessDenied(err.status)) {
+      res.status(403).json({
+        status: "forbidden",
+        message: "Your Plex account isn't a Tyflix member.",
+      });
+      return;
+    }
+    throw err;
+  }
+
+  // Seerr's sign-in response omits plexId, so resolve the authoritative
+  // user record (which carries plexId + permissions) when needed.
+  const seerrUser =
+    signedInUser ?? (await seerr.getUserByPlexId(plexUser.id));
+
+  if (seerrUser === null) {
+    res.status(403).json({
+      status: "forbidden",
+      message: "Your Plex account isn't a Tyflix member.",
+    });
+    return;
+  }
+
+  // Membership is settled, so mint the session. The raw Plex auth token
+  // goes in here and gets encrypted inside the cookie; the response below
+  // deliberately carries identity fields only.
+  issueSession(
+    res,
+    {
+      seerrUserId: seerrUser.id,
+      plexId: seerrUser.plexId,
+      plexUsername: seerrUser.plexUsername,
+      displayName: seerrUser.displayName,
+      avatar: plexUser.thumb,
+      permissions: seerrUser.permissions,
+      plexToken: authToken,
+    },
+    { secret: sessionSecret, secure: secureCookies },
+  );
+
+  res.json({
+    status: "ok",
+    user: {
+      seerrUserId: seerrUser.id,
+      plexId: seerrUser.plexId,
+      plexUsername: seerrUser.plexUsername,
+      displayName: seerrUser.displayName,
+      email: seerrUser.email,
+      avatar: plexUser.thumb,
+      permissions: seerrUser.permissions,
+    },
+    isAdmin: isAdmin(seerrUser.permissions),
+  });
 }
 
 // Splits "you're not a member" from "Seerr is broken". The first is a normal
