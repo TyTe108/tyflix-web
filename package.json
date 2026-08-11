@@ -15,6 +15,6 @@
     "test": "npm test -w web && npm test -w server"
   },
   "devDependencies": {
-    "concurrently": "9.2.1"
+    "concurrently": "9.2.4"
   }
 }
