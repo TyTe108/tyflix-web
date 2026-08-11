@@ -18,7 +18,7 @@
 // surfaces here as the rateLimited branch.
 
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { submitAccessRequest } from "../api/accessRequests";
 import { useAccessRequestsEnabled } from "../hooks/useAccessRequestsEnabled";
 

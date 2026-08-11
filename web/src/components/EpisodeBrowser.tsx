@@ -10,7 +10,7 @@
 // falls over, shows an error with a Retry button and leaves the rest of the
 // detail page alone.
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { fetchEpisodes, type Episode } from "../api/watch";
 
 type LoadStatus = "loading" | "ready" | "error";

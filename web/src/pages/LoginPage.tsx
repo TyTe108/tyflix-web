@@ -14,7 +14,7 @@
 // and a strict COOP would sever that handle.
 
 import { useEffect, useRef, useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router";
 import { checkPlexLogin, startPlexLogin } from "../api/auth";
 import { useAuth } from "../auth/AuthContext";
 import { useAccessRequestsEnabled } from "../hooks/useAccessRequestsEnabled";

@@ -15,7 +15,7 @@
 // exact accessible-name assertions stay valid; badge-specific tests alone use
 // regex names when a badge's aria-label joins the link's accessible name.
 import { cleanup, render, screen, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchBadgeCounts, type BadgeCounts } from "../api/badgeCounts";
 import { fetchMe, type MeResponse } from "../api/auth";

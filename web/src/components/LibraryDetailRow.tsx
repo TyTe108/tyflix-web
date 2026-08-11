@@ -7,7 +7,7 @@
 //
 // A row isn't always a link. Plex items with no TMDB id and no direct play
 // route (shows, mostly) render as plain text instead.
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { formatRuntime } from "../api/discover";
 import {
   libraryImageUrl,

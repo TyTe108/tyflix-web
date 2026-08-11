@@ -8,7 +8,7 @@
 // see everyone's issues on the admin page instead, off /api/issues/all.
 
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import {
   fetchMyIssues,
   formatIssueDate,

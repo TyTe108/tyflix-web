@@ -8,7 +8,7 @@
 // here when a movie belongs to a collection.
 
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router";
 import {
   fetchCollection,
   type CollectionDetail,

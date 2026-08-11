@@ -12,7 +12,7 @@
 // fail; a failure leaves the last good counts alone and never surfaces an
 // error in the nav.
 import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet } from "react-router";
 import {
   adminBadgeRollup,
   fetchBadgeCounts,

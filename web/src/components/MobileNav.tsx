@@ -10,7 +10,7 @@
 // The More overlay is the shared BottomSheet so Library filters (and later
 // Dropdown) get the same scrim / Escape / focus behaviour.
 import { useCallback, useRef, useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink } from "react-router";
 import {
   adminBadgeRollup,
   type BadgeCounts,

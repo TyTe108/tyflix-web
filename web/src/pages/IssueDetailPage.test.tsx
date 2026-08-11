@@ -2,7 +2,7 @@
 // direct load with no router state. Auth is the real AuthProvider with fetchMe
 // mocked at api/auth — same boundary as MediaDetailPage.test.tsx.
 import { cleanup, render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchMe } from "../api/auth";
 import { fetchIssue, type IssueView } from "../api/issues";

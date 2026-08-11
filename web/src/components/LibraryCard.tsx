@@ -8,7 +8,7 @@
 //
 // MediaCard is the equivalent for TMDB discovery results. This one is for
 // things that are already on the server.
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import {
   libraryImageUrl,
   libraryItemTarget,

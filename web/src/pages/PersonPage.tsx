@@ -8,7 +8,7 @@
 // status corners as Discover. MediaDetailPage's cast and crew rows link in.
 
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router";
 import {
   fetchPerson,
   type MediaSummary,
