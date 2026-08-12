@@ -6,7 +6,6 @@ const validEnv = {
   PORT: "4000",
   NODE_ENV: "production",
   PLEX_CLIENT_ID: "plex-client-id",
-  PLEX_PRODUCT: "CustomProduct",
   PLEX_BASEURL: "http://plex:32400",
   PLEX_TOKEN: "plex-token",
   SESSION_SECRET: "sixteen-chars!!!",
@@ -26,7 +25,6 @@ describe("loadConfig", () => {
       port: 4000,
       nodeEnv: "production",
       plexClientId: "plex-client-id",
-      plexProduct: "CustomProduct",
       plexBaseUrl: "http://plex:32400",
       plexToken: "plex-token",
       sessionSecret: "sixteen-chars!!!",
@@ -152,10 +150,9 @@ describe("loadConfig", () => {
     );
   });
 
-  it('defaults PLEX_PRODUCT to "Tyflix" and NODE_ENV to "development"', () => {
-    const { PLEX_PRODUCT: _p, NODE_ENV: _n, ...rest } = validEnv;
+  it('defaults NODE_ENV to "development"', () => {
+    const { NODE_ENV: _n, ...rest } = validEnv;
     const config = loadConfig(rest);
-    assert.equal(config.plexProduct, "Tyflix");
     assert.equal(config.nodeEnv, "development");
   });
 

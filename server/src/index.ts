@@ -107,14 +107,14 @@ async function start(): Promise<void> {
   const secureCookies = config.nodeEnv === "production";
 
   // Five Plex-facing clients, split by which credential each one carries.
-  // `plex` talks to plex.tv with no token, since it's what drives the PIN
-  // sign-in flow. The next three hold the owner token from config. The
-  // transient minter holds no token either; callers pass the user's own token
-  // per call and get a short-lived one back. A sixth, the sharing client, gets
-  // built further down and only when access requests are turned on.
+  // `plex` talks to plex.tv with no owner token: getUser validates the
+  // browser-posted authToken during /plex/complete. The next three hold the
+  // owner token from config. The transient minter holds no token either;
+  // callers pass the user's own token per call and get a short-lived one back.
+  // A sixth, the sharing client, gets built further down and only when access
+  // requests are turned on.
   const plex = createPlexClient({
     clientId: config.plexClientId,
-    product: config.plexProduct,
   });
 
   const plexServer = createPlexServerClient({
@@ -228,8 +228,8 @@ async function start(): Promise<void> {
   // upstream. See middleware/rateLimit.ts for why the key isn't req.ip.
   app.use("/api", apiRateLimiter);
 
-  // Unauthenticated by definition: this router runs the Plex PIN handshake and
-  // is what mints the session cookie in the first place.
+  // Unauthenticated by definition: this router accepts the browser-completed
+  // Plex hand-off and is what mints the session cookie in the first place.
   app.use(
     "/api/auth",
     createAuthRouter({

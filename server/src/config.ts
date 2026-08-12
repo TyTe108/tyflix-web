@@ -5,10 +5,10 @@
 //
 // The shape is one small parseX function per variable. Each either returns a
 // clean value or throws with the variable's name in the message, so the log
-// line at boot tells you exactly which one to fix. Three variables have
-// defaults (PORT, NODE_ENV, PLEX_PRODUCT) and only ACCESS_REQUESTS_FILE is
-// genuinely optional. Everything else is required, because every one of them is
-// a credential, an upstream address, or core auth infrastructure the app can't
+// line at boot tells you exactly which one to fix. Two variables have
+// defaults (PORT, NODE_ENV) and only ACCESS_REQUESTS_FILE is genuinely
+// optional. Everything else is required, because every one of them is a
+// credential, an upstream address, or core auth infrastructure the app can't
 // work without.
 //
 // loadConfig takes the env as a parameter defaulting to process.env, which is
@@ -28,7 +28,6 @@ export type AppConfig = {
   // X-Plex-Client-Identifier, sent on every Plex call. It's how Plex identifies
   // this client, so it needs to stay stable across restarts.
   plexClientId: string;
-  plexProduct: string; // X-Plex-Product, defaults to "Tyflix"
   plexBaseUrl: string; // LAN address of the PMS, no trailing slash
   // Owner token. Used for server-wide reads and for resolving other users'
   // per-server tokens, never handed to a browser.
@@ -116,15 +115,6 @@ function parseNodeEnv(
 // Required, with no format check past non-empty.
 function parsePlexClientId(raw: string | undefined): string {
   return validate("PLEX_CLIENT_ID", raw, () => null);
-}
-
-// The product name this client reports to Plex. Defaults to "Tyflix" and
-// there's rarely a reason to override it.
-function parsePlexProduct(raw: string | undefined): string {
-  if (raw === undefined || raw.trim() === "") {
-    return "Tyflix";
-  }
-  return validate("PLEX_PRODUCT", raw, () => null);
 }
 
 // 16 characters is a floor, not a recommendation. This one secret both signs
@@ -225,7 +215,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     port: parsePort(env.PORT),
     nodeEnv: parseNodeEnv(env.NODE_ENV),
     plexClientId: parsePlexClientId(env.PLEX_CLIENT_ID),
-    plexProduct: parsePlexProduct(env.PLEX_PRODUCT),
     plexBaseUrl: parsePlexBaseUrl(env.PLEX_BASEURL),
     plexToken: parsePlexToken(env.PLEX_TOKEN),
     sessionSecret: parseSessionSecret(env.SESSION_SECRET),

@@ -1,25 +1,18 @@
-// Login. Mounted at /api/auth with five endpoints: POST /plex/start,
-// GET /plex/check, POST /plex/complete, GET /me and POST /logout.
+// Login. Mounted at /api/auth with three endpoints: POST /plex/complete,
+// GET /me and POST /logout.
 //
 // Public by necessity. This is the surface that creates a session, so it can't
 // sit behind requireAuth. GET /me reads and verifies the cookie itself instead
 // of relying on middleware (and then revalidates permissions via the same
 // helper requireAuth uses), which is why it lives here rather than in me.ts.
 //
-// The flow is Plex's PIN handshake, the same one their own apps use. We ask
-// plex.tv for a PIN, the browser opens Plex's auth page in a popup, and the SPA
-// polls /plex/check until Plex attaches an auth token to that PIN. Two
-// upstreams: Plex for the PIN and the account, Seerr to confirm the account is
-// actually a member and to pull permissions.
-//
-// POST /plex/complete exists for the browser-side handshake cutover: the SPA
-// creates and polls the PIN itself, then posts the resulting authToken here.
-// /plex/start and /plex/check stay until that cutover lands.
-//
-// The Plex token that comes back never reaches the browser via /plex/check.
-// /plex/complete accepts a token the browser already holds. issueSession
-// encrypts it into the signed httpOnly cookie, and only server code ever
-// decrypts it afterward.
+// Sign-in is a one-shot hand-off. The browser runs Plex's PIN handshake against
+// plex.tv itself, then POSTs the resulting authToken to /plex/complete. We
+// validate it with plex.getUser, confirm membership via Seerr, and mint the
+// session cookie. The token transits the browser in memory during that
+// handshake only; afterward the browser holds nothing but the httpOnly cookie.
+// issueSession encrypts the token into the cookie, and only server code ever
+// decrypts it.
 
 import { Router, type RequestHandler, type Response } from "express";
 import { revalidateSessionPermissions } from "../middleware/revalidatePermissions";
@@ -65,78 +58,11 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   const router = Router();
 
   /**
-   * POST /api/auth/plex/start
-   *
-   * Opens the PIN handshake. Returns `{ pinId, code, authUrl }`; the SPA sends
-   * the browser to authUrl in a popup and then polls /plex/check with pinId.
-   * Reads no params. 502 if plex.tv won't hand out a PIN.
-   */
-  router.post("/plex/start", async (_req, res) => {
-    try {
-      const pin = await plex.createPin();
-      const authUrl = plex.buildAuthUrl(pin.code);
-      res.json({
-        pinId: pin.id,
-        code: pin.code,
-        authUrl,
-      });
-    } catch (err) {
-      respondUpstreamError(res, err);
-    }
-  });
-
-  /**
-   * GET /api/auth/plex/check?pinId=<id>
-   *
-   * The polling half of the login. While the user hasn't finished on Plex's
-   * side this answers 200 `{ status: "pending" }` and touches nothing else.
-   * Once Plex attaches a token it sets the session cookie and returns
-   * `{ status: "ok", user, isAdmin }`.
-   *
-   * 400 for a missing or non-numeric pinId, 403 `{ status: "forbidden" }` when
-   * the Plex account isn't a member of this server, 502 for any other upstream
-   * failure. A 403 issues no cookie.
-   *
-   * Polling means this runs repeatedly for one login, so the pending path
-   * deliberately stops before any Seerr work.
-   */
-  router.get("/plex/check", async (req, res) => {
-    const pinIdRaw = req.query.pinId;
-    if (typeof pinIdRaw !== "string" || pinIdRaw.trim() === "") {
-      res.status(400).json({ error: "pinId is required" });
-      return;
-    }
-    if (!/^\d+$/.test(pinIdRaw)) {
-      res.status(400).json({ error: "pinId must be numeric" });
-      return;
-    }
-
-    const pinId = Number(pinIdRaw);
-
-    try {
-      const { authToken } = await plex.checkPin(pinId);
-      if (authToken === null) {
-        res.json({ status: "pending" });
-        return;
-      }
-
-      await establishSessionFromPlexToken(res, authToken, {
-        plex,
-        seerr,
-        sessionSecret,
-        secureCookies,
-      });
-    } catch (err) {
-      respondUpstreamError(res, err);
-    }
-  });
-
-  /**
    * POST /api/auth/plex/complete
    *
    * Accepts a Plex authToken the browser obtained itself (PIN create + poll
-   * against plex.tv) and finishes the same membership check + session mint as
-   * /plex/check. Body: `{ authToken: string }`.
+   * against plex.tv) and runs membership check + session mint. Body:
+   * `{ authToken: string }`.
    *
    * 200 `{ status: "ok", user, isAdmin }` plus the session cookie on success.
    * 400 for a missing/non-object body or a missing/non-string/empty/whitespace/
@@ -194,7 +120,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
    * 503 when Seerr is unreachable.
    *
    * Note the `user` block leaves out email: that only comes back from
-   * /plex/check, since the session doesn't carry it. The cookie is not
+   * /plex/complete, since the session doesn't carry it. The cookie is not
    * rewritten — fresh permissions are response-only.
    */
   router.get("/me", async (req, res) => {
@@ -253,10 +179,9 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   return router;
 }
 
-// Shared by /plex/check (once a PIN yields a token) and /plex/complete (token
-// already in hand): validate with plex.getUser, confirm membership via Seerr,
-// mint the session cookie, and write the ok body. Callers own the outer
-// try/catch so /plex/complete can map a plex.tv 401 to 401 instead of 502.
+// /plex/complete: validate with plex.getUser, confirm membership via Seerr,
+// mint the session cookie, and write the ok body. The route owns the outer
+// try/catch so it can map a plex.tv 401 to 401 instead of 502.
 async function establishSessionFromPlexToken(
   res: Response,
   authToken: string,
