@@ -1,6 +1,7 @@
 // The persistent chrome around every signed-in page: sidebar on the left on
-// desktop, bottom tab bar on viewports below 48rem, and the routed page in the
-// remaining space.
+// desktop, bottom tab bar on viewports below 48rem, and the routed page in a
+// stable middle slot so rotating a phone across the breakpoint does not
+// remount the page inside.
 //
 // App.tsx mounts this as a layout route nested inside ProtectedRoute, so it
 // wraps everything from /library through /admin and never renders for /login or
@@ -106,83 +107,79 @@ export function AppShell() {
     };
   }, []);
 
-  if (isMobile) {
-    return (
-      <div className="app-shell app-shell--mobile">
-        <div className="app-content">
-          <Outlet />
-        </div>
-        <MobileNav badgeCounts={badgeCounts} />
-      </div>
-    );
-  }
-
+  // One tree, stable child indexes: sidebar | content | mobile nav. React
+  // reconciles by index, so swapping a two-branch layout would remount
+  // <Outlet /> and take the player's fullscreen element and <video> with it.
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        {/* Both brand marks are always in the DOM. A media query at 820px
-            narrows the sidebar to a 64px rail and swaps the word for the T. */}
-        <div className="sidebar-brand">
-          <span className="sidebar-brand-full">Tyflix</span>
-          <span className="sidebar-brand-short" aria-hidden="true">
-            T
-          </span>
-        </div>
+    <div className={isMobile ? "app-shell app-shell--mobile" : "app-shell"}>
+      {isMobile ? null : (
+        <aside className="sidebar">
+          {/* Both brand marks are always in the DOM. A media query at 820px
+              narrows the sidebar to a 64px rail and swaps the word for the T. */}
+          <div className="sidebar-brand">
+            <span className="sidebar-brand-full">Tyflix</span>
+            <span className="sidebar-brand-short" aria-hidden="true">
+              T
+            </span>
+          </div>
 
-        {/* Primary nav. Admin-only rows are filtered out; Requests, Issues,
-            and Admin carry badges when their counts are above zero. */}
-        <nav className="sidebar-nav" aria-label="Primary">
-          {NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin).map((item) => {
-            const badge = badgeForPath(item.to, badgeCounts);
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) =>
-                  isActive ? "sidebar-link active" : "sidebar-link"
-                }
-              >
-                <span className="sidebar-link-icon">
-                  {item.icon}
-                  {badge ? (
-                    <NavBadge
-                      count={badge.count}
-                      label={badge.label}
-                      className="sidebar-badge"
-                    />
-                  ) : null}
-                </span>
-                <span className="sidebar-link-label">{item.label}</span>
-              </NavLink>
-            );
-          })}
-        </nav>
+          {/* Primary nav. Admin-only rows are filtered out; Requests, Issues,
+              and Admin carry badges when their counts are above zero. */}
+          <nav className="sidebar-nav" aria-label="Primary">
+            {NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin).map((item) => {
+              const badge = badgeForPath(item.to, badgeCounts);
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) =>
+                    isActive ? "sidebar-link active" : "sidebar-link"
+                  }
+                >
+                  <span className="sidebar-link-icon">
+                    {item.icon}
+                    {badge ? (
+                      <NavBadge
+                        count={badge.count}
+                        label={badge.label}
+                        className="sidebar-badge"
+                      />
+                    ) : null}
+                  </span>
+                  <span className="sidebar-link-label">{item.label}</span>
+                </NavLink>
+              );
+            })}
+          </nav>
 
-        {/* Footer: who's signed in, plus the way out. */}
-        <div className="sidebar-footer">
-          {user ? (
-            <div className="sidebar-user">
-              <span className="sidebar-user-name">{user.displayName}</span>
-              {isAdmin ? (
-                <span className="sidebar-admin-chip">admin</span>
-              ) : null}
-            </div>
-          ) : null}
-          <button
-            type="button"
-            className="sidebar-logout"
-            onClick={() => void logout()}
-          >
-            <span className="sidebar-link-icon">{LogoutIcon}</span>
-            <span className="sidebar-link-label">Logout</span>
-          </button>
-        </div>
-      </aside>
+          {/* Footer: who's signed in, plus the way out. */}
+          <div className="sidebar-footer">
+            {user ? (
+              <div className="sidebar-user">
+                <span className="sidebar-user-name">{user.displayName}</span>
+                {isAdmin ? (
+                  <span className="sidebar-admin-chip">admin</span>
+                ) : null}
+              </div>
+            ) : null}
+            <button
+              type="button"
+              className="sidebar-logout"
+              onClick={() => void logout()}
+            >
+              <span className="sidebar-link-icon">{LogoutIcon}</span>
+              <span className="sidebar-link-label">Logout</span>
+            </button>
+          </div>
+        </aside>
+      )}
 
       <div className="app-content">
         <Outlet />
       </div>
+
+      {isMobile ? <MobileNav badgeCounts={badgeCounts} /> : null}
     </div>
   );
 }

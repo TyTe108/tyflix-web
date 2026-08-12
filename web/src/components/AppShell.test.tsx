@@ -14,7 +14,8 @@
 // hang the suite. Link-inventory and viewport tests keep every count at 0 so
 // exact accessible-name assertions stay valid; badge-specific tests alone use
 // regex names when a badge's aria-label joins the link's accessible name.
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { useEffect } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchBadgeCounts, type BadgeCounts } from "../api/badgeCounts";
@@ -274,5 +275,65 @@ describe("AppShell", () => {
     setViewport("desktop");
     await screen.findByRole("complementary");
     expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+  });
+});
+
+// Module-level so a remount increments past 1; reset in beforeEach.
+let outletMountCount = 0;
+
+function OutletMountProbe() {
+  useEffect(() => {
+    outletMountCount += 1;
+  }, []);
+  return <video data-testid="outlet-probe-video" />;
+}
+
+describe("AppShell outlet identity across breakpoint", () => {
+  beforeEach(() => {
+    outletMountCount = 0;
+    vi.mocked(fetchMe).mockReset();
+    vi.mocked(fetchBadgeCounts).mockReset();
+    vi.mocked(fetchBadgeCounts).mockResolvedValue(ZERO_COUNTS);
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("keeps the routed page mounted when the viewport crosses 48rem either way", async () => {
+    setViewport("desktop");
+    vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: false }));
+
+    render(
+      <MemoryRouter initialEntries={["/library"]}>
+        <AuthProvider>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/library" element={<OutletMountProbe />} />
+            </Route>
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("Test User");
+    const videoBefore = screen.getByTestId("outlet-probe-video");
+    expect(outletMountCount).toBe(1);
+
+    act(() => {
+      setViewport("mobile");
+    });
+    await screen.findByRole("button", { name: "More" });
+    expect(screen.queryByRole("complementary")).toBeNull();
+    expect(screen.getByTestId("outlet-probe-video")).toBe(videoBefore);
+    expect(outletMountCount).toBe(1);
+
+    act(() => {
+      setViewport("desktop");
+    });
+    await screen.findByRole("complementary");
+    expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+    expect(screen.getByTestId("outlet-probe-video")).toBe(videoBefore);
+    expect(outletMountCount).toBe(1);
   });
 });
