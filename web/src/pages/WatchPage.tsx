@@ -29,7 +29,7 @@
 
 import Hls from "hls.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 import {
   fetchEpisodeWatch,
   fetchItemWatch,
@@ -438,6 +438,21 @@ function resolveSubtitleForPreference(
   );
 }
 
+/**
+ * True only when Play navigation latched `{ enterFullscreen: true }` onto
+ * location.state. Anything else (missing state, wrong shape, non-boolean) is
+ * false so deep links and the ended auto-advance stay non-fullscreen.
+ */
+export function wantsFullscreenFromNavState(state: unknown): boolean {
+  if (state === null || typeof state !== "object") {
+    return false;
+  }
+  return (
+    "enterFullscreen" in state &&
+    (state as { enterFullscreen: unknown }).enterFullscreen === true
+  );
+}
+
 // Route params are whatever's in the URL bar. Anything that isn't a positive
 // integer comes back null and the page renders its error state instead of
 // firing a doomed request.
@@ -580,6 +595,8 @@ function sendTimelinePayload(
  */
 export function WatchPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const enterFullscreenOnMount = wantsFullscreenFromNavState(location.state);
   const {
     tmdbId: rawTmdbId,
     ratingKey: rawRatingKey,
@@ -1626,7 +1643,9 @@ export function WatchPage() {
             : null
         }
         onPlayNow={() => {
-          navigate(`/watch/episode/${nextEpisode.ratingKey}`);
+          navigate(`/watch/episode/${nextEpisode.ratingKey}`, {
+            state: { enterFullscreen: true },
+          });
         }}
         onDismiss={() => {
           setUpNextDismissed(true);
@@ -1830,6 +1849,7 @@ export function WatchPage() {
             autoPlay={isEpisode ? autoPlay : undefined}
             onAutoPlayChange={isEpisode ? onAutoPlayChange : undefined}
             remote={castRemote}
+            enterFullscreenOnMount={enterFullscreenOnMount}
             overlay={playerOverlay}
           >
             <video

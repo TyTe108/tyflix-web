@@ -374,7 +374,11 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
         (detail.mediaStatus === "available" ||
           detail.mediaStatus === "partially_available") ? (
           <p className="media-detail-play">
-            <Link className="btn" to={`/watch/movie/${detail.tmdbId}`}>
+            <Link
+              className="btn"
+              to={`/watch/movie/${detail.tmdbId}`}
+              state={{ enterFullscreen: true }}
+            >
               ▶ Play
             </Link>
           </p>

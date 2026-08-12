@@ -101,6 +101,7 @@ export function ContinueWatchingRail() {
             <Link
               key={item.ratingKey}
               to={continueLink(item)}
+              state={{ enterFullscreen: true }}
               className="continue-rail-card"
             >
               <div className="continue-rail-poster media-poster">

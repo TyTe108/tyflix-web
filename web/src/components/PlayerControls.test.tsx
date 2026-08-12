@@ -43,6 +43,7 @@ type PlayerHarnessProps = {
   onAutoPlayChange?: (value: boolean) => void;
   onStreamSettingsChange?: (settings: StreamSettings) => Promise<void>;
   remote?: RemotePlaybackControl;
+  enterFullscreenOnMount?: boolean;
 };
 
 function PlayerHarness({
@@ -54,6 +55,7 @@ function PlayerHarness({
   onAutoPlayChange,
   onStreamSettingsChange,
   remote,
+  enterFullscreenOnMount,
 }: PlayerHarnessProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -93,6 +95,7 @@ function PlayerHarness({
       onAutoPlayChange={onAutoPlayChange}
       onStreamSettingsChange={onStreamSettingsChange ?? (async () => {})}
       remote={remote}
+      enterFullscreenOnMount={enterFullscreenOnMount}
     >
       <video ref={videoRef} data-testid="player-video" />
       {children}
@@ -394,6 +397,122 @@ describe("PlayerControls fullscreen", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enter fullscreen" }));
 
     screen.getByText(/fullscreen/i);
+  });
+});
+
+describe("PlayerControls enterFullscreenOnMount", () => {
+  let requestFullscreen: ReturnType<typeof vi.fn>;
+
+  function stubUserActivation(isActive: boolean) {
+    Object.defineProperty(navigator, "userActivation", {
+      configurable: true,
+      value: { isActive, hasBeenActive: isActive },
+    });
+  }
+
+  beforeEach(() => {
+    setViewport("desktop");
+    requestFullscreen = vi.fn().mockResolvedValue(undefined);
+    // jsdom has no Element.requestFullscreen; the auto path runs on mount, so
+    // the prototype has to be stubbed before render (unlike the button tests,
+    // which assign on the shell instance after mount and before the click).
+    Object.defineProperty(HTMLElement.prototype, "requestFullscreen", {
+      configurable: true,
+      writable: true,
+      value: requestFullscreen,
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    Reflect.deleteProperty(HTMLElement.prototype, "requestFullscreen");
+    Reflect.deleteProperty(navigator, "userActivation");
+  });
+
+  it("calls shell.requestFullscreen exactly once when activation is live", async () => {
+    stubUserActivation(true);
+    await mountPlayer({ enterFullscreenOnMount: true });
+
+    const shell = shellElement();
+    expect(requestFullscreen).toHaveBeenCalledTimes(1);
+    expect(requestFullscreen.mock.instances[0]).toBe(shell);
+  });
+
+  it("does not call requestFullscreen or render an error when activation is inactive", async () => {
+    stubUserActivation(false);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await mountPlayer({ enterFullscreenOnMount: true });
+
+    expect(requestFullscreen).not.toHaveBeenCalled();
+    expect(screen.queryByText(/fullscreen/i)).toBeNull();
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it("does not call requestFullscreen on mount when enterFullscreenOnMount is absent", async () => {
+    stubUserActivation(true);
+    await mountPlayer();
+
+    expect(requestFullscreen).not.toHaveBeenCalled();
+  });
+
+  it("does not call requestFullscreen on mount when enterFullscreenOnMount is false", async () => {
+    stubUserActivation(true);
+    await mountPlayer({ enterFullscreenOnMount: false });
+
+    expect(requestFullscreen).not.toHaveBeenCalled();
+  });
+
+  it("does not fire a second request when stream settings props change", async () => {
+    stubUserActivation(true);
+    const onReady = vi.fn();
+    const { rerender } = render(
+      <PlayerHarness
+        onReady={onReady}
+        enterFullscreenOnMount
+        audioTracks={SAMPLE_AUDIO}
+      />,
+    );
+    await waitFor(() => {
+      expect(onReady).toHaveBeenCalled();
+    });
+    expect(requestFullscreen).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <PlayerHarness
+        onReady={onReady}
+        enterFullscreenOnMount
+        audioTracks={[SAMPLE_AUDIO[1]!]}
+        subtitleTracks={SAMPLE_SUBTITLES}
+      />,
+    );
+
+    expect(requestFullscreen).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not render an error banner when the automatic request is refused", async () => {
+    stubUserActivation(true);
+    requestFullscreen.mockRejectedValue(new Error("Fullscreen denied"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await mountPlayer({ enterFullscreenOnMount: true });
+
+    await waitFor(() => {
+      expect(warn).toHaveBeenCalled();
+    });
+    expect(screen.queryByText(/fullscreen/i)).toBeNull();
+  });
+
+  it("does not request fullscreen while a Cast session is active", async () => {
+    stubUserActivation(true);
+    await mountPlayer({
+      enterFullscreenOnMount: true,
+      remote: idleRemote({ isActive: true }),
+    });
+
+    expect(requestFullscreen).not.toHaveBeenCalled();
   });
 });
 

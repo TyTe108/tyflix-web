@@ -124,6 +124,7 @@ export function EpisodeBrowser({ tmdbId }: { tmdbId: number }) {
                       <Link
                         className="btn"
                         to={`/watch/episode/${episode.ratingKey}`}
+                        state={{ enterFullscreen: true }}
                       >
                         Play
                       </Link>

@@ -140,6 +140,13 @@ type PlayerControlsProps = {
   onAutoPlayChange?: (value: boolean) => void;
   /** When active, the bar reads/writes the Cast receiver instead of <video>. */
   remote?: RemotePlaybackControl;
+  /**
+   * Enter fullscreen once on mount. Set when the user pressed Play to get
+   * here; uses `requestPlayerFullscreen` for the same platform fallbacks as
+   * the fullscreen button. Skips silently if transient activation has already
+   * expired — that is not a missing-API error.
+   */
+  enterFullscreenOnMount?: boolean;
   /** Cards drawn over the video: Up Next, resume prompt, cast status. */
   overlay?: ReactNode;
   children: ReactNode;
@@ -344,12 +351,16 @@ export function PlayerControls({
   autoPlay,
   onAutoPlayChange,
   remote,
+  enterFullscreenOnMount = false,
   overlay,
   children,
 }: PlayerControlsProps) {
   // shell is the fullscreen target and the keyboard root; the other three back
   // the outside-click logic that decides whether a pointerdown closes settings.
   const shellRef = useRef<HTMLDivElement | null>(null);
+  // One automatic fullscreen attempt per mount; quality/audio/subtitle
+  // re-renders must not fire another.
+  const enterFullscreenOnMountAttemptedRef = useRef(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
   const gearRef = useRef<HTMLButtonElement | null>(null);
   const mediaRef = useRef<HTMLDivElement | null>(null);
@@ -651,6 +662,39 @@ export function PlayerControls({
       window.clearTimeout(timerId);
     };
   }, [fullscreenError]);
+
+  // Auto-enter fullscreen when Play navigation asked for it. Element.requestFullscreen
+  // needs transient user activation; by the time the descriptor round-trip
+  // finishes that may already be gone. Check isActive before calling so an
+  // expired gesture does not fall through to the button's "isn't available"
+  // banner — that message would be a lie about browser support.
+  useEffect(() => {
+    if (!enterFullscreenOnMount) {
+      return;
+    }
+    if (enterFullscreenOnMountAttemptedRef.current) {
+      return;
+    }
+    enterFullscreenOnMountAttemptedRef.current = true;
+    if (remoteActive) {
+      return;
+    }
+    const shell = shellRef.current;
+    if (shell === null) {
+      return;
+    }
+    if (navigator.userActivation?.isActive !== true) {
+      console.warn(
+        "[enterFullscreenOnMount] skipped: userActivation not live (Play intent present, activation expired before shell was ready)",
+      );
+      return;
+    }
+    requestPlayerFullscreen(shell, videoRef.current, () => {
+      console.warn(
+        "[enterFullscreenOnMount] refused: requestFullscreen/webkit fallback unavailable or denied (Play intent present, no banner)",
+      );
+    });
+  }, [enterFullscreenOnMount, remoteActive, videoRef]);
 
   // Dismiss the settings panel on an outside click, and hold the bar visible
   // for as long as the panel is open. Runs on every open/close.
