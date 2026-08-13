@@ -967,6 +967,47 @@ a {
   font-weight: 500;
 }
 
+/* Double-tap skip flash: covers the tapped half so the gesture is visible.
+   pointer-events: none is load-bearing — without it the flash sits on the
+   media surface and eats the second tap of a rapid sequence. jsdom applies
+   no stylesheet, so no unit test can catch its removal. */
+.watch-skip-flash {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  pointer-events: none;
+  animation: watch-skip-flash-fade var(--watch-skip-flash-ms, 500ms) ease-out
+    forwards;
+}
+
+.watch-skip-flash--left {
+  left: 0;
+}
+
+.watch-skip-flash--right {
+  right: 0;
+}
+
+.watch-skip-flash svg {
+  width: 3.5rem;
+  height: 3.5rem;
+}
+
+@keyframes watch-skip-flash-fade {
+  from {
+    opacity: 0.95;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
 .watch-player-shell:fullscreen {
   max-height: none;
   border-radius: 0;

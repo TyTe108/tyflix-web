@@ -31,6 +31,7 @@ import { setPointer, setViewport } from "../test/setup";
 import {
   DOUBLE_TAP_MS,
   PlayerControls,
+  SKIP_FLASH_MS,
   type StreamSettings,
 } from "./PlayerControls";
 
@@ -1304,5 +1305,135 @@ describe("PlayerControls double-tap skip", () => {
     expect(harness.play).not.toHaveBeenCalled();
     expect(harness.pause).not.toHaveBeenCalled();
     expect(document.querySelector(".watch-controls--hidden")).toBeNull();
+  });
+
+  // CSS for the flash (position, z-index, pointer-events) is not asserted
+  // here — jsdom does not apply the stylesheet.
+
+  it("skip flash sets --watch-skip-flash-ms from SKIP_FLASH_MS", async () => {
+    const harness = await mountPlayer();
+    stubMediaRect();
+    await seedPosition(harness, 30);
+
+    fireEvent.click(mediaSurface(), { clientX: 50 });
+    fireEvent.click(mediaSurface(), { clientX: 50 });
+
+    const flash = document.querySelector(".watch-skip-flash");
+    expect(flash).toBeInstanceOf(HTMLElement);
+    expect(
+      (flash as HTMLElement).style.getPropertyValue("--watch-skip-flash-ms"),
+    ).toBe(`${SKIP_FLASH_MS}ms`);
+  });
+
+  it("double-tap left flashes the left half; right flashes the right half", async () => {
+    const harness = await mountPlayer();
+    stubMediaRect();
+    await seedPosition(harness, 30);
+
+    fireEvent.click(mediaSurface(), { clientX: 50 });
+    fireEvent.click(mediaSurface(), { clientX: 50 });
+
+    expect(document.querySelector(".watch-skip-flash--left")).not.toBeNull();
+    expect(document.querySelector(".watch-skip-flash--right")).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SKIP_FLASH_MS);
+    });
+    expect(document.querySelector(".watch-skip-flash")).toBeNull();
+
+    fireEvent.click(mediaSurface(), { clientX: 350 });
+    fireEvent.click(mediaSurface(), { clientX: 350 });
+
+    expect(document.querySelector(".watch-skip-flash--right")).not.toBeNull();
+    expect(document.querySelector(".watch-skip-flash--left")).toBeNull();
+  });
+
+  it("skip flash disappears on its own after SKIP_FLASH_MS", async () => {
+    const harness = await mountPlayer();
+    stubMediaRect();
+    await seedPosition(harness, 30);
+
+    fireEvent.click(mediaSurface(), { clientX: 50 });
+    fireEvent.click(mediaSurface(), { clientX: 50 });
+
+    expect(document.querySelector(".watch-skip-flash--left")).not.toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SKIP_FLASH_MS - 1);
+    });
+    expect(document.querySelector(".watch-skip-flash--left")).not.toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(document.querySelector(".watch-skip-flash")).toBeNull();
+  });
+
+  it("a single tap never renders a skip flash", async () => {
+    const harness = await mountPlayer();
+    stubMediaRect();
+    await seedPosition(harness, 30);
+
+    fireEvent.click(mediaSurface(), { clientX: 50 });
+    expect(document.querySelector(".watch-skip-flash")).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(DOUBLE_TAP_MS);
+    });
+    expect(document.querySelector(".watch-skip-flash")).toBeNull();
+  });
+
+  it("same-direction double-tap restarts the flash full duration", async () => {
+    const harness = await mountPlayer();
+    stubMediaRect();
+    await seedPosition(harness, 30);
+
+    fireEvent.click(mediaSurface(), { clientX: 50 });
+    fireEvent.click(mediaSurface(), { clientX: 50 });
+    expect(document.querySelector(".watch-skip-flash--left")).not.toBeNull();
+
+    // Part-way through the first flash, skip the same way again.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(Math.floor(SKIP_FLASH_MS / 2));
+    });
+    fireEvent.click(mediaSurface(), { clientX: 50 });
+    fireEvent.click(mediaSurface(), { clientX: 50 });
+    expect(document.querySelector(".watch-skip-flash--left")).not.toBeNull();
+
+    // Past when the first flash would have expired — second must still show.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(Math.floor(SKIP_FLASH_MS / 2) + 1);
+    });
+    expect(document.querySelector(".watch-skip-flash--left")).not.toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(Math.floor(SKIP_FLASH_MS / 2));
+    });
+    expect(document.querySelector(".watch-skip-flash")).toBeNull();
+  });
+
+  it("bar buttons and arrow keys skip without a flash", async () => {
+    const harness = await mountPlayer();
+    await seedPosition(harness, 30);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Skip back 5 seconds" }),
+    );
+    expect(harness.videoRef.current?.currentTime).toBe(25);
+    expect(document.querySelector(".watch-skip-flash")).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Skip forward 5 seconds" }),
+    );
+    expect(harness.videoRef.current?.currentTime).toBe(30);
+    expect(document.querySelector(".watch-skip-flash")).toBeNull();
+
+    fireEvent.keyDown(shellElement(), { key: "ArrowLeft" });
+    expect(harness.videoRef.current?.currentTime).toBe(25);
+    expect(document.querySelector(".watch-skip-flash")).toBeNull();
+
+    fireEvent.keyDown(shellElement(), { key: "ArrowRight" });
+    expect(harness.videoRef.current?.currentTime).toBe(30);
+    expect(document.querySelector(".watch-skip-flash")).toBeNull();
   });
 });

@@ -27,6 +27,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
@@ -171,6 +172,10 @@ const SKIP_SECONDS = 5;
 
 // Mobile double-tap window. Exported so tests advance by the real value.
 export const DOUBLE_TAP_MS = 250;
+
+// How long the double-tap skip flash stays on screen. Exported so tests
+// advance by the real duration rather than a literal that can drift.
+export const SKIP_FLASH_MS = 500;
 
 // Speed is applied straight to video.playbackRate, so these never reach Plex.
 const SPEED_OPTIONS = [
@@ -376,11 +381,14 @@ export function PlayerControls({
   const mediaRef = useRef<HTMLDivElement | null>(null);
   const scrubbingRef = useRef(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Pending mobile media tap awaiting DOUBLE_TAP_MS before reveal/toggle.
   const pendingTapRef = useRef<{
     side: "left" | "right" | null;
     timerId: ReturnType<typeof setTimeout>;
   } | null>(null);
+  // Monotonic counter so same-direction flashes remount the clear effect.
+  const skipFlashKeyRef = useRef(0);
   // These mirror state into refs so the long-lived <video> listeners (and
   // onMediaClick) read current values without the effect rebinding on every
   // change.
@@ -415,6 +423,13 @@ export function PlayerControls({
     initialSubtitleId,
   );
   const [fullscreenError, setFullscreenError] = useState<string | null>(null);
+  // Side alone is not enough: skipping the same half twice would leave the
+  // value unchanged, the clear effect would not re-run, and the second flash
+  // would inherit the first one's remaining time. The key forces a restart.
+  const [skipFlash, setSkipFlash] = useState<{
+    side: "left" | "right";
+    key: number;
+  } | null>(null);
   const settingsBackRef = useRef<HTMLButtonElement | null>(null);
   const settingsNavRefs = useRef<
     Partial<Record<SettingsSubmenu, HTMLButtonElement | null>>
@@ -472,6 +487,13 @@ export function PlayerControls({
     }
     clearTimeout(pending.timerId);
     pendingTapRef.current = null;
+  };
+
+  const clearSkipFlashTimer = () => {
+    if (skipFlashTimerRef.current !== null) {
+      clearTimeout(skipFlashTimerRef.current);
+      skipFlashTimerRef.current = null;
+    }
   };
 
   // Arms the auto-hide countdown. Bails out and pins the bar whenever hiding it
@@ -687,6 +709,25 @@ export function PlayerControls({
     };
   }, [fullscreenError]);
 
+  // Clear the skip flash after SKIP_FLASH_MS. Keyed on the whole flash value
+  // (side + key) so a same-direction re-trigger starts a fresh timer.
+  useEffect(() => {
+    if (skipFlash === null) {
+      return;
+    }
+    const timerId = setTimeout(() => {
+      skipFlashTimerRef.current = null;
+      setSkipFlash(null);
+    }, SKIP_FLASH_MS);
+    skipFlashTimerRef.current = timerId;
+    return () => {
+      clearTimeout(timerId);
+      if (skipFlashTimerRef.current === timerId) {
+        skipFlashTimerRef.current = null;
+      }
+    };
+  }, [skipFlash]);
+
   // Auto-enter fullscreen when Play navigation asked for it. Element.requestFullscreen
   // needs transient user activation; by the time the descriptor round-trip
   // finishes that may already be gone. Check isActive before calling so an
@@ -817,11 +858,13 @@ export function PlayerControls({
     }
   }, [settingsSubmenu]);
 
-  // Don't leave a hide timer or pending double-tap running after unmount.
+  // Don't leave a hide timer, pending double-tap, or skip flash running after
+  // unmount.
   useEffect(() => {
     return () => {
       clearHideTimer();
       clearPendingTap();
+      clearSkipFlashTimer();
     };
   }, []);
 
@@ -910,6 +953,8 @@ export function PlayerControls({
     const pending = pendingTapRef.current;
     if (pending !== null && side !== null && pending.side === side) {
       clearPendingTap();
+      skipFlashKeyRef.current += 1;
+      setSkipFlash({ side, key: skipFlashKeyRef.current });
       skipBy(side === "left" ? -SKIP_SECONDS : SKIP_SECONDS);
       return;
     }
@@ -1238,6 +1283,27 @@ export function PlayerControls({
 
       {/* Cast status, resume prompt, Up Next. Composed by WatchPage. */}
       {overlay}
+
+      {skipFlash !== null ? (
+        <div
+          key={skipFlash.key}
+          className={
+            skipFlash.side === "left"
+              ? "watch-skip-flash watch-skip-flash--left"
+              : "watch-skip-flash watch-skip-flash--right"
+          }
+          aria-hidden="true"
+          // CSS custom properties are not in CSSProperties; cast only the
+          // style object so SKIP_FLASH_MS stays the single duration owner.
+          style={
+            {
+              "--watch-skip-flash-ms": `${SKIP_FLASH_MS}ms`,
+            } as CSSProperties
+          }
+        >
+          {skipFlash.side === "left" ? <IconSkipBack5 /> : <IconSkipForward5 />}
+        </div>
+      ) : null}
 
       {fullscreenError !== null ? (
         <div className="watch-fullscreen-error" role="status">
