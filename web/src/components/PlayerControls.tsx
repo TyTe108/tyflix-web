@@ -1407,49 +1407,54 @@ export function PlayerControls({
             <IconSkipForward5 />
           </button>
 
-          {/* Hidden from screen readers; the seek slider's aria-valuetext
-              already announces the same position. */}
-          <span className="watch-time" aria-hidden="true">
-            {formatTime(target.currentTime)} / {formatTime(total)}
-          </span>
+          {/* Clock + scrubber share a wrapper so mobile can put them on row 1
+              together and free row 2 for the skip buttons. Desktop uses
+              display: contents so this div is not a layout box. */}
+          <div className="watch-seek-row">
+            {/* Hidden from screen readers; the seek slider's aria-valuetext
+                already announces the same position. */}
+            <span className="watch-time" aria-hidden="true">
+              {formatTime(target.currentTime)} / {formatTime(total)}
+            </span>
 
-          {/* Seek. onPointerDown latches scrubbingRef, which stops the clock
-              from writing over the thumb mid-drag, and the real seek only
-              fires on release. onChange still seeks directly for keyboard
-              users, who never set the latch. */}
-          <label className="watch-seek">
-            <span className="visually-hidden">Seek</span>
-            <input
-              type="range"
-              min={0}
-              max={progressMax || 1}
-              step={0.1}
-              value={progressValue}
-              disabled={progressMax <= 0}
-              aria-label="Seek"
-              aria-valuetext={`${formatTime(target.currentTime)} of ${formatTime(total)}`}
-              onPointerDown={() => {
-                scrubbingRef.current = true;
-                if (remoteActive && remote) {
-                  setCurrentTime(remote.currentTime);
-                }
-              }}
-              onPointerUp={(event) => {
-                scrubbingRef.current = false;
-                seekTo(Number(event.currentTarget.value));
-              }}
-              onChange={(event) => {
-                const next = Number(event.currentTarget.value);
-                setCurrentTime(next);
-                if (!scrubbingRef.current) {
-                  seekTo(next);
-                }
-              }}
-              onInput={(event) => {
-                setCurrentTime(Number(event.currentTarget.value));
-              }}
-            />
-          </label>
+            {/* Seek. onPointerDown latches scrubbingRef, which stops the clock
+                from writing over the thumb mid-drag, and the real seek only
+                fires on release. onChange still seeks directly for keyboard
+                users, who never set the latch. */}
+            <label className="watch-seek">
+              <span className="visually-hidden">Seek</span>
+              <input
+                type="range"
+                min={0}
+                max={progressMax || 1}
+                step={0.1}
+                value={progressValue}
+                disabled={progressMax <= 0}
+                aria-label="Seek"
+                aria-valuetext={`${formatTime(target.currentTime)} of ${formatTime(total)}`}
+                onPointerDown={() => {
+                  scrubbingRef.current = true;
+                  if (remoteActive && remote) {
+                    setCurrentTime(remote.currentTime);
+                  }
+                }}
+                onPointerUp={(event) => {
+                  scrubbingRef.current = false;
+                  seekTo(Number(event.currentTarget.value));
+                }}
+                onChange={(event) => {
+                  const next = Number(event.currentTarget.value);
+                  setCurrentTime(next);
+                  if (!scrubbingRef.current) {
+                    seekTo(next);
+                  }
+                }}
+                onInput={(event) => {
+                  setCurrentTime(Number(event.currentTarget.value));
+                }}
+              />
+            </label>
+          </div>
 
           <button
             type="button"

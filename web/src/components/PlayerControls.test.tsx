@@ -871,10 +871,38 @@ describe("PlayerControls skip", () => {
     if (!(bar instanceof HTMLElement)) {
       throw new Error("expected .watch-controls-bar");
     }
-    const ordered = [...bar.children];
+    // Flattened document order — the clock lives inside .watch-seek-row, so
+    // it is no longer a direct child of the bar.
+    const ordered = [...bar.querySelectorAll("*")];
     expect(ordered.indexOf(skipBack)).toBeLessThan(ordered.indexOf(play));
     expect(ordered.indexOf(play)).toBeLessThan(ordered.indexOf(skipForward));
     expect(ordered.indexOf(skipForward)).toBeLessThan(ordered.indexOf(time));
+  });
+
+  it("keeps the clock and scrubber inside a seek-row wrapper under the bar", async () => {
+    await mountPlayer();
+
+    const bar = document.querySelector(".watch-controls-bar");
+    const row = document.querySelector(".watch-seek-row");
+    const time = document.querySelector(".watch-time");
+    const seek = document.querySelector(".watch-seek");
+    if (!(bar instanceof HTMLElement)) {
+      throw new Error("expected .watch-controls-bar");
+    }
+    if (!(row instanceof HTMLElement)) {
+      throw new Error("expected .watch-seek-row");
+    }
+    if (!(time instanceof HTMLElement)) {
+      throw new Error("expected .watch-time");
+    }
+    if (!(seek instanceof HTMLElement)) {
+      throw new Error("expected .watch-seek");
+    }
+
+    expect(bar.contains(row)).toBe(true);
+    expect(row.contains(time)).toBe(true);
+    expect(row.contains(seek)).toBe(true);
+    expect([...bar.children]).toContain(row);
   });
 
   it("skips back and forward by 5 seconds from mid-playback", async () => {

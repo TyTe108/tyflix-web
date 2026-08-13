@@ -1120,6 +1120,12 @@ a {
   min-width: 5.5rem;
 }
 
+/* Desktop: vanish from layout so .watch-time and .watch-seek stay direct
+   flex children of the bar — byte-identical to the pre-wrapper one-row bar. */
+.watch-seek-row {
+  display: contents;
+}
+
 .watch-seek {
   flex: 1 1 auto;
   display: flex;
@@ -4488,20 +4494,31 @@ a {
     flex-wrap: wrap;
   }
 
-  .watch-seek {
+  /* Clock moved off row 2 so both skip buttons fit: measured row 2 with
+     skips + clock = 400.8px (overflows 336); without the clock = 304px
+     (32px spare at 360). See spec D8 superseded by 45.0b. */
+  .watch-seek-row {
     flex: 1 1 100%;
     order: -1;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
     min-width: 0;
     margin: 0 0 0.15rem;
   }
 
-  .watch-control-btn--mute,
-  .watch-volume {
-    display: none;
+  .watch-seek-row .watch-time {
+    flex: 0 0 auto;
   }
 
-  /* Skip ±5s: the mobile row cannot hold two more 44px buttons (spec D8). */
-  .watch-control-btn--skip {
+  .watch-seek-row .watch-seek {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+  }
+
+  .watch-control-btn--mute,
+  .watch-volume {
     display: none;
   }
 
