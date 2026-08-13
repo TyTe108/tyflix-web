@@ -459,6 +459,7 @@ describe("PlayerControls enterFullscreenOnMount", () => {
     expect(requestFullscreen).not.toHaveBeenCalled();
     expect(screen.queryByText(/fullscreen/i)).toBeNull();
     expect(warn).toHaveBeenCalled();
+    expect(warn.mock.calls[0]?.[0]).toMatch(/absent|unsupported/);
   });
 
   it("does not call requestFullscreen on mount when enterFullscreenOnMount is absent", async () => {
