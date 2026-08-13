@@ -1,6 +1,7 @@
 // Season checklist behavior on MediaDetail: tapping a season's label toggles
 // its checkbox (the thumb-usable label pattern for 36.4). Also covers the
-// admin-only Manage entry point on the title page.
+// admin-only Manage entry point on the title page, and that ▶ Play latches
+// { enterFullscreen: true } onto the watch-route navigation state.
 import {
   cleanup,
   fireEvent,
@@ -8,10 +9,10 @@ import {
   screen,
   within,
 } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchMe } from "../api/auth";
-import { fetchTv, type TvDetail } from "../api/discover";
+import { fetchMovie, fetchTv, type MovieDetail, type TvDetail } from "../api/discover";
 import { AuthProvider } from "../auth/AuthContext";
 import { MediaDetailPage } from "./MediaDetailPage";
 
@@ -155,5 +156,64 @@ describe("MediaDetailPage Manage entry", () => {
     const manage = await screen.findByRole("button", { name: "Manage" });
     fireEvent.click(manage);
     expect(await screen.findByRole("dialog")).toBeTruthy();
+  });
+});
+
+const movieDetail: MovieDetail = {
+  tmdbId: 550,
+  mediaType: "movie",
+  title: "Fight Club",
+  year: 1999,
+  overview: "A movie.",
+  posterUrl: null,
+  backdropUrl: null,
+  runtime: 139,
+  genres: [],
+  status: "Released",
+  collection: null,
+  mediaStatus: "available",
+};
+
+function LocationStateProbe() {
+  const location = useLocation();
+  return <pre data-testid="location-state">{JSON.stringify(location.state)}</pre>;
+}
+
+describe("Play navigation enterFullscreen state", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("MediaDetailPage ▶ Play navigates with { enterFullscreen: true }", async () => {
+    vi.mocked(fetchMe).mockResolvedValue({
+      isAdmin: false,
+      user: {
+        seerrUserId: 1,
+        plexId: 1,
+        plexUsername: "testuser",
+        displayName: "Test User",
+        avatar: null,
+        permissions: 0,
+      },
+    });
+    vi.mocked(fetchMovie).mockResolvedValue(movieDetail);
+
+    render(
+      <MemoryRouter initialEntries={["/media/movie/550"]}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/media/:type/:id" element={<MediaDetailPage />} />
+            <Route path="/watch/movie/:tmdbId" element={<LocationStateProbe />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    const play = await screen.findByRole("link", { name: /Play/ });
+    fireEvent.click(play);
+
+    expect(screen.getByTestId("location-state").textContent).toBe(
+      JSON.stringify({ enterFullscreen: true }),
+    );
   });
 });
