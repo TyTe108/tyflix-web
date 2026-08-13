@@ -450,6 +450,17 @@ describe("PlayerControls enterFullscreenOnMount", () => {
     expect(warn).toHaveBeenCalled();
   });
 
+  it("does not call requestFullscreen or render an error when userActivation is absent", async () => {
+    Reflect.deleteProperty(navigator, "userActivation");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await mountPlayer({ enterFullscreenOnMount: true });
+
+    expect(requestFullscreen).not.toHaveBeenCalled();
+    expect(screen.queryByText(/fullscreen/i)).toBeNull();
+    expect(warn).toHaveBeenCalled();
+  });
+
   it("does not call requestFullscreen on mount when enterFullscreenOnMount is absent", async () => {
     stubUserActivation(true);
     await mountPlayer();

@@ -359,7 +359,9 @@ export function PlayerControls({
   // the outside-click logic that decides whether a pointerdown closes settings.
   const shellRef = useRef<HTMLDivElement | null>(null);
   // One automatic fullscreen attempt per mount; quality/audio/subtitle
-  // re-renders must not fire another.
+  // re-renders must not fire another. Arriving while casting burns the
+  // attempt on purpose — fullscreen must not fire later when the session
+  // ends, by which point there is no activation anyway.
   const enterFullscreenOnMountAttemptedRef = useRef(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
   const gearRef = useRef<HTMLButtonElement | null>(null);
@@ -683,9 +685,18 @@ export function PlayerControls({
     if (shell === null) {
       return;
     }
-    if (navigator.userActivation?.isActive !== true) {
+    // Skipping when the API is absent departs from spec D4 (try anyway, quiet
+    // handler absorbs refusal): firing blind on a browser that cannot report
+    // activation would land in the refusal path and tell us nothing.
+    if (navigator.userActivation === undefined) {
       console.warn(
-        "[enterFullscreenOnMount] skipped: userActivation not live (Play intent present, activation expired before shell was ready)",
+        "[enterFullscreenOnMount] unsupported: navigator.userActivation absent",
+      );
+      return;
+    }
+    if (!navigator.userActivation.isActive) {
+      console.warn(
+        "[enterFullscreenOnMount] skipped: activation not live",
       );
       return;
     }
