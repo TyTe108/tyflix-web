@@ -464,29 +464,29 @@ describe("PlayerControls enterFullscreenOnMount", () => {
     expect(requestFullscreen).not.toHaveBeenCalled();
   });
 
-  it("does not fire a second request when stream settings props change", async () => {
+  it("does not fire a second request when a Cast session starts and ends", async () => {
     stubUserActivation(true);
     const onReady = vi.fn();
     const { rerender } = render(
-      <PlayerHarness
-        onReady={onReady}
-        enterFullscreenOnMount
-        audioTracks={SAMPLE_AUDIO}
-      />,
+      <PlayerHarness onReady={onReady} enterFullscreenOnMount />,
     );
     await waitFor(() => {
       expect(onReady).toHaveBeenCalled();
     });
     expect(requestFullscreen).toHaveBeenCalledTimes(1);
 
+    // remoteActive IS an effect dependency, so connecting and dropping Cast
+    // genuinely re-runs the effect. A quality/audio prop change never touches
+    // its deps, which is why that rerender cannot exercise the once-per-mount
+    // ref at all.
     rerender(
       <PlayerHarness
         onReady={onReady}
         enterFullscreenOnMount
-        audioTracks={[SAMPLE_AUDIO[1]!]}
-        subtitleTracks={SAMPLE_SUBTITLES}
+        remote={idleRemote({ isActive: true })}
       />,
     );
+    rerender(<PlayerHarness onReady={onReady} enterFullscreenOnMount />);
 
     expect(requestFullscreen).toHaveBeenCalledTimes(1);
   });
