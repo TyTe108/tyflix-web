@@ -32,6 +32,9 @@ type VideoHarness = {
   videoRef: RefObject<HTMLVideoElement | null>;
   play: ReturnType<typeof vi.fn>;
   pause: ReturnType<typeof vi.fn>;
+  setCurrentTime: (seconds: number) => void;
+  /** When true, currentTime writes store without dispatching timeupdate. */
+  setDeferTimeUpdate: (defer: boolean) => void;
 };
 
 type PlayerHarnessProps = {
@@ -44,6 +47,7 @@ type PlayerHarnessProps = {
   onStreamSettingsChange?: (settings: StreamSettings) => Promise<void>;
   remote?: RemotePlaybackControl;
   enterFullscreenOnMount?: boolean;
+  durationMs?: number | null;
 };
 
 function PlayerHarness({
@@ -56,6 +60,7 @@ function PlayerHarness({
   onStreamSettingsChange,
   remote,
   enterFullscreenOnMount,
+  durationMs = 120_000,
 }: PlayerHarnessProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -71,6 +76,19 @@ function PlayerHarness({
       get: () => paused,
     });
 
+    let currentTime = 0;
+    let deferTimeUpdate = false;
+    Object.defineProperty(video, "currentTime", {
+      configurable: true,
+      get: () => currentTime,
+      set: (value: number) => {
+        currentTime = value;
+        if (!deferTimeUpdate) {
+          video.dispatchEvent(new Event("timeupdate"));
+        }
+      },
+    });
+
     const play = vi.fn(async () => {
       paused = false;
       video.dispatchEvent(new Event("play"));
@@ -82,13 +100,20 @@ function PlayerHarness({
     video.play = play as HTMLVideoElement["play"];
     video.pause = pause as HTMLVideoElement["pause"];
 
-    onReady({ videoRef, play, pause });
+    const setCurrentTime = (seconds: number) => {
+      video.currentTime = seconds;
+    };
+    const setDeferTimeUpdate = (defer: boolean) => {
+      deferTimeUpdate = defer;
+    };
+
+    onReady({ videoRef, play, pause, setCurrentTime, setDeferTimeUpdate });
   }, [onReady]);
 
   return (
     <PlayerControls
       videoRef={videoRef}
-      durationMs={120_000}
+      durationMs={durationMs}
       audioTracks={audioTracks}
       subtitleTracks={subtitleTracks}
       autoPlay={autoPlay}
@@ -782,5 +807,214 @@ describe("PlayerControls settings menu", () => {
     });
     expect(screen.queryByRole("heading", { name: "Speed" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Speed/ })).toBeNull();
+  });
+});
+
+// Criterion 9 (hide skip buttons below 48rem) is CSS-only. jsdom never loads
+// styles.css, so visibility is left to the smoke test — asserting it here
+// would pass for the wrong reason.
+describe("PlayerControls skip", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    setViewport("desktop");
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  async function seedPosition(
+    harness: VideoHarness,
+    seconds: number,
+  ): Promise<void> {
+    harness.setCurrentTime(seconds);
+    await waitFor(() => {
+      expect(screen.getByRole("slider", { name: "Seek" })).toHaveProperty(
+        "value",
+        String(seconds),
+      );
+    });
+  }
+
+  it("renders skip back, play/pause, skip forward, then the clock in that order", async () => {
+    await mountPlayer();
+
+    const skipBack = screen.getByRole("button", {
+      name: "Skip back 5 seconds",
+    });
+    const play = screen.getByRole("button", { name: "Play" });
+    const skipForward = screen.getByRole("button", {
+      name: "Skip forward 5 seconds",
+    });
+    const time = document.querySelector(".watch-time");
+    if (!(time instanceof HTMLElement)) {
+      throw new Error("expected .watch-time");
+    }
+
+    const bar = document.querySelector(".watch-controls-bar");
+    if (!(bar instanceof HTMLElement)) {
+      throw new Error("expected .watch-controls-bar");
+    }
+    const ordered = [...bar.children];
+    expect(ordered.indexOf(skipBack)).toBeLessThan(ordered.indexOf(play));
+    expect(ordered.indexOf(play)).toBeLessThan(ordered.indexOf(skipForward));
+    expect(ordered.indexOf(skipForward)).toBeLessThan(ordered.indexOf(time));
+  });
+
+  it("skips back and forward by 5 seconds from mid-playback", async () => {
+    const harness = await mountPlayer();
+    await seedPosition(harness, 30);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Skip back 5 seconds" }),
+    );
+    expect(harness.videoRef.current?.currentTime).toBe(25);
+
+    await seedPosition(harness, 30);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Skip forward 5 seconds" }),
+    );
+    expect(harness.videoRef.current?.currentTime).toBe(35);
+  });
+
+  it("clamps skip back to 0 near the start", async () => {
+    const harness = await mountPlayer();
+    await seedPosition(harness, 3);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Skip back 5 seconds" }),
+    );
+    expect(harness.videoRef.current?.currentTime).toBe(0);
+  });
+
+  it("clamps skip forward to the duration near the end", async () => {
+    const harness = await mountPlayer();
+    await seedPosition(harness, 118);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Skip forward 5 seconds" }),
+    );
+    expect(harness.videoRef.current?.currentTime).toBe(120);
+  });
+
+  it("while casting, seeks the receiver and never writes video.currentTime", async () => {
+    const seek = vi.fn();
+    const harness = await mountPlayer({
+      remote: idleRemote({
+        isActive: true,
+        currentTime: 30,
+        duration: 120,
+        seek,
+      }),
+    });
+    const video = harness.videoRef.current;
+    if (video === null) {
+      throw new Error("expected video element");
+    }
+    harness.setCurrentTime(99);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Skip back 5 seconds" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Skip forward 5 seconds" }),
+    );
+
+    expect(seek).toHaveBeenCalledWith(25);
+    expect(seek).toHaveBeenCalledWith(35);
+    expect(video.currentTime).toBe(99);
+  });
+
+  it("while casting, clamps skip forward against the receiver duration", async () => {
+    const seek = vi.fn();
+    await mountPlayer({
+      remote: idleRemote({
+        isActive: true,
+        currentTime: 58,
+        duration: 60,
+        seek,
+      }),
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Skip forward 5 seconds" }),
+    );
+    expect(seek).toHaveBeenCalledWith(60);
+  });
+
+  it("disables both skip buttons when there is no duration yet", async () => {
+    await mountPlayer({ durationMs: null });
+
+    expect(
+      screen.getByRole("button", { name: "Skip back 5 seconds" }),
+    ).toHaveProperty("disabled", true);
+    expect(
+      screen.getByRole("button", { name: "Skip forward 5 seconds" }),
+    ).toHaveProperty("disabled", true);
+  });
+
+  it("skips while paused and while playing", async () => {
+    const harness = await mountPlayer();
+    await seedPosition(harness, 40);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Skip forward 5 seconds" }),
+    );
+    expect(harness.videoRef.current?.currentTime).toBe(45);
+
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    await waitFor(() => {
+      expect(harness.play).toHaveBeenCalled();
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Skip back 5 seconds" }),
+    );
+    expect(harness.videoRef.current?.currentTime).toBe(40);
+  });
+
+  it("reveals the control bar and re-arms the idle timer", async () => {
+    const harness = await mountPlayer();
+    await seedPosition(harness, 30);
+    await hideControlsWhilePlaying(harness);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Skip forward 5 seconds" }),
+    );
+
+    expect(document.querySelector(".watch-controls--hidden")).toBeNull();
+    expect(harness.videoRef.current?.currentTime).toBe(35);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await waitFor(() => {
+      expect(document.querySelector(".watch-controls--hidden")).not.toBeNull();
+    });
+  });
+
+  it("accumulates two rapid skips before timeupdate settles", async () => {
+    const harness = await mountPlayer();
+    await seedPosition(harness, 30);
+    harness.setDeferTimeUpdate(true);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Skip forward 5 seconds" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Skip forward 5 seconds" }),
+    );
+    expect(harness.videoRef.current?.currentTime).toBe(40);
+
+    harness.setDeferTimeUpdate(false);
+    await seedPosition(harness, 30);
+    harness.setDeferTimeUpdate(true);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Skip back 5 seconds" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Skip back 5 seconds" }),
+    );
+    expect(harness.videoRef.current?.currentTime).toBe(20);
   });
 });

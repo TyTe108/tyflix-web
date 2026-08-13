@@ -4500,6 +4500,11 @@ a {
     display: none;
   }
 
+  /* Skip ±5s: the mobile row cannot hold two more 44px buttons (spec D8). */
+  .watch-control-btn--skip {
+    display: none;
+  }
+
   .watch-controls-bar .watch-control-btn {
     width: 44px;
     height: 44px;
