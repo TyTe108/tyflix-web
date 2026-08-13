@@ -10,6 +10,7 @@
 // unavailable in jsdom, so the cast button is absent and does not interfere.
 import {
   cleanup,
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -1016,5 +1017,105 @@ describe("PlayerControls skip", () => {
       screen.getByRole("button", { name: "Skip back 5 seconds" }),
     );
     expect(harness.videoRef.current?.currentTime).toBe(20);
+  });
+});
+
+describe("PlayerControls skip keyboard", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    setViewport("desktop");
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  async function seedPosition(
+    harness: VideoHarness,
+    seconds: number,
+  ): Promise<void> {
+    harness.setCurrentTime(seconds);
+    await waitFor(() => {
+      expect(screen.getByRole("slider", { name: "Seek" })).toHaveProperty(
+        "value",
+        String(seconds),
+      );
+    });
+  }
+
+  it("ArrowLeft and ArrowRight seek by 5 seconds on the shell", async () => {
+    const harness = await mountPlayer();
+    await seedPosition(harness, 30);
+
+    fireEvent.keyDown(shellElement(), { key: "ArrowRight" });
+    expect(harness.videoRef.current?.currentTime).toBe(35);
+
+    fireEvent.keyDown(shellElement(), { key: "ArrowLeft" });
+    expect(harness.videoRef.current?.currentTime).toBe(30);
+  });
+
+  it("prevents the default action so the page does not scroll", async () => {
+    const harness = await mountPlayer();
+    await seedPosition(harness, 30);
+
+    const right = createEvent.keyDown(shellElement(), { key: "ArrowRight" });
+    fireEvent(shellElement(), right);
+    expect(right.defaultPrevented).toBe(true);
+
+    const left = createEvent.keyDown(shellElement(), { key: "ArrowLeft" });
+    fireEvent(shellElement(), left);
+    expect(left.defaultPrevented).toBe(true);
+  });
+
+  it("does not handle arrows when focus is on the seek slider", async () => {
+    const harness = await mountPlayer();
+    await seedPosition(harness, 30);
+
+    fireEvent.keyDown(screen.getByRole("slider", { name: "Seek" }), {
+      key: "ArrowRight",
+    });
+    expect(harness.videoRef.current?.currentTime).toBe(30);
+  });
+
+  it("seeks with arrows on a focused button, but Space still does not toggle", async () => {
+    const harness = await mountPlayer();
+    await seedPosition(harness, 30);
+
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    await waitFor(() => {
+      expect(harness.play).toHaveBeenCalled();
+    });
+    harness.pause.mockClear();
+
+    const pauseBtn = screen.getByRole("button", { name: "Pause" });
+    fireEvent.keyDown(pauseBtn, { key: "ArrowRight" });
+    expect(harness.videoRef.current?.currentTime).toBe(35);
+
+    fireEvent.keyDown(pauseBtn, { key: " " });
+    expect(harness.pause).not.toHaveBeenCalled();
+  });
+
+  it("still seeks with arrows while the settings panel is open", async () => {
+    const harness = await mountPlayer();
+    await seedPosition(harness, 30);
+    openSettings();
+
+    fireEvent.keyDown(shellElement(), { key: "ArrowRight" });
+    expect(harness.videoRef.current?.currentTime).toBe(35);
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy();
+  });
+
+  it("does nothing when there is no duration yet", async () => {
+    const harness = await mountPlayer({ durationMs: null });
+    harness.setCurrentTime(30);
+    await waitFor(() => {
+      expect(document.querySelector(".watch-time")?.textContent).toContain(
+        "0:30",
+      );
+    });
+
+    fireEvent.keyDown(shellElement(), { key: "ArrowRight" });
+    expect(harness.videoRef.current?.currentTime).toBe(30);
   });
 });

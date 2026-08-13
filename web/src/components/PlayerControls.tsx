@@ -1077,6 +1077,26 @@ export function PlayerControls({
   // Space toggles playback, but not when focus sits on a control that already
   // means something by Space (buttons, the sliders, any input).
   const onShellKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      // Arrow guard ≠ Space guard. Space excludes BUTTON because Space
+      // activates a focused button; arrows do not, so after clicking Play
+      // (focus still on the button) ← / → must still seek. INPUT is excluded
+      // here because the seek/volume range inputs already answer ← / →.
+      const el = event.target as HTMLElement;
+      const tag = el.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        el.isContentEditable
+      ) {
+        return;
+      }
+      event.preventDefault();
+      skipBy(event.key === "ArrowLeft" ? -SKIP_SECONDS : SKIP_SECONDS);
+      return;
+    }
+
     if (event.key !== " " && event.code !== "Space") {
       return;
     }
@@ -1106,6 +1126,9 @@ export function PlayerControls({
   // base. The receiver has no synchronously-truthful position, so Cast still
   // reads remote.currentTime (D5 coalescing caveat unchanged).
   const skipBy = (deltaSeconds: number): void => {
+    if (total <= 0) {
+      return;
+    }
     const next = Math.min(
       Math.max(livePlaybackPosition() + deltaSeconds, 0),
       total,
