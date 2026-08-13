@@ -9,6 +9,7 @@
 // Viewport control is setViewport from src/test/setup.ts. Cast stays
 // unavailable in jsdom, so the cast button is absent and does not interfere.
 import {
+  act,
   cleanup,
   createEvent,
   fireEvent,
@@ -27,7 +28,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AudioStream, SubtitleStream } from "../api/watch";
 import type { RemotePlaybackControl } from "../cast/useCastPlayer";
 import { setViewport } from "../test/setup";
-import { PlayerControls, type StreamSettings } from "./PlayerControls";
+import {
+  DOUBLE_TAP_MS,
+  PlayerControls,
+  type StreamSettings,
+} from "./PlayerControls";
 
 type VideoHarness = {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -279,6 +284,9 @@ describe("PlayerControls media tap", () => {
     await hideControlsWhilePlaying(harness);
 
     fireEvent.click(mediaSurface());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(DOUBLE_TAP_MS);
+    });
 
     expect(harness.play).not.toHaveBeenCalled();
     expect(harness.pause).not.toHaveBeenCalled();
@@ -291,10 +299,16 @@ describe("PlayerControls media tap", () => {
     await hideControlsWhilePlaying(harness);
 
     fireEvent.click(mediaSurface());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(DOUBLE_TAP_MS);
+    });
     harness.play.mockClear();
     harness.pause.mockClear();
 
     fireEvent.click(mediaSurface());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(DOUBLE_TAP_MS);
+    });
     expect(harness.pause).toHaveBeenCalled();
   });
 
@@ -1116,6 +1130,117 @@ describe("PlayerControls skip keyboard", () => {
     });
 
     fireEvent.keyDown(shellElement(), { key: "ArrowRight" });
+    expect(harness.videoRef.current?.currentTime).toBe(30);
+  });
+});
+
+describe("PlayerControls double-tap skip", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    setViewport("mobile");
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  function stubMediaRect(width = 400, left = 0): void {
+    const el = mediaSurface();
+    el.getBoundingClientRect = () =>
+      ({
+        x: left,
+        y: 0,
+        width,
+        height: 200,
+        top: 0,
+        left,
+        bottom: 200,
+        right: left + width,
+        toJSON: () => ({}),
+      }) as DOMRect;
+  }
+
+  async function seedPosition(
+    harness: VideoHarness,
+    seconds: number,
+  ): Promise<void> {
+    harness.setCurrentTime(seconds);
+    await waitFor(() => {
+      expect(screen.getByRole("slider", { name: "Seek" })).toHaveProperty(
+        "value",
+        String(seconds),
+      );
+    });
+  }
+
+  it("double-tap left seeks back 5s without toggling playback", async () => {
+    const harness = await mountPlayer();
+    stubMediaRect();
+    await seedPosition(harness, 30);
+
+    fireEvent.click(mediaSurface(), { clientX: 50 });
+    fireEvent.click(mediaSurface(), { clientX: 50 });
+
+    expect(harness.videoRef.current?.currentTime).toBe(25);
+    expect(harness.play).not.toHaveBeenCalled();
+    expect(harness.pause).not.toHaveBeenCalled();
+  });
+
+  it("double-tap right seeks forward 5s without toggling playback", async () => {
+    const harness = await mountPlayer();
+    stubMediaRect();
+    await seedPosition(harness, 30);
+
+    fireEvent.click(mediaSurface(), { clientX: 350 });
+    fireEvent.click(mediaSurface(), { clientX: 350 });
+
+    expect(harness.videoRef.current?.currentTime).toBe(35);
+    expect(harness.play).not.toHaveBeenCalled();
+    expect(harness.pause).not.toHaveBeenCalled();
+  });
+
+  it("taps on different halves are two single taps, not a skip", async () => {
+    const harness = await mountPlayer();
+    stubMediaRect();
+    await seedPosition(harness, 30);
+
+    fireEvent.click(mediaSurface(), { clientX: 50 });
+    fireEvent.click(mediaSurface(), { clientX: 350 });
+
+    expect(harness.videoRef.current?.currentTime).toBe(30);
+    expect(harness.play).toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(DOUBLE_TAP_MS);
+    expect(harness.pause).toHaveBeenCalled();
+  });
+
+  it("while casting, double-tap seeks the receiver", async () => {
+    const seek = vi.fn();
+    await mountPlayer({
+      remote: idleRemote({
+        isActive: true,
+        currentTime: 30,
+        duration: 120,
+        seek,
+      }),
+    });
+    stubMediaRect();
+
+    fireEvent.click(mediaSurface(), { clientX: 350 });
+    fireEvent.click(mediaSurface(), { clientX: 350 });
+
+    expect(seek).toHaveBeenCalledWith(35);
+  });
+
+  it("does not skip when the media rect has no width", async () => {
+    const harness = await mountPlayer();
+    stubMediaRect(0);
+    await seedPosition(harness, 30);
+
+    fireEvent.click(mediaSurface(), { clientX: 50 });
+    fireEvent.click(mediaSurface(), { clientX: 50 });
+
     expect(harness.videoRef.current?.currentTime).toBe(30);
   });
 });

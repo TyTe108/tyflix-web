@@ -28,6 +28,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type MouseEvent,
   type ReactNode,
   type Ref,
   type RefObject,
@@ -167,6 +168,9 @@ const HIDE_DELAY_MS = 3000;
 // Shared by the control-bar buttons, keyboard shortcuts (45.1), and mobile
 // double-tap (45.2) so the three trigger paths cannot drift.
 const SKIP_SECONDS = 5;
+
+// Mobile double-tap window. Exported so tests advance by the real value.
+export const DOUBLE_TAP_MS = 250;
 
 // Speed is applied straight to video.playbackRate, so these never reach Plex.
 const SPEED_OPTIONS = [
@@ -372,6 +376,11 @@ export function PlayerControls({
   const mediaRef = useRef<HTMLDivElement | null>(null);
   const scrubbingRef = useRef(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Pending mobile media tap awaiting DOUBLE_TAP_MS before reveal/toggle.
+  const pendingTapRef = useRef<{
+    side: "left" | "right" | null;
+    timerId: ReturnType<typeof setTimeout>;
+  } | null>(null);
   // These mirror state into refs so the long-lived <video> listeners (and
   // onMediaClick) read current values without the effect rebinding on every
   // change.
@@ -454,6 +463,15 @@ export function PlayerControls({
       clearTimeout(hideTimerRef.current);
       hideTimerRef.current = null;
     }
+  };
+
+  const clearPendingTap = () => {
+    const pending = pendingTapRef.current;
+    if (pending === null) {
+      return;
+    }
+    clearTimeout(pending.timerId);
+    pendingTapRef.current = null;
   };
 
   // Arms the auto-hide countdown. Bails out and pins the bar whenever hiding it
@@ -799,10 +817,11 @@ export function PlayerControls({
     }
   }, [settingsSubmenu]);
 
-  // Don't leave a hide timer running after unmount.
+  // Don't leave a hide timer or pending double-tap running after unmount.
   useEffect(() => {
     return () => {
       clearHideTimer();
+      clearPendingTap();
     };
   }, []);
 
@@ -841,16 +860,70 @@ export function PlayerControls({
   // 3. Otherwise → toggle playback.
   // The reveal branch is gated on useIsMobile(), not (pointer: coarse), so a
   // touchscreen laptop above 48rem keeps desktop click-to-pause behavior.
-  const onMediaClick = () => {
+  //
+  // On mobile, taps 2 and 3 are buffered for DOUBLE_TAP_MS: a single tap already
+  // means reveal or toggle, so the gesture has to wait that window before its
+  // meaning is known (250ms latency on every mobile picture tap). A second tap
+  // on the same half skips instead and the single-tap action never runs.
+  // Desktop stays synchronous — no double-tap skip there, so no reason to pay
+  // the delay. Settings-open stays unbuffered on purpose so closing the panel
+  // feels instant and a double-tap with the panel open cannot skip.
+  const onMediaClick = (event: MouseEvent<HTMLDivElement>) => {
     if (settingsOpenRef.current) {
+      clearPendingTap();
       setSettingsOpen(false);
       return;
     }
-    if (isMobile && !controlsVisibleRef.current) {
-      revealControls();
+
+    const runSingleTap = () => {
+      if (settingsOpenRef.current) {
+        setSettingsOpen(false);
+        return;
+      }
+      if (isMobile && !controlsVisibleRef.current) {
+        revealControls();
+        return;
+      }
+      togglePlay();
+    };
+
+    if (!isMobile) {
+      runSingleTap();
       return;
     }
-    togglePlay();
+
+    const media = mediaRef.current;
+    let side: "left" | "right" | null = null;
+    if (media !== null) {
+      const rect = media.getBoundingClientRect();
+      if (rect.width > 0) {
+        const mid = rect.left + rect.width / 2;
+        side = event.clientX < mid ? "left" : "right";
+      }
+    }
+
+    // No usable rect: still buffer the single-tap action, but never match a
+    // double-tap (side stays null) — guessing a half would skip the wrong way.
+    const pending = pendingTapRef.current;
+    if (pending !== null && side !== null && pending.side === side) {
+      clearPendingTap();
+      skipBy(side === "left" ? -SKIP_SECONDS : SKIP_SECONDS);
+      return;
+    }
+
+    if (pending !== null) {
+      clearTimeout(pending.timerId);
+      pendingTapRef.current = null;
+      runSingleTap();
+    }
+
+    pendingTapRef.current = {
+      side,
+      timerId: setTimeout(() => {
+        pendingTapRef.current = null;
+        runSingleTap();
+      }, DOUBLE_TAP_MS),
+    };
   };
 
   const toggleMute = () => {
