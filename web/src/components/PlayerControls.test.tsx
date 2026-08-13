@@ -27,7 +27,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AudioStream, SubtitleStream } from "../api/watch";
 import type { RemotePlaybackControl } from "../cast/useCastPlayer";
-import { setViewport } from "../test/setup";
+import { setPointer, setViewport } from "../test/setup";
 import {
   DOUBLE_TAP_MS,
   PlayerControls,
@@ -280,6 +280,7 @@ describe("PlayerControls media tap", () => {
 
   it("mobile + controls hidden: media click reveals and does not toggle playback", async () => {
     setViewport("mobile");
+    setPointer("coarse");
     const harness = await mountPlayer();
     await hideControlsWhilePlaying(harness);
 
@@ -295,6 +296,7 @@ describe("PlayerControls media tap", () => {
 
   it("mobile + controls visible: media click toggles playback", async () => {
     setViewport("mobile");
+    setPointer("coarse");
     const harness = await mountPlayer();
     await hideControlsWhilePlaying(harness);
 
@@ -314,6 +316,7 @@ describe("PlayerControls media tap", () => {
 
   it("mobile + settings open: media click closes settings and does nothing else", async () => {
     setViewport("mobile");
+    setPointer("coarse");
     const harness = await mountPlayer();
     await hideControlsWhilePlaying(harness);
 
@@ -332,6 +335,7 @@ describe("PlayerControls media tap", () => {
 
   it("desktop + controls hidden: media click toggles playback (no reveal branch)", async () => {
     setViewport("desktop");
+    setPointer("fine");
     const harness = await mountPlayer();
     await hideControlsWhilePlaying(harness);
 
@@ -1166,6 +1170,7 @@ describe("PlayerControls double-tap skip", () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     setViewport("mobile");
+    setPointer("coarse");
   });
 
   afterEach(() => {
@@ -1270,5 +1275,34 @@ describe("PlayerControls double-tap skip", () => {
     fireEvent.click(mediaSurface(), { clientX: 50 });
 
     expect(harness.videoRef.current?.currentTime).toBe(30);
+  });
+
+  it("coarse pointer at desktop width: double-tap still skips (landscape phone)", async () => {
+    setViewport("desktop");
+    setPointer("coarse");
+    const harness = await mountPlayer();
+    stubMediaRect();
+    await seedPosition(harness, 30);
+
+    fireEvent.click(mediaSurface(), { clientX: 350 });
+    fireEvent.click(mediaSurface(), { clientX: 350 });
+
+    expect(harness.videoRef.current?.currentTime).toBe(35);
+  });
+
+  it("coarse pointer at desktop width: one tap reveals when controls are hidden", async () => {
+    setViewport("desktop");
+    setPointer("coarse");
+    const harness = await mountPlayer();
+    await hideControlsWhilePlaying(harness);
+
+    fireEvent.click(mediaSurface());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(DOUBLE_TAP_MS);
+    });
+
+    expect(harness.play).not.toHaveBeenCalled();
+    expect(harness.pause).not.toHaveBeenCalled();
+    expect(document.querySelector(".watch-controls--hidden")).toBeNull();
   });
 });

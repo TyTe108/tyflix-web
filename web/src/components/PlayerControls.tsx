@@ -36,7 +36,7 @@ import {
 import type { AudioStream, SubtitleStream } from "../api/watch";
 import type { RemotePlaybackControl } from "../cast/useCastPlayer";
 import { useCastState } from "../cast/useCastState";
-import { useIsMobile } from "../hooks/useIsMobile";
+import { useIsTouch } from "../hooks/useIsTouch";
 
 /** Which settings submenu is open, or null for the root menu. */
 type SettingsSubmenu = "speed" | "quality" | "audio" | "subtitles";
@@ -389,7 +389,7 @@ export function PlayerControls({
   const playbackRateRef = useRef(1);
   const remoteActiveRef = useRef(false);
 
-  const isMobile = useIsMobile();
+  const isTouch = useIsTouch();
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -855,19 +855,22 @@ export function PlayerControls({
 
   // Click on the picture. Precedence, top to bottom:
   // 1. Settings open → close the panel only (don't pause on the way out).
-  // 2. Mobile + controls hidden → reveal the bar only (touch has no pointermove,
+  // 2. Touch + controls hidden → reveal the bar only (touch has no pointermove,
   //    so without this the only way back is a tap that also toggled play).
   // 3. Otherwise → toggle playback.
-  // The reveal branch is gated on useIsMobile(), not (pointer: coarse), so a
-  // touchscreen laptop above 48rem keeps desktop click-to-pause behavior.
+  // The reveal branch (and the double-tap buffer below) are gated on
+  // (pointer: coarse), not viewport width. That still excludes a touchscreen
+  // laptop — its primary pointer is fine — which was 36.2's intent, and it
+  // additionally keeps a landscape phone on the touch path, which the width
+  // query got wrong (~851 CSS px).
   //
-  // On mobile, taps 2 and 3 are buffered for DOUBLE_TAP_MS: a single tap already
+  // On touch, taps 2 and 3 are buffered for DOUBLE_TAP_MS: a single tap already
   // means reveal or toggle, so the gesture has to wait that window before its
-  // meaning is known (250ms latency on every mobile picture tap). A second tap
+  // meaning is known (250ms latency on every touch picture tap). A second tap
   // on the same half skips instead and the single-tap action never runs.
-  // Desktop stays synchronous — no double-tap skip there, so no reason to pay
-  // the delay. Settings-open stays unbuffered on purpose so closing the panel
-  // feels instant and a double-tap with the panel open cannot skip.
+  // Fine-pointer stays synchronous — no double-tap skip there, so no reason to
+  // pay the delay. Settings-open stays unbuffered on purpose so closing the
+  // panel feels instant and a double-tap with the panel open cannot skip.
   const onMediaClick = (event: MouseEvent<HTMLDivElement>) => {
     if (settingsOpenRef.current) {
       clearPendingTap();
@@ -880,14 +883,14 @@ export function PlayerControls({
         setSettingsOpen(false);
         return;
       }
-      if (isMobile && !controlsVisibleRef.current) {
+      if (isTouch && !controlsVisibleRef.current) {
         revealControls();
         return;
       }
       togglePlay();
     };
 
-    if (!isMobile) {
+    if (!isTouch) {
       runSingleTap();
       return;
     }
