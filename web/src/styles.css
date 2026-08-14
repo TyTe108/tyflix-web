@@ -3111,8 +3111,11 @@ a {
   margin-top: 1.5rem;
 }
 
+/* Keep the banner proportionate on wide desktop viewports. */
 .collection-hero {
+  width: 100%;
   aspect-ratio: 16 / 9;
+  max-height: var(--hero-max-height);
   margin-bottom: 1.25rem;
   overflow: hidden;
   border-radius: var(--radius);
