@@ -15,6 +15,7 @@ import type {
 } from "../seerr/client";
 import type { IssueStatus, IssueView } from "../seerr/issues";
 import { issueSession, SESSION_COOKIE_NAME } from "../session";
+import type { UserPreferencesStore } from "../preferences/store";
 import { createMeRouter } from "./me";
 
 const SECRET = "sixteen-chars!!!";
@@ -22,6 +23,13 @@ const SECRET = "sixteen-chars!!!";
 beforeEach(() => {
   clearPermissionCacheForTests();
 });
+
+const defaultPreferences: UserPreferencesStore = {
+  get: () => ({ fullscreenOnPlay: true }),
+  async set(_id, patch) {
+    return { fullscreenOnPlay: true, ...patch };
+  },
+};
 
 type FakeRes = {
   cookies: Array<{ name: string; value: string }>;
@@ -82,6 +90,7 @@ describe("GET /api/me/quota", () => {
       createMeRouter({
         seerr,
         plexServer: {} as PlexServerClient,
+        preferences: defaultPreferences,
       }),
     );
 
@@ -284,6 +293,7 @@ function createBadgeApp(options: {
     createMeRouter({
       seerr,
       plexServer: {} as PlexServerClient,
+      preferences: defaultPreferences,
       ...(options.accessRequests === undefined
         ? {}
         : { accessRequestStore: { list: () => options.accessRequests! } }),
@@ -395,3 +405,209 @@ async function fetchLocal(
     });
   }
 }
+
+async function fetchMePreferences(
+  app: express.Express,
+  init: {
+    cookie?: string | null;
+    body?: unknown;
+    omitContentType?: boolean;
+  } = {},
+): Promise<Response> {
+  const server = app.listen(0);
+  try {
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("failed to bind test server");
+    }
+    const headers: Record<string, string> = {};
+    if (init.cookie) {
+      headers.Cookie = init.cookie;
+    }
+    if (!init.omitContentType) {
+      headers["content-type"] = "application/json";
+    }
+    return await fetch(
+      `http://127.0.0.1:${address.port}/api/me/preferences`,
+      {
+        method: "PATCH",
+        headers,
+        body:
+          init.body === undefined ? undefined : JSON.stringify(init.body),
+      },
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+  }
+}
+
+function buildPreferencesApp(preferences: UserPreferencesStore): {
+  app: express.Express;
+  seerr: SeerrClient;
+} {
+  const seerr = {
+    async getUserById(id: number) {
+      return {
+        id,
+        plexId: 10,
+        plexUsername: "tyler",
+        displayName: "Tyler",
+        email: null,
+        permissions: 0,
+      };
+    },
+  } as SeerrClient;
+
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/me",
+    requireAuth(SECRET, seerr, { isRevoked: () => false }),
+    createMeRouter({
+      seerr,
+      plexServer: {} as PlexServerClient,
+      preferences,
+    }),
+  );
+  return { app, seerr };
+}
+
+describe("PATCH /api/me/preferences", () => {
+  it("returns 200 with the merged preferences and persists for the caller", async () => {
+    let stored = { fullscreenOnPlay: true };
+    const preferences: UserPreferencesStore = {
+      get: () => stored,
+      async set(_id, patch) {
+        stored = { ...stored, ...patch };
+        return stored;
+      },
+    };
+    const { app } = buildPreferencesApp(preferences);
+
+    const response = await fetchMePreferences(app, {
+      cookie: sessionCookie(44),
+      body: { fullscreenOnPlay: false },
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { fullscreenOnPlay: false });
+    assert.deepEqual(preferences.get(44), { fullscreenOnPlay: false });
+  });
+
+  it("returns 400 for a non-boolean fullscreenOnPlay and leaves the store unchanged", async () => {
+    let setCalls = 0;
+    const preferences: UserPreferencesStore = {
+      get: () => ({ fullscreenOnPlay: true }),
+      async set() {
+        setCalls += 1;
+        return { fullscreenOnPlay: true };
+      },
+    };
+    const { app } = buildPreferencesApp(preferences);
+
+    const response = await fetchMePreferences(app, {
+      cookie: sessionCookie(44),
+      body: { fullscreenOnPlay: "no" },
+    });
+
+    assert.equal(response.status, 400);
+    assert.equal(setCalls, 0);
+  });
+
+  it("returns 400 for a missing body and leaves the store unchanged", async () => {
+    let setCalls = 0;
+    const preferences: UserPreferencesStore = {
+      get: () => ({ fullscreenOnPlay: true }),
+      async set() {
+        setCalls += 1;
+        return { fullscreenOnPlay: true };
+      },
+    };
+    const { app } = buildPreferencesApp(preferences);
+
+    const response = await fetchMePreferences(app, {
+      cookie: sessionCookie(44),
+      body: undefined,
+      omitContentType: true,
+    });
+
+    assert.equal(response.status, 400);
+    assert.equal(setCalls, 0);
+  });
+
+  it("returns 400 for a non-object body and leaves the store unchanged", async () => {
+    let setCalls = 0;
+    const preferences: UserPreferencesStore = {
+      get: () => ({ fullscreenOnPlay: true }),
+      async set() {
+        setCalls += 1;
+        return { fullscreenOnPlay: true };
+      },
+    };
+    const { app } = buildPreferencesApp(preferences);
+
+    const response = await fetchMePreferences(app, {
+      cookie: sessionCookie(44),
+      body: ["fullscreenOnPlay", false],
+    });
+
+    assert.equal(response.status, 400);
+    assert.equal(setCalls, 0);
+  });
+
+  it("returns 400 for an unrecognised key and leaves the store unchanged", async () => {
+    let setCalls = 0;
+    const preferences: UserPreferencesStore = {
+      get: () => ({ fullscreenOnPlay: true }),
+      async set() {
+        setCalls += 1;
+        return { fullscreenOnPlay: true };
+      },
+    };
+    const { app } = buildPreferencesApp(preferences);
+
+    const response = await fetchMePreferences(app, {
+      cookie: sessionCookie(44),
+      body: { fullscreenOnPlay: false, theme: "dark" },
+    });
+
+    assert.equal(response.status, 400);
+    assert.equal(setCalls, 0);
+  });
+
+  it("returns 401 without a session", async () => {
+    const { app } = buildPreferencesApp(defaultPreferences);
+
+    const response = await fetchMePreferences(app, {
+      cookie: null,
+      body: { fullscreenOnPlay: false },
+    });
+
+    assert.equal(response.status, 401);
+  });
+
+  it("returns 500 when the store write rejects and does not report success", async () => {
+    const preferences: UserPreferencesStore = {
+      get: () => ({ fullscreenOnPlay: true }),
+      async set() {
+        throw new Error("disk full");
+      },
+    };
+    const { app } = buildPreferencesApp(preferences);
+
+    const response = await fetchMePreferences(app, {
+      cookie: sessionCookie(44),
+      body: { fullscreenOnPlay: false },
+    });
+
+    assert.equal(response.status, 500);
+    const body = (await response.json()) as Record<string, unknown>;
+    assert.equal(body.fullscreenOnPlay, undefined);
+    assert.equal(
+      typeof body.error === "string" && body.error.includes("disk full"),
+      false,
+    );
+  });
+});

@@ -6,10 +6,11 @@
 // The shape is one small parseX function per variable. Each either returns a
 // clean value or throws with the variable's name in the message, so the log
 // line at boot tells you exactly which one to fix. Two variables have
-// defaults (PORT, NODE_ENV) and only ACCESS_REQUESTS_FILE is genuinely
-// optional. Everything else is required, because every one of them is a
-// credential, an upstream address, or core auth infrastructure the app can't
-// work without.
+// defaults (PORT, NODE_ENV), USER_PREFERENCES_FILE defaults next to the
+// session-revocation file when unset, and only ACCESS_REQUESTS_FILE is
+// genuinely optional. Everything else is required, because every one of them
+// is a credential, an upstream address, or core auth infrastructure the app
+// can't work without.
 //
 // loadConfig takes the env as a parameter defaulting to process.env, which is
 // what lets config.test.ts exercise all of this without mutating the real
@@ -46,6 +47,8 @@ export type AppConfig = {
   accessRequestsFile?: string;
   /** Absolute path to the session-revocation JSON file. Always required. */
   sessionRevocationFile: string;
+  /** Absolute path to the user-preferences JSON file. Always present. */
+  userPreferencesFile: string;
 };
 
 /**
@@ -200,6 +203,18 @@ function parseSessionRevocationFile(raw: string | undefined): string {
   return validated.trim();
 }
 
+// Absolute when set. Unset falls through to a default beside the revocation
+// file in loadConfig, so this only runs when the env var is actually present.
+function parseUserPreferencesFile(raw: string): string {
+  const validated = validate("USER_PREFERENCES_FILE", raw, (v) => {
+    if (!path.isAbsolute(v.trim())) {
+      return "must be an absolute path";
+    }
+    return null;
+  });
+  return validated.trim();
+}
+
 /**
  * Validates the whole environment and returns the config the rest of the server
  * runs on. Called once from index.ts at boot.
@@ -211,6 +226,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   // Resolved up front so the conditional spread at the bottom can leave the key
   // off the object entirely instead of setting it to undefined.
   const accessRequestsFile = parseAccessRequestsFile(env.ACCESS_REQUESTS_FILE);
+  const sessionRevocationFile = parseSessionRevocationFile(
+    env.SESSION_REVOCATION_FILE,
+  );
+  const userPreferencesFile =
+    env.USER_PREFERENCES_FILE !== undefined &&
+    env.USER_PREFERENCES_FILE.trim() !== ""
+      ? parseUserPreferencesFile(env.USER_PREFERENCES_FILE)
+      : path.join(
+          path.dirname(sessionRevocationFile),
+          "user-preferences.json",
+        );
   return {
     port: parsePort(env.PORT),
     nodeEnv: parseNodeEnv(env.NODE_ENV),
@@ -224,9 +250,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     sonarrApiKey: parseSonarrApiKey(env.SONARR_API_KEY),
     dashboardUrl: parseDashboardUrl(env.DASHBOARD_URL),
     tmdbApiKey: parseTmdbApiKey(env.TMDB_API_KEY),
-    sessionRevocationFile: parseSessionRevocationFile(
-      env.SESSION_REVOCATION_FILE,
-    ),
+    sessionRevocationFile,
+    userPreferencesFile,
     ...(accessRequestsFile !== undefined ? { accessRequestsFile } : {}),
   };
 }

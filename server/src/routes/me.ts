@@ -1,12 +1,13 @@
 // Per-user numbers for the Home page: what you asked for versus what you
-// actually watched, plus your Seerr request quota. Mounted at /api/me behind
-// requireAuth, with three endpoints: GET /stats, GET /quota, and
-// GET /badge-counts.
+// actually watched, plus your Seerr request quota, plus preference writes.
+// Mounted at /api/me behind requireAuth, with four endpoints: GET /stats,
+// GET /quota, GET /badge-counts, and PATCH /preferences.
 //
 // Both upstreams show up here. Plex supplies the account list and watch history;
 // Seerr supplies requests, issues, and quota. The optional local access-request
 // store contributes only its pending admin badge count. The analytics module
-// does the GB-weighting once the Plex and Seerr sides are joined.
+// does the GB-weighting once the Plex and Seerr sides are joined. Preferences
+// are a local JSON-file store — no upstream.
 //
 // The Plex account list and history are shared across every user, so they're
 // cached for a minute at router scope. Without that, each dashboard poll would
@@ -27,6 +28,7 @@ import {
   type SeerrRequest,
 } from "../seerr/client";
 import { isAdmin, type SessionPayload } from "../session";
+import type { UserPreferencesStore } from "../preferences/store";
 
 const SHARED_CACHE_TTL_MS = 60_000;
 
@@ -34,6 +36,7 @@ export type MeRouterDeps = {
   plexServer: PlexServerClient;
   seerr: SeerrClient;
   accessRequestStore?: Pick<AccessRequestStore, "list">;
+  preferences: UserPreferencesStore;
 };
 
 export type BadgeCounts = {
@@ -59,7 +62,7 @@ type CacheEntry<T> = {
 };
 
 export function createMeRouter(deps: MeRouterDeps): Router {
-  const { plexServer, seerr, accessRequestStore } = deps;
+  const { plexServer, seerr, accessRequestStore, preferences } = deps;
   const router = Router();
 
   // Server-wide data, not per-user, so one cache serves every caller. Lives for
@@ -89,6 +92,65 @@ export function createMeRouter(deps: MeRouterDeps): Router {
     historyCache = { at: now, value };
     return value;
   }
+
+  /**
+   * PATCH /api/me/preferences
+   *
+   * Merges a partial preferences object into the caller's stored row and
+   * returns the full merged preferences. Body must be a plain object whose
+   * only recognised key is `fullscreenOnPlay` (boolean). Unrecognised keys
+   * are rejected, not dropped.
+   *
+   * 200 with the merged preferences on success. 400 for a missing/non-object
+   * body, a non-boolean value, or an unrecognised key (store untouched). 401
+   * without a session. 500 when the store write fails — the body must not
+   * look like success.
+   */
+  router.patch("/preferences", async (req, res) => {
+    const session = res.locals.session as SessionPayload | undefined;
+    if (!session) {
+      res.status(401).json({ error: "not authenticated" });
+      return;
+    }
+
+    const body = req.body as unknown;
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      res.status(400).json({ error: "invalid preferences body" });
+      return;
+    }
+
+    const keys = Object.keys(body);
+    for (const key of keys) {
+      if (key !== "fullscreenOnPlay") {
+        res.status(400).json({ error: `unrecognised preference: ${key}` });
+        return;
+      }
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(body, "fullscreenOnPlay")) {
+      res.status(400).json({ error: "fullscreenOnPlay is required" });
+      return;
+    }
+
+    const fullscreenOnPlay = (body as { fullscreenOnPlay: unknown })
+      .fullscreenOnPlay;
+    if (typeof fullscreenOnPlay !== "boolean") {
+      res.status(400).json({ error: "fullscreenOnPlay must be a boolean" });
+      return;
+    }
+
+    try {
+      const merged = await preferences.set(session.seerrUserId, {
+        fullscreenOnPlay,
+      });
+      res.json(merged);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "failed to save preferences";
+      console.error(message);
+      res.status(500).json({ error: "failed to save preferences" });
+    }
+  });
 
   /**
    * GET /api/me/stats

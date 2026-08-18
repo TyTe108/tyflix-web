@@ -23,6 +23,7 @@ import {
   type SeerrUser,
 } from "../seerr/client";
 import type { SessionRevocationStore } from "../sessionRevocation";
+import type { UserPreferencesStore } from "../preferences/store";
 import {
   clearSession,
   isAdmin,
@@ -41,6 +42,7 @@ export type AuthRouterDeps = {
   // False in development so the cookie survives plain http://localhost.
   secureCookies: boolean;
   sessionRevocation: SessionRevocationStore;
+  preferences: UserPreferencesStore;
   // Optional; production mounts plexCompleteLimiter. Tests omit it so the
   // suite never trips 429s.
   completeLimiter?: RequestHandler;
@@ -53,6 +55,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
     sessionSecret,
     secureCookies,
     sessionRevocation,
+    preferences,
     completeLimiter,
   } = deps;
   const router = Router();
@@ -115,13 +118,16 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
    *
    * Who's signed in. Verifies the cookie, then re-checks revocation and
    * permissions against Seerr (same helper as requireAuth). Returns
-   * `{ user, isAdmin }` with the live permissions, 401 when the cookie is
+   * `{ user, isAdmin, preferences }` with the live permissions and the caller's
+   * stored preferences (defaults when no row), 401 when the cookie is
    * missing/tampered/expired/revoked or Seerr says the account is gone, and
    * 503 when Seerr is unreachable.
    *
    * Note the `user` block leaves out email: that only comes back from
    * /plex/complete, since the session doesn't carry it. The cookie is not
-   * rewritten — fresh permissions are response-only.
+   * rewritten — fresh permissions are response-only. Preferences are a
+   * synchronous local read; they don't add an upstream call or a failure
+   * branch.
    */
   router.get("/me", async (req, res) => {
     const session = readSession(req, sessionSecret);
@@ -154,6 +160,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         permissions: result.permissions,
       },
       isAdmin: isAdmin(result.permissions),
+      preferences: preferences.get(session.seerrUserId),
     });
   });
 

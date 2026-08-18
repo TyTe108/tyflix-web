@@ -21,8 +21,14 @@ import {
   createSessionRevocationStore,
   type SessionRevocationStore,
 } from "../sessionRevocation";
+import {
+  createUserPreferencesStore,
+  type UserPreferencesStore,
+} from "../preferences/store";
 import { issueSession, SESSION_COOKIE_NAME } from "../session";
 import { createAuthRouter } from "./auth";
+import { createMeRouter } from "./me";
+import type { PlexServerClient } from "../plex/server";
 
 beforeEach(() => {
   clearPermissionCacheForTests();
@@ -75,8 +81,15 @@ function buildApp(
       getUserById?: (id: number) => Promise<SeerrUser | null>;
     };
     sessionRevocation?: SessionRevocationStore;
+    preferences?: UserPreferencesStore;
+    mountMe?: boolean;
   } = {},
-): { app: express.Express; calls: Calls; sessionRevocation: SessionRevocationStore } {
+): {
+  app: express.Express;
+  calls: Calls;
+  sessionRevocation: SessionRevocationStore;
+  preferences: UserPreferencesStore;
+} {
   const calls: Calls = {
     signInTokens: [],
     getUserPlexIds: [],
@@ -117,6 +130,15 @@ function buildApp(
       },
     } satisfies SessionRevocationStore);
 
+  const preferences =
+    overrides.preferences ??
+    ({
+      get: () => ({ fullscreenOnPlay: true }),
+      async set(_id, patch) {
+        return { fullscreenOnPlay: true, ...patch };
+      },
+    } satisfies UserPreferencesStore);
+
   const app = express();
   app.use(express.json());
   app.use(
@@ -127,8 +149,20 @@ function buildApp(
       sessionSecret: SECRET,
       secureCookies: false,
       sessionRevocation,
+      preferences,
     }),
   );
+  if (overrides.mountMe) {
+    app.use(
+      "/api/me",
+      requireAuth(SECRET, seerr, sessionRevocation),
+      createMeRouter({
+        seerr,
+        plexServer: {} as PlexServerClient,
+        preferences,
+      }),
+    );
+  }
   // Protected probe used by logout tests to assert the cookie is dead.
   app.use(
     "/api/probe",
@@ -137,7 +171,7 @@ function buildApp(
       res.json({ ok: true });
     },
   );
-  return { app, calls, sessionRevocation };
+  return { app, calls, sessionRevocation, preferences };
 }
 
 function sessionCookieValue(response: Response): string | null {
@@ -292,6 +326,44 @@ describe("GET /api/auth/me", () => {
     assert.equal(body.user.permissions, 2);
     assert.equal(body.user.seerrUserId, 9);
     assert.equal(body.isAdmin, true);
+  });
+
+  it("returns default preferences for a user with no stored row", async () => {
+    const { app } = buildApp();
+
+    const response = await fetchMe(app, meCookie(0, 9));
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      preferences: { fullscreenOnPlay: boolean };
+    };
+    assert.deepEqual(body.preferences, { fullscreenOnPlay: true });
+  });
+
+  it("PATCH /api/me/preferences then GET /me reports the stored value", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tyflix-auth-prefs-"));
+    const preferences = await createUserPreferencesStore(
+      path.join(dir, "user-preferences.json"),
+    );
+    const { app } = buildApp({ preferences, mountMe: true });
+    const cookie = meCookie(0, 9);
+
+    const patch = await fetchLocal(app, "/api/me/preferences", {
+      method: "PATCH",
+      headers: {
+        cookie,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ fullscreenOnPlay: false }),
+    });
+    assert.equal(patch.status, 200);
+    assert.deepEqual(await patch.json(), { fullscreenOnPlay: false });
+
+    const me = await fetchMe(app, cookie);
+    assert.equal(me.status, 200);
+    const body = (await me.json()) as {
+      preferences: { fullscreenOnPlay: boolean };
+    };
+    assert.deepEqual(body.preferences, { fullscreenOnPlay: false });
   });
 });
 

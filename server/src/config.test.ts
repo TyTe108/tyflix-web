@@ -35,7 +35,35 @@ describe("loadConfig", () => {
       dashboardUrl: "http://dashboard:8787",
       tmdbApiKey: "tmdb-api-key",
       sessionRevocationFile: "/data/session-revocation.json",
+      userPreferencesFile: "/data/user-preferences.json",
     });
+  });
+
+  it("defaults USER_PREFERENCES_FILE next to SESSION_REVOCATION_FILE when unset", () => {
+    const config = loadConfig(validEnv);
+    assert.equal(config.userPreferencesFile, "/data/user-preferences.json");
+  });
+
+  it("uses an absolute USER_PREFERENCES_FILE when set", () => {
+    const config = loadConfig({
+      ...validEnv,
+      USER_PREFERENCES_FILE: "/other/prefs.json",
+    });
+    assert.equal(config.userPreferencesFile, "/other/prefs.json");
+  });
+
+  it("throws naming USER_PREFERENCES_FILE when set to a relative path", () => {
+    assert.throws(
+      () =>
+        loadConfig({
+          ...validEnv,
+          USER_PREFERENCES_FILE: "data/user-preferences.json",
+        }),
+      (err: unknown) =>
+        err instanceof Error &&
+        err.message.includes("USER_PREFERENCES_FILE") &&
+        err.message.includes("absolute"),
+    );
   });
 
   it("throws naming SESSION_REVOCATION_FILE when missing or empty", () => {

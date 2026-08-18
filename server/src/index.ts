@@ -60,6 +60,7 @@ import { createWatchlistRouter } from "./routes/watchlist";
 import { createSeerrClient } from "./seerr/client";
 import { createMediaStatusProvider } from "./seerr/mediaStatusProvider";
 import { createSessionRevocationStore } from "./sessionRevocation";
+import { createUserPreferencesStore } from "./preferences/store";
 import { createSonarrClient } from "./sonarr/client";
 import { createTmdbClient } from "./tmdb/client";
 import { createMediaEnrichment } from "./tmdb/enrichment";
@@ -91,6 +92,12 @@ async function start(): Promise<void> {
   // Boot fails loud if SESSION_REVOCATION_FILE's parent directory is missing.
   const sessionRevocation = await createSessionRevocationStore(
     config.sessionRevocationFile,
+  );
+
+  // Always constructed — same durability contract as session revocation. Boot
+  // fails loud if USER_PREFERENCES_FILE's parent directory is missing.
+  const preferences = await createUserPreferencesStore(
+    config.userPreferencesFile,
   );
 
   // Self-serve access requests are off unless ACCESS_REQUESTS_FILE points at a
@@ -238,6 +245,7 @@ async function start(): Promise<void> {
       sessionSecret: config.sessionSecret,
       secureCookies,
       sessionRevocation,
+      preferences,
       completeLimiter: plexCompleteLimiter,
     }),
   );
@@ -266,7 +274,7 @@ async function start(): Promise<void> {
   app.use(
     "/api/me",
     requireAuth(config.sessionSecret, seerr, sessionRevocation),
-    createMeRouter({ plexServer, seerr, accessRequestStore }),
+    createMeRouter({ plexServer, seerr, accessRequestStore, preferences }),
   );
 
   // More specific than /api/admin — mount first. requireAdmin at the mount so
