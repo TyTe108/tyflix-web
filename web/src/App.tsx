@@ -17,6 +17,7 @@
 //   /watchlist                     your Plex Watchlist
 //   /requests                      your Seerr requests
 //   /issues, /issues/:id           problems you reported on a title
+//   /settings                      account preferences (fullscreen-on-Play)
 //   /media/:type/:id               title page, :type is movie or tv
 //   /person/:id                    a TMDB person and their credits
 //   /collection/:id                a TMDB collection
@@ -52,6 +53,7 @@ import { MyIssuesPage } from "./pages/MyIssuesPage";
 import { MyRequestsPage } from "./pages/MyRequestsPage";
 import { PersonPage } from "./pages/PersonPage";
 import { RequestAccessPage } from "./pages/RequestAccessPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { WatchPage } from "./pages/WatchPage";
 import { WatchlistPage } from "./pages/WatchlistPage";
 
@@ -77,6 +79,7 @@ export function App() {
           <Route path="/requests" element={<MyRequestsPage />} />
           <Route path="/issues" element={<MyIssuesPage />} />
           <Route path="/issues/:id" element={<IssueDetailPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="/media/:type/:id" element={<MediaDetailPage />} />
           <Route path="/watch/movie/:tmdbId" element={<WatchPage />} />
           <Route path="/watch/episode/:ratingKey" element={<WatchPage />} />

@@ -65,6 +65,20 @@ const IssuesIcon = (
   </svg>
 );
 
+const SettingsIcon = (
+  <svg {...iconProps}>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M12 3v2.2" />
+    <path d="M12 18.8V21" />
+    <path d="M4.9 6.3l1.6 1.6" />
+    <path d="M17.5 16.1l1.6 1.6" />
+    <path d="M3 12h2.2" />
+    <path d="M18.8 12H21" />
+    <path d="M4.9 17.7l1.6-1.6" />
+    <path d="M17.5 7.9l1.6-1.6" />
+  </svg>
+);
+
 const AdminIcon = (
   <svg {...iconProps}>
     <path d="M12 3 5 6v5c0 4.2 2.9 7.9 7 9 4.1-1.1 7-4.8 7-9V6z" />
@@ -106,6 +120,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: "/watchlist", label: "Watchlist", icon: WatchlistIcon },
   { to: "/requests", label: "My Requests", icon: RequestsIcon },
   { to: "/issues", label: "My Issues", icon: IssuesIcon },
+  { to: "/settings", label: "Settings", icon: SettingsIcon },
   { to: "/admin", label: "Admin", icon: AdminIcon, adminOnly: true },
 ];
 
@@ -118,7 +133,7 @@ const MOBILE_TAB_PATHS = [
   "/requests",
 ] as const;
 
-const MOBILE_MORE_PATHS = ["/home", "/issues", "/admin"] as const;
+const MOBILE_MORE_PATHS = ["/home", "/issues", "/settings", "/admin"] as const;
 
 function itemsForPaths(paths: readonly string[]): NavItem[] {
   return paths.map((path) => {

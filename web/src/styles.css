@@ -60,6 +60,81 @@ body {
   max-width: 72rem;
 }
 
+.settings-section {
+  margin-top: 1.75rem;
+  max-width: 36rem;
+}
+
+.settings-section h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.15rem;
+}
+
+.settings-section-copy {
+  margin: 0 0 1rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.settings-toggle-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0;
+  min-height: 44px;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+@media (hover: hover) {
+  .settings-toggle:hover {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    color: var(--accent-hover);
+  }
+}
+
+.settings-toggle:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.settings-toggle-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-toggle input {
+  flex-shrink: 0;
+  margin: 0;
+  width: 1.15rem;
+  height: 1.15rem;
+  accent-color: var(--accent);
+}
+
+.settings-toggle:has(input:disabled) {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.settings-toggle-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+
 .app-shell {
   display: flex;
   align-items: flex-start;

@@ -53,6 +53,7 @@ const NON_ADMIN_LABELS = [
   "Watchlist",
   "My Requests",
   "My Issues",
+  "Settings",
 ] as const;
 
 const ZERO_COUNTS: BadgeCounts = {
@@ -106,7 +107,7 @@ describe("AppShell", () => {
     cleanup();
   });
 
-  it("shows the six non-admin nav links and hides Admin for a non-admin", async () => {
+  it("shows the seven non-admin nav links and hides Admin for a non-admin", async () => {
     vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: false }));
     vi.mocked(fetchBadgeCounts).mockResolvedValue({
       mine: { requests: 0, issues: 0 },
@@ -122,7 +123,7 @@ describe("AppShell", () => {
 
     const nav = screen.getByRole("navigation", { name: "Primary" });
     const links = within(nav).getAllByRole("link");
-    expect(links).toHaveLength(6);
+    expect(links).toHaveLength(7);
 
     for (const label of NON_ADMIN_LABELS) {
       within(nav).getByRole("link", { name: label });
@@ -131,7 +132,7 @@ describe("AppShell", () => {
     expect(within(nav).queryByRole("link", { name: "Admin" })).toBeNull();
   });
 
-  it("shows Admin in addition to the six non-admin links for an admin", async () => {
+  it("shows Admin in addition to the seven non-admin links for an admin", async () => {
     vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: true }));
 
     renderAppShell();
@@ -141,7 +142,7 @@ describe("AppShell", () => {
 
     const nav = screen.getByRole("navigation", { name: "Primary" });
     const links = within(nav).getAllByRole("link");
-    expect(links).toHaveLength(7);
+    expect(links).toHaveLength(8);
 
     for (const label of NON_ADMIN_LABELS) {
       within(nav).getByRole("link", { name: label });

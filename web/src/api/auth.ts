@@ -31,8 +31,6 @@ export type AuthUser = {
   email?: string | null;
 };
 
-// `isAdmin` is decided server-side from the permission bits (Seerr's admin bit),
-// so the client never has to know how that's computed.
 export type UserPreferences = {
   fullscreenOnPlay: boolean;
 };
@@ -42,6 +40,8 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   fullscreenOnPlay: true,
 };
 
+// `isAdmin` is decided server-side from the permission bits (Seerr's admin bit),
+// so the client never has to know how that's computed.
 export type MeResponse = {
   user: AuthUser;
   isAdmin: boolean;
