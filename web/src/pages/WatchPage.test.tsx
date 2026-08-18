@@ -3,11 +3,13 @@
 // it. Wording of the diagnostic message is deliberately not asserted — only
 // that the secret is absent and the hostname remains.
 //
-// Also covers wantsFullscreenFromNavState: the Play-navigation flag that
-// WatchPage reads from location.state before mounting PlayerControls.
+// Also covers wantsFullscreenFromNavState and shouldEnterFullscreenOnMount:
+// Play-navigation latches enterFullscreen, and the account preference gates
+// whether that becomes enterFullscreenOnMount for PlayerControls.
 import { describe, expect, it } from "vitest";
 import {
   buildHlsPlaybackFailureReport,
+  shouldEnterFullscreenOnMount,
   wantsFullscreenFromNavState,
 } from "./WatchPage";
 
@@ -74,5 +76,24 @@ describe("wantsFullscreenFromNavState", () => {
     expect(wantsFullscreenFromNavState({ enterFullscreen: "yes" })).toBe(
       false,
     );
+  });
+});
+
+describe("shouldEnterFullscreenOnMount", () => {
+  it("is true when nav asks for fullscreen and the preference allows it", () => {
+    expect(
+      shouldEnterFullscreenOnMount({ enterFullscreen: true }, true),
+    ).toBe(true);
+  });
+
+  it("is false when nav asks for fullscreen but the preference is off", () => {
+    expect(
+      shouldEnterFullscreenOnMount({ enterFullscreen: true }, false),
+    ).toBe(false);
+  });
+
+  it("is false with no nav state even when the preference is on", () => {
+    expect(shouldEnterFullscreenOnMount(null, true)).toBe(false);
+    expect(shouldEnterFullscreenOnMount(undefined, true)).toBe(false);
   });
 });

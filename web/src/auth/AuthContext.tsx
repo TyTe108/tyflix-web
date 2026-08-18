@@ -32,9 +32,11 @@ import {
   type ReactNode,
 } from "react";
 import {
+  DEFAULT_USER_PREFERENCES,
   fetchMe,
   logoutRequest,
   type AuthUser,
+  type UserPreferences,
 } from "../api/auth";
 
 // "loading" only means the first /api/auth/me hasn't come back yet. A later
@@ -44,9 +46,13 @@ export type AuthStatus = "loading" | "authed" | "anon";
 type AuthContextValue = {
   user: AuthUser | null;
   isAdmin: boolean; // decided server-side from Seerr's permission bits
+  preferences: UserPreferences;
   status: AuthStatus;
   refresh: () => Promise<void>; // re-read the session, e.g. right after login
   logout: () => Promise<void>;
+  // Replaces the held preferences without another /api/auth/me round trip.
+  // Callers that PATCH /api/me/preferences use this with the server's reply.
+  setPreferences: (preferences: UserPreferences) => void;
 };
 
 // Null default so useAuth can tell "no provider above me" from "provider says
@@ -64,28 +70,35 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [preferences, setPreferences] = useState<UserPreferences>(
+    DEFAULT_USER_PREFERENCES,
+  );
   const [status, setStatus] = useState<AuthStatus>("loading");
 
   // Re-reads the session from the cookie. Both failure shapes land in the same
   // place: fetchMe returning null (a clean 401) and fetchMe throwing (network
-  // trouble, or a 5xx) both drop to "anon". Erring toward logged-out is the
-  // safe direction, since the server re-checks every request anyway and a
-  // wrongly-optimistic "authed" would just render pages that then 401.
+  // trouble, or a 5xx) both drop to "anon" and reset preferences to the
+  // default. Erring toward logged-out is the safe direction, since the server
+  // re-checks every request anyway and a wrongly-optimistic "authed" would
+  // just render pages that then 401.
   const refresh = useCallback(async () => {
     try {
       const me = await fetchMe();
       if (me === null) {
         setUser(null);
         setIsAdmin(false);
+        setPreferences(DEFAULT_USER_PREFERENCES);
         setStatus("anon");
         return;
       }
       setUser(me.user);
       setIsAdmin(me.isAdmin);
+      setPreferences(me.preferences);
       setStatus("authed");
     } catch {
       setUser(null);
       setIsAdmin(false);
+      setPreferences(DEFAULT_USER_PREFERENCES);
       setStatus("anon");
     }
   }, []);
@@ -100,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setUser(null);
       setIsAdmin(false);
+      setPreferences(DEFAULT_USER_PREFERENCES);
       setStatus("anon");
     }
   }, []);
@@ -111,8 +125,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const value = useMemo(
-    () => ({ user, isAdmin, status, refresh, logout }),
-    [user, isAdmin, status, refresh, logout],
+    () => ({
+      user,
+      isAdmin,
+      preferences,
+      status,
+      refresh,
+      logout,
+      setPreferences,
+    }),
+    [user, isAdmin, preferences, status, refresh, logout, setPreferences],
   );
 
   return (

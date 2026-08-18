@@ -33,9 +33,19 @@ export type AuthUser = {
 
 // `isAdmin` is decided server-side from the permission bits (Seerr's admin bit),
 // so the client never has to know how that's computed.
+export type UserPreferences = {
+  fullscreenOnPlay: boolean;
+};
+
+/** Default when /me hasn't answered yet, after logout, or when the field is bad. */
+export const DEFAULT_USER_PREFERENCES: UserPreferences = {
+  fullscreenOnPlay: true,
+};
+
 export type MeResponse = {
   user: AuthUser;
   isAdmin: boolean;
+  preferences: UserPreferences;
 };
 
 export type PlexCheckOk = {
@@ -67,7 +77,33 @@ export async function fetchMe(): Promise<MeResponse | null> {
   if (!res.ok) {
     throw new Error(`Failed to load session (${res.status})`);
   }
-  return (await res.json()) as MeResponse;
+  const body = (await res.json()) as MeResponse;
+  // Guard the unchecked cast: a missing or malformed preferences field must
+  // not leave undefined for callers to blow up on when they read
+  // .fullscreenOnPlay. Not version skew — server and SPA ship together.
+  return {
+    ...body,
+    preferences: normalizePreferences(body.preferences),
+  };
+}
+
+/**
+ * Turns whatever landed on `preferences` into a usable UserPreferences.
+ * Absent, non-object, or non-boolean fullscreenOnPlay → the default.
+ */
+function normalizePreferences(raw: unknown): UserPreferences {
+  if (
+    typeof raw === "object" &&
+    raw !== null &&
+    typeof (raw as { fullscreenOnPlay?: unknown }).fullscreenOnPlay ===
+      "boolean"
+  ) {
+    return {
+      fullscreenOnPlay: (raw as { fullscreenOnPlay: boolean })
+        .fullscreenOnPlay,
+    };
+  }
+  return { ...DEFAULT_USER_PREFERENCES };
 }
 
 /**

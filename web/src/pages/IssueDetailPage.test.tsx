@@ -9,10 +9,14 @@ import { fetchIssue, type IssueView } from "../api/issues";
 import { AuthProvider } from "../auth/AuthContext";
 import { IssueDetailPage } from "./IssueDetailPage";
 
-vi.mock("../api/auth", () => ({
-  fetchMe: vi.fn(),
-  logoutRequest: vi.fn(),
-}));
+vi.mock("../api/auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/auth")>();
+  return {
+    ...actual,
+    fetchMe: vi.fn(),
+    logoutRequest: vi.fn(),
+  };
+});
 
 vi.mock("../api/issues", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/issues")>();
@@ -56,6 +60,7 @@ function meUser(isAdmin: boolean) {
       avatar: null,
       permissions: isAdmin ? 2 : 0,
     },
+    preferences: { fullscreenOnPlay: true },
   };
 }
 

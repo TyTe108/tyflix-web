@@ -26,10 +26,14 @@ import { AppShell } from "./AppShell";
 
 // AuthProvider imports fetchMe / logoutRequest from this module. Replacing the
 // whole module keeps AuthProvider real while controlling the session it sees.
-vi.mock("../api/auth", () => ({
-  fetchMe: vi.fn(),
-  logoutRequest: vi.fn(),
-}));
+vi.mock("../api/auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/auth")>();
+  return {
+    ...actual,
+    fetchMe: vi.fn(),
+    logoutRequest: vi.fn(),
+  };
+});
 
 // AppShell calls fetchBadgeCounts on every signed-in mount and again on a 60s
 // interval. Keep the real helpers (adminBadgeRollup) while replacing only the
@@ -70,6 +74,7 @@ function meResponse(overrides: {
       avatar: null,
       permissions: overrides.isAdmin ? 2 : 0,
     },
+    preferences: { fullscreenOnPlay: true },
   };
 }
 

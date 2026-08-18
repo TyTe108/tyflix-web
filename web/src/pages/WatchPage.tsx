@@ -57,6 +57,7 @@ import { loadMediaOnCast } from "../cast/loadMediaOnCast";
 import { subscribeSessionReady } from "../cast/subscribeSessionReady";
 import { useCastPlayer } from "../cast/useCastPlayer";
 import { useCastState } from "../cast/useCastState";
+import { useAuth } from "../auth/AuthContext";
 
 // Auto-advance is a per-browser preference, so it lives in localStorage.
 const AUTO_PLAY_STORAGE_KEY = "tyflix.autoPlay";
@@ -453,6 +454,19 @@ export function wantsFullscreenFromNavState(state: unknown): boolean {
   );
 }
 
+/**
+ * Whether PlayerControls should enter fullscreen on mount.
+ *
+ * Nav state means the user pressed Play; the account preference decides
+ * whether that Play also means fullscreen. Both must be true.
+ */
+export function shouldEnterFullscreenOnMount(
+  navState: unknown,
+  fullscreenOnPlay: boolean,
+): boolean {
+  return wantsFullscreenFromNavState(navState) && fullscreenOnPlay;
+}
+
 // Route params are whatever's in the URL bar. Anything that isn't a positive
 // integer comes back null and the page renders its error state instead of
 // firing a doomed request.
@@ -596,7 +610,13 @@ function sendTimelinePayload(
 export function WatchPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const enterFullscreenOnMount = wantsFullscreenFromNavState(location.state);
+  const { preferences } = useAuth();
+  // Nav state means Play was pressed; the preference decides whether that
+  // means fullscreen. Deep links and ended auto-advance pass no nav state.
+  const enterFullscreenOnMount = shouldEnterFullscreenOnMount(
+    location.state,
+    preferences.fullscreenOnPlay,
+  );
   const {
     tmdbId: rawTmdbId,
     ratingKey: rawRatingKey,

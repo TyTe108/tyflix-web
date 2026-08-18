@@ -1,6 +1,6 @@
 // Client for the server's me router (server/src/routes/me.ts), mounted at
-// /api/me behind requireAuth. Two endpoints, both about the signed-in user:
-// their watched-versus-requested numbers and their Seerr request quota.
+// /api/me behind requireAuth. Three shapes of call about the signed-in user:
+// watched-versus-requested numbers, Seerr request quota, and preference writes.
 //
 // The stats are the one thing Tyflix computes that Seerr doesn't. The server
 // joins Seerr's request list to Plex's watch history, then weights everything
@@ -8,7 +8,11 @@
 // rather than in titles. Both the Plex account list and the history are cached
 // for a minute server-side, since they're the same for everyone.
 //
+// Preferences are a local JSON-file store on the server — no Plex/Seerr call.
+//
 // Errors follow the api/discover.ts convention: throw on non-2xx.
+
+import type { UserPreferences } from "./auth";
 
 // The GB-weighted headline numbers. Despite the gb* names these are all raw
 // byte counts; formatBytes at the bottom is what turns them into GB or TB.
@@ -96,6 +100,26 @@ export async function fetchMyQuota(): Promise<MyQuota> {
     throw new Error(`Failed to load request quota (${res.status})`);
   }
   return (await res.json()) as MyQuota;
+}
+
+/**
+ * PATCH /api/me/preferences. Merges a partial preferences object for the
+ * signed-in user and returns the full merged result from the server.
+ *
+ * @throws Error on any non-2xx — never resolves with a locally assumed value.
+ */
+export async function updatePreferences(
+  patch: Partial<UserPreferences>,
+): Promise<UserPreferences> {
+  const res = await fetch("/api/me/preferences", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to update preferences (${res.status})`);
+  }
+  return (await res.json()) as UserPreferences;
 }
 
 /**

@@ -22,10 +22,14 @@ import { AuthProvider } from "../auth/AuthContext";
 import { setViewport } from "../test/setup";
 import { MobileNav } from "./MobileNav";
 
-vi.mock("../api/auth", () => ({
-  fetchMe: vi.fn(),
-  logoutRequest: vi.fn(),
-}));
+vi.mock("../api/auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/auth")>();
+  return {
+    ...actual,
+    fetchMe: vi.fn(),
+    logoutRequest: vi.fn(),
+  };
+});
 
 const TAB_LABELS = [
   "Library",
@@ -49,6 +53,7 @@ function meResponse(overrides: {
       avatar: null,
       permissions: overrides.isAdmin ? 2 : 0,
     },
+    preferences: { fullscreenOnPlay: true },
   };
 }
 

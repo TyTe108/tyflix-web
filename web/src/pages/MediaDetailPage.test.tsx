@@ -16,10 +16,14 @@ import { fetchMovie, fetchTv, type MovieDetail, type TvDetail } from "../api/dis
 import { AuthProvider } from "../auth/AuthContext";
 import { MediaDetailPage } from "./MediaDetailPage";
 
-vi.mock("../api/auth", () => ({
-  fetchMe: vi.fn(),
-  logoutRequest: vi.fn(),
-}));
+vi.mock("../api/auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/auth")>();
+  return {
+    ...actual,
+    fetchMe: vi.fn(),
+    logoutRequest: vi.fn(),
+  };
+});
 
 vi.mock("../api/discover", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/discover")>();
@@ -94,6 +98,7 @@ function meUser(isAdmin: boolean) {
       avatar: null,
       permissions: isAdmin ? 2 : 0,
     },
+    preferences: { fullscreenOnPlay: true },
   };
 }
 
@@ -195,6 +200,7 @@ describe("Play navigation enterFullscreen state", () => {
         avatar: null,
         permissions: 0,
       },
+      preferences: { fullscreenOnPlay: true },
     });
     vi.mocked(fetchMovie).mockResolvedValue(movieDetail);
 
