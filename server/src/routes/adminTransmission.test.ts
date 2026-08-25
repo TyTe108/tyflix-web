@@ -39,17 +39,23 @@ const FORBIDDEN_TORRENT_GET_FIELDS = [
 
 function createTrackingDeps(options: {
   fieldsSeen: string[][];
+  idsSeen?: Array<string[] | undefined>;
   listResult?: unknown;
+  detailResult?: unknown;
   listError?: Error;
   statsResult?: unknown;
   statsError?: Error;
 }): AdminTransmissionRouterDeps {
   return {
     transmission: {
-      async listTorrents(fields: string[]) {
+      async listTorrents(fields: string[], ids?: string[]) {
         options.fieldsSeen.push(fields);
+        options.idsSeen?.push(ids);
         if (options.listError) {
           throw options.listError;
+        }
+        if (ids !== undefined && options.detailResult !== undefined) {
+          return options.detailResult as object;
         }
         return (
           options.listResult ?? {
@@ -66,6 +72,33 @@ function createTrackingDeps(options: {
     },
   };
 }
+
+const DETAIL_ROW = {
+  hashString: "abc123",
+  name: "Example detail",
+  totalSize: 1000,
+  pieceCount: 1,
+  pieceSize: 1000,
+  isPrivate: false,
+  comment: "",
+  creator: "",
+  dateCreated: 0,
+  addedDate: 100,
+  doneDate: 0,
+  activityDate: 0,
+  downloadDir: "/downloads",
+  downloadedEver: 1000,
+  uploadedEver: 0,
+  corruptEver: 0,
+  haveValid: 1000,
+  secondsDownloading: 10,
+  secondsSeeding: 0,
+  errorString: "",
+  files: [],
+  fileStats: [],
+  peers: [],
+  trackerStats: [],
+};
 
 describe("GET /api/admin/transmission/torrents", () => {
   it("returns 401 with no session", async () => {
@@ -146,6 +179,80 @@ describe("GET /api/admin/transmission/torrents", () => {
     } finally {
       console.error = originalConsoleError;
     }
+  });
+});
+
+describe("GET /api/admin/transmission/torrents/:hash", () => {
+  it("returns 401 with no session", async () => {
+    const fieldsSeen: string[][] = [];
+    const response = await fetchLocal(
+      createApp(createTrackingDeps({ fieldsSeen }), null),
+      "/api/admin/transmission/torrents/abc123",
+    );
+    assert.equal(response.status, 401);
+    assert.deepEqual(fieldsSeen, []);
+  });
+
+  it("returns 403 with a non-admin session", async () => {
+    const fieldsSeen: string[][] = [];
+    const response = await fetchLocal(
+      createApp(createTrackingDeps({ fieldsSeen }), nonAdminSession),
+      "/api/admin/transmission/torrents/abc123",
+    );
+    assert.equal(response.status, 403);
+    assert.deepEqual(fieldsSeen, []);
+  });
+
+  it("returns 200 with normalised detail for an admin", async () => {
+    const fieldsSeen: string[][] = [];
+    const response = await fetchLocal(
+      createApp(
+        createTrackingDeps({
+          fieldsSeen,
+          detailResult: { torrents: [DETAIL_ROW] },
+        }),
+      ),
+      "/api/admin/transmission/torrents/abc123",
+    );
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { hash: string; name: string };
+    assert.deepEqual(body, {
+      ...body,
+      hash: "abc123",
+      name: "Example detail",
+    });
+  });
+
+  it("scopes torrent-get with ids and does not request magnetLink", async () => {
+    const fieldsSeen: string[][] = [];
+    const idsSeen: Array<string[] | undefined> = [];
+    const response = await fetchLocal(
+      createApp(
+        createTrackingDeps({
+          fieldsSeen,
+          idsSeen,
+          detailResult: { torrents: [DETAIL_ROW] },
+        }),
+      ),
+      "/api/admin/transmission/torrents/abc123",
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(idsSeen, [["abc123"]]);
+    assert.equal(fieldsSeen.length, 1);
+    assert.equal(fieldsSeen[0]?.includes("magnetLink"), false);
+  });
+
+  it("returns 404 when Transmission returns no matching torrent", async () => {
+    const response = await fetchLocal(
+      createApp(
+        createTrackingDeps({
+          fieldsSeen: [],
+          detailResult: { torrents: [] },
+        }),
+      ),
+      "/api/admin/transmission/torrents/missing",
+    );
+    assert.equal(response.status, 404);
   });
 });
 

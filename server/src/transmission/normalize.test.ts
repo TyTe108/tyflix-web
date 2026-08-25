@@ -4,6 +4,7 @@ import { TransmissionUpstreamError } from "./client";
 import {
   normalizeSessionStats,
   normalizeTorrent,
+  normalizeTorrentDetail,
 } from "./normalize";
 import {
   SESSION_STATS_ARGUMENTS,
@@ -12,6 +13,79 @@ import {
 
 function row(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return { ...TORRENT_GET_ROW, ...overrides };
+}
+
+function detailRow(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    hashString: "detail-hash",
+    name: "Example detail",
+    totalSize: 3000,
+    pieceCount: 3,
+    pieceSize: 1000,
+    isPrivate: false,
+    comment: "",
+    creator: "fixture",
+    dateCreated: 0,
+    addedDate: 100,
+    doneDate: 0,
+    activityDate: 0,
+    downloadDir: "/downloads",
+    downloadedEver: 2500,
+    uploadedEver: 500,
+    corruptEver: 10,
+    haveValid: 2400,
+    secondsDownloading: 60,
+    secondsSeeding: 30,
+    errorString: "",
+    files: [
+      {
+        begin_piece: 0,
+        bytesCompleted: 400,
+        end_piece: 0,
+        length: 1000,
+        name: "first.mkv",
+      },
+      {
+        begin_piece: 1,
+        bytesCompleted: 1500,
+        end_piece: 2,
+        length: 2000,
+        name: "second.mkv",
+      },
+    ],
+    fileStats: [
+      { bytesCompleted: 400, priority: -1, wanted: false },
+      { bytesCompleted: 1500, priority: 1, wanted: true },
+    ],
+    peers: [],
+    trackerStats: [
+      {
+        host: "unknown.example",
+        tier: 0,
+        isBackup: false,
+        seederCount: -1,
+        leecherCount: -1,
+        downloadCount: -1,
+        lastAnnounceSucceeded: false,
+        lastAnnounceResult: "",
+        nextAnnounceTime: 0,
+      },
+      {
+        host: "empty.example",
+        tier: 1,
+        isBackup: true,
+        seederCount: 0,
+        leecherCount: 0,
+        downloadCount: 0,
+        lastAnnounceSucceeded: true,
+        lastAnnounceResult: "Success",
+        nextAnnounceTime: 200,
+      },
+    ],
+    ...overrides,
+  };
 }
 
 describe("normalizeTorrent recorded protocol shape", () => {
@@ -128,6 +202,67 @@ describe("normalizeTorrent strictness", () => {
         err.status === 502 &&
         err.message.includes("percentDone") &&
         err.message.includes("c555a15c97f99ac1347e29491be7f017fb2811d1"),
+    );
+  });
+});
+
+describe("normalizeTorrentDetail", () => {
+  it("zips files and fileStats by index without mixing their fields", () => {
+    const detail = normalizeTorrentDetail(detailRow());
+
+    assert.deepEqual(detail.files, [
+      {
+        name: "first.mkv",
+        lengthBytes: 1000,
+        completedBytes: 400,
+        wanted: false,
+        priority: -1,
+        progress: 0.4,
+      },
+      {
+        name: "second.mkv",
+        lengthBytes: 2000,
+        completedBytes: 1500,
+        wanted: true,
+        priority: 1,
+        progress: 0.75,
+      },
+    ]);
+  });
+
+  it("throws with both lengths when files and fileStats differ", () => {
+    assert.throws(
+      () =>
+        normalizeTorrentDetail(
+          detailRow({
+            fileStats: [{ bytesCompleted: 400, priority: -1, wanted: false }],
+          }),
+        ),
+      (err: unknown) =>
+        err instanceof TransmissionUpstreamError &&
+        err.message.includes("files length 2") &&
+        err.message.includes("fileStats length 1") &&
+        err.message.includes("detail-hash"),
+    );
+  });
+
+  it("maps negative tracker counts to null but preserves zero", () => {
+    const detail = normalizeTorrentDetail(detailRow());
+
+    assert.equal(detail.trackers[0]?.seeders, null);
+    assert.equal(detail.trackers[0]?.leechers, null);
+    assert.equal(detail.trackers[0]?.downloads, null);
+    assert.equal(detail.trackers[1]?.seeders, 0);
+    assert.equal(detail.trackers[1]?.leechers, 0);
+    assert.equal(detail.trackers[1]?.downloads, 0);
+  });
+
+  it("maps dateCreated 0 to null and a real value to milliseconds", () => {
+    assert.equal(normalizeTorrentDetail(detailRow()).info.createdAtMs, null);
+    assert.equal(
+      normalizeTorrentDetail(detailRow({ dateCreated: 1_700_000_000 })).info
+        .createdAtMs,
+      1_700_000_000_000,
     );
   });
 });

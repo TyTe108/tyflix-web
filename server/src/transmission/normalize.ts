@@ -63,6 +63,216 @@ export type TransmissionListResponse = {
   };
 };
 
+/** Normalised Inspector-style detail for one torrent. */
+export type TransmissionTorrentDetail = {
+  hash: string;
+  name: string;
+  info: {
+    totalSizeBytes: number;
+    pieceCount: number;
+    pieceSizeBytes: number;
+    isPrivate: boolean;
+    comment: string;
+    creator: string;
+    createdAtMs: number | null;
+    addedAtMs: number;
+    doneAtMs: number | null;
+    lastActivityAtMs: number | null;
+    downloadDir: string;
+    downloadedBytes: number;
+    uploadedBytes: number;
+    corruptBytes: number;
+    haveValidBytes: number;
+    secondsDownloading: number;
+    secondsSeeding: number;
+    errorMessage: string | null;
+  };
+  files: Array<{
+    name: string;
+    lengthBytes: number;
+    completedBytes: number;
+    wanted: boolean;
+    priority: number;
+    progress: number;
+  }>;
+  peers: Array<{
+    address: string;
+    port: number;
+    client: string;
+    flags: string;
+    progress: number;
+    rateToClient: number;
+    rateToPeer: number;
+    isEncrypted: boolean;
+    isIncoming: boolean;
+    isUtp: boolean;
+  }>;
+  trackers: Array<{
+    host: string;
+    tier: number;
+    isBackup: boolean;
+    seeders: number | null;
+    leechers: number | null;
+    downloads: number | null;
+    lastAnnounceSucceeded: boolean;
+    lastAnnounceResult: string | null;
+    nextAnnounceAtMs: number | null;
+  }>;
+};
+
+/**
+ * Maps one detailed torrent-get row into Inspector-style detail.
+ *
+ * files and fileStats are parallel arrays aligned only by index. A length
+ * mismatch is rejected rather than truncated, because truncation would either
+ * hide a file or attach another file's wanted/priority values.
+ */
+export function normalizeTorrentDetail(raw: unknown): TransmissionTorrentDetail {
+  const row = requireObject(raw, "torrent detail row");
+  const hash = readOptionalString(row, "hashString") ?? "unknown";
+  const hashString = readString(row, "hashString", hash);
+  const files = readArray(row, "files", hashString);
+  const fileStats = readArray(row, "fileStats", hashString);
+  if (files.length !== fileStats.length) {
+    throw fieldError(
+      "files/fileStats",
+      hashString,
+      `length mismatch: files length ${files.length}, fileStats length ${fileStats.length}`,
+    );
+  }
+
+  const peers = readArray(row, "peers", hashString);
+  const trackerStats = readArray(row, "trackerStats", hashString);
+  const dateCreated = readNumber(row, "dateCreated", hashString);
+  const addedDate = readNumber(row, "addedDate", hashString);
+  const doneDate = readNumber(row, "doneDate", hashString);
+  const activityDate = readNumber(row, "activityDate", hashString);
+  const errorString = readString(row, "errorString", hashString);
+
+  return {
+    hash: hashString,
+    name: readString(row, "name", hashString),
+    info: {
+      totalSizeBytes: readNumber(row, "totalSize", hashString),
+      pieceCount: readNumber(row, "pieceCount", hashString),
+      pieceSizeBytes: readNumber(row, "pieceSize", hashString),
+      isPrivate: readBoolean(row, "isPrivate", hashString),
+      comment: readString(row, "comment", hashString),
+      creator: readString(row, "creator", hashString),
+      createdAtMs: dateCreated === 0 ? null : dateCreated * 1000,
+      addedAtMs: addedDate * 1000,
+      doneAtMs: doneDate === 0 ? null : doneDate * 1000,
+      lastActivityAtMs: activityDate === 0 ? null : activityDate * 1000,
+      downloadDir: readString(row, "downloadDir", hashString),
+      downloadedBytes: readNumber(row, "downloadedEver", hashString),
+      uploadedBytes: readNumber(row, "uploadedEver", hashString),
+      corruptBytes: readNumber(row, "corruptEver", hashString),
+      haveValidBytes: readNumber(row, "haveValid", hashString),
+      secondsDownloading: readNumber(row, "secondsDownloading", hashString),
+      secondsSeeding: readNumber(row, "secondsSeeding", hashString),
+      errorMessage: errorString === "" ? null : errorString,
+    },
+    files: files.map((rawFile, index) => {
+      const file = requireNestedObject(rawFile, `files[${index}]`, hashString);
+      const stats = requireNestedObject(
+        fileStats[index],
+        `fileStats[${index}]`,
+        hashString,
+      );
+      const length = readNumber(file, "length", hashString);
+      const completed = readNumber(stats, "bytesCompleted", hashString);
+      return {
+        name: readString(file, "name", hashString),
+        lengthBytes: length,
+        completedBytes: completed,
+        wanted: readBoolean(stats, "wanted", hashString),
+        priority: readNumber(stats, "priority", hashString),
+        progress: length === 0 ? 0 : completed / length,
+      };
+    }),
+    peers: peers.map((rawPeer, index) => {
+      const peer = requireNestedObject(rawPeer, `peers[${index}]`, hashString);
+      return {
+        address: readString(peer, "address", hashString),
+        port: readNumber(peer, "port", hashString),
+        client: readString(peer, "clientName", hashString),
+        flags: readString(peer, "flagStr", hashString),
+        progress: readNumber(peer, "progress", hashString),
+        rateToClient: readNumber(peer, "rateToClient", hashString),
+        rateToPeer: readNumber(peer, "rateToPeer", hashString),
+        isEncrypted: readBoolean(peer, "isEncrypted", hashString),
+        isIncoming: readBoolean(peer, "isIncoming", hashString),
+        isUtp: readBoolean(peer, "isUTP", hashString),
+      };
+    }),
+    trackers: trackerStats.map((rawTracker, index) => {
+      const tracker = requireNestedObject(
+        rawTracker,
+        `trackerStats[${index}]`,
+        hashString,
+      );
+      const seederCount = readNumber(tracker, "seederCount", hashString);
+      const leecherCount = readNumber(tracker, "leecherCount", hashString);
+      const downloadCount = readNumber(tracker, "downloadCount", hashString);
+      const lastAnnounceResult = readString(
+        tracker,
+        "lastAnnounceResult",
+        hashString,
+      );
+      const nextAnnounceTime = readNumber(
+        tracker,
+        "nextAnnounceTime",
+        hashString,
+      );
+      return {
+        host: readString(tracker, "host", hashString),
+        tier: readNumber(tracker, "tier", hashString),
+        isBackup: readBoolean(tracker, "isBackup", hashString),
+        // Transmission uses any negative scrape count as "unknown"; zero is a
+        // real reported count and must remain distinguishable.
+        seeders: seederCount < 0 ? null : seederCount,
+        leechers: leecherCount < 0 ? null : leecherCount,
+        downloads: downloadCount < 0 ? null : downloadCount,
+        lastAnnounceSucceeded: readBoolean(
+          tracker,
+          "lastAnnounceSucceeded",
+          hashString,
+        ),
+        lastAnnounceResult:
+          lastAnnounceResult === "" ? null : lastAnnounceResult,
+        nextAnnounceAtMs:
+          nextAnnounceTime === 0 ? null : nextAnnounceTime * 1000,
+      };
+    }),
+  };
+}
+
+/** Maps scoped torrent-get arguments to one detail row or null when unknown. */
+export function normalizeTorrentDetailGetArguments(
+  raw: unknown,
+): TransmissionTorrentDetail | null {
+  const args = requireObject(raw, "torrent detail arguments");
+  const torrents = args.torrents;
+  if (!Array.isArray(torrents)) {
+    throw fieldError(
+      "torrents",
+      "torrent detail",
+      "missing or wrong type",
+    );
+  }
+  if (torrents.length === 0) {
+    return null;
+  }
+  if (torrents.length !== 1) {
+    throw fieldError(
+      "torrents",
+      "torrent detail",
+      `expected one row, received ${torrents.length}`,
+    );
+  }
+  return normalizeTorrentDetail(torrents[0]);
+}
+
 /**
  * Maps one torrent-get row into TransmissionTorrentView.
  *
@@ -255,6 +465,29 @@ function readBoolean(
     throw fieldError(field, hash, "missing or wrong type");
   }
   return value;
+}
+
+function readArray(
+  row: Record<string, unknown>,
+  field: string,
+  hash: string,
+): unknown[] {
+  const value = row[field];
+  if (!Array.isArray(value)) {
+    throw fieldError(field, hash, "missing or wrong type");
+  }
+  return value;
+}
+
+function requireNestedObject(
+  value: unknown,
+  field: string,
+  hash: string,
+): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw fieldError(field, hash, "missing or wrong type");
+  }
+  return value as Record<string, unknown>;
 }
 
 function readStringArray(

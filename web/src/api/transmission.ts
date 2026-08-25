@@ -58,6 +58,63 @@ export type TransmissionListResponse = {
   };
 };
 
+/** Inspector-style detail returned for one torrent hash. */
+export type TransmissionTorrentDetail = {
+  hash: string;
+  name: string;
+  info: {
+    totalSizeBytes: number;
+    pieceCount: number;
+    pieceSizeBytes: number;
+    isPrivate: boolean;
+    comment: string;
+    creator: string;
+    createdAtMs: number | null;
+    addedAtMs: number;
+    doneAtMs: number | null;
+    lastActivityAtMs: number | null;
+    downloadDir: string;
+    downloadedBytes: number;
+    uploadedBytes: number;
+    corruptBytes: number;
+    haveValidBytes: number;
+    secondsDownloading: number;
+    secondsSeeding: number;
+    errorMessage: string | null;
+  };
+  files: Array<{
+    name: string;
+    lengthBytes: number;
+    completedBytes: number;
+    wanted: boolean;
+    priority: number;
+    progress: number;
+  }>;
+  peers: Array<{
+    address: string;
+    port: number;
+    client: string;
+    flags: string;
+    progress: number;
+    rateToClient: number;
+    rateToPeer: number;
+    isEncrypted: boolean;
+    isIncoming: boolean;
+    isUtp: boolean;
+  }>;
+  trackers: Array<{
+    host: string;
+    tier: number;
+    isBackup: boolean;
+    seeders: number | null;
+    leechers: number | null;
+    downloads: number | null;
+    lastAnnounceSucceeded: boolean;
+    lastAnnounceResult: string | null;
+    nextAnnounceAtMs: number | null;
+  }>;
+};
+
 /** Fetches the current normalised torrent list and session aggregate. */
 export async function fetchTransmission(): Promise<TransmissionListResponse> {
   const response = await fetch("/api/admin/transmission/torrents");
@@ -74,6 +131,28 @@ export async function fetchTransmission(): Promise<TransmissionListResponse> {
     throw new Error(message);
   }
   return (await response.json()) as TransmissionListResponse;
+}
+
+/** Fetches Inspector-style detail for one torrent hash. */
+export async function fetchTransmissionDetail(
+  hash: string,
+): Promise<TransmissionTorrentDetail> {
+  const response = await fetch(
+    `/api/admin/transmission/torrents/${encodeURIComponent(hash)}`,
+  );
+  if (!response.ok) {
+    let message = `Failed to load torrent detail (${response.status})`;
+    try {
+      const body = (await response.json()) as { error?: unknown };
+      if (typeof body.error === "string") {
+        message = body.error;
+      }
+    } catch {
+      // Keep the status-based message when the error response is not JSON.
+    }
+    throw new Error(message);
+  }
+  return (await response.json()) as TransmissionTorrentDetail;
 }
 
 const STATE_LABELS: Record<TransmissionTorrentState, string> = {

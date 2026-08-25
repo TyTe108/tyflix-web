@@ -47,6 +47,24 @@ describe("createTransmissionClient", () => {
       "listTorrents",
     ]);
   });
+
+  it("includes optional torrent hashes in the torrent-get arguments", async () => {
+    let body: unknown;
+    globalThis.fetch = async (_input, init) => {
+      body = JSON.parse(String(init?.body));
+      return successResponse({ torrents: [] });
+    };
+    const client = createTransmissionClient({
+      baseUrl: "http://transmission:9091",
+    });
+
+    await client.listTorrents(["hashString"], ["abc123"]);
+
+    assert.deepEqual(body, {
+      method: "torrent-get",
+      arguments: { fields: ["hashString"], ids: ["abc123"] },
+    });
+  });
 });
 
 describe("createTransmissionClient CSRF handshake", () => {

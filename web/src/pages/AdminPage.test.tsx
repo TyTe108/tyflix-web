@@ -31,7 +31,9 @@ import {
 } from "../api/requests";
 import {
   fetchTransmission,
+  fetchTransmissionDetail,
   type TransmissionListResponse,
+  type TransmissionTorrentDetail,
   type TransmissionTorrentView,
 } from "../api/transmission";
 import { useTransmissionEnabled } from "../hooks/useTransmissionEnabled";
@@ -101,6 +103,7 @@ vi.mock("../api/transmission", async (importOriginal) => {
   return {
     ...actual,
     fetchTransmission: vi.fn(),
+    fetchTransmissionDetail: vi.fn(),
   };
 });
 
@@ -192,6 +195,39 @@ function transmissionResponse(
   };
 }
 
+function transmissionDetail(
+  overrides: Partial<TransmissionTorrentDetail> = {},
+): TransmissionTorrentDetail {
+  return {
+    hash: "abc123",
+    name: "Example.Show.S01E01",
+    info: {
+      totalSizeBytes: 2_000_000,
+      pieceCount: 2,
+      pieceSizeBytes: 1_000_000,
+      isPrivate: false,
+      comment: "",
+      creator: "fixture",
+      createdAtMs: null,
+      addedAtMs: 1_700_000_000_000,
+      doneAtMs: null,
+      lastActivityAtMs: null,
+      downloadDir: "/downloads",
+      downloadedBytes: 1_000_000,
+      uploadedBytes: 0,
+      corruptBytes: 0,
+      haveValidBytes: 1_000_000,
+      secondsDownloading: 60,
+      secondsSeeding: 0,
+      errorMessage: null,
+    },
+    files: [],
+    peers: [],
+    trackers: [],
+    ...overrides,
+  };
+}
+
 describe("AdminPage Downloads tab", () => {
   afterEach(() => {
     cleanup();
@@ -204,6 +240,8 @@ describe("AdminPage Downloads tab", () => {
     vi.mocked(fetchAllRequests).mockResolvedValue([]);
     vi.mocked(fetchTransmission).mockReset();
     vi.mocked(fetchTransmission).mockResolvedValue(transmissionResponse());
+    vi.mocked(fetchTransmissionDetail).mockReset();
+    vi.mocked(fetchTransmissionDetail).mockResolvedValue(transmissionDetail());
     vi.mocked(useTransmissionEnabled).mockReset();
   });
 
@@ -315,6 +353,38 @@ describe("AdminPage Downloads tab", () => {
     const message = await screen.findByText("Tracker gave an error");
     expect(message.classList.contains("error")).toBe(true);
     expect(screen.queryByText(/Downloading from/)).toBeNull();
+  });
+
+  it("fetches detail only after its row is expanded", async () => {
+    vi.mocked(useTransmissionEnabled).mockReturnValue(true);
+    renderAdmin("downloads");
+
+    const expand = await screen.findByRole("button", {
+      name: "Expand Example.Show.S01E01 details",
+    });
+    expect(fetchTransmissionDetail).not.toHaveBeenCalled();
+
+    fireEvent.click(expand);
+
+    await screen.findByRole("heading", { name: "Info" });
+    expect(fetchTransmissionDetail).toHaveBeenCalledTimes(1);
+    expect(fetchTransmissionDetail).toHaveBeenCalledWith("abc123");
+  });
+
+  it("renders the normal empty state for a torrent with no connected peers", async () => {
+    vi.mocked(useTransmissionEnabled).mockReturnValue(true);
+    vi.mocked(fetchTransmissionDetail).mockResolvedValue(
+      transmissionDetail({ peers: [] }),
+    );
+    renderAdmin("downloads");
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Expand Example.Show.S01E01 details",
+      }),
+    );
+
+    expect(await screen.findByText("No connected peers")).toBeTruthy();
   });
 });
 

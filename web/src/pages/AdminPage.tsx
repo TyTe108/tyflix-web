@@ -91,11 +91,13 @@ import {
 } from "../api/admin";
 import {
   fetchTransmission,
+  fetchTransmissionDetail,
   formatBytes,
   formatBytesPerSecond,
   formatDuration,
   transmissionProgressFillClass,
   transmissionStateLabel,
+  type TransmissionTorrentDetail,
   type TransmissionTorrentView,
 } from "../api/transmission";
 import { fetchBadgeCounts } from "../api/badgeCounts";
@@ -297,6 +299,8 @@ export function AdminPage() {
 // same rate-limit budget as System or Containers because only the active panel
 // is mounted at a time. fetchTransmission is a module-level function; keeping
 // that reference stable prevents usePolledResource from resetting its interval.
+// Per-torrent detail is fetched only when its row expands and is not polled, so
+// opening Inspector-style data does not add another live rate-limit consumer.
 function DownloadsPanel() {
   const { data, status, error, lastUpdated, refresh } = usePolledResource(
     fetchTransmission,
@@ -360,20 +364,89 @@ function TransmissionTorrentRow({
 }: {
   torrent: TransmissionTorrentView;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const [detail, setDetail] = useState<TransmissionTorrentDetail | null>(null);
+  const [detailStatus, setDetailStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const detailRequest = useRef(0);
   const progressPercent = Math.min(
     100,
     Math.max(0, torrent.progress * 100),
   );
   const complete = torrent.progress >= 1;
 
+  useEffect(
+    () => () => {
+      detailRequest.current += 1;
+    },
+    [],
+  );
+
+  const toggleDetail = () => {
+    if (expanded) {
+      setExpanded(false);
+      return;
+    }
+
+    setExpanded(true);
+    setDetail(null);
+    setDetailError(null);
+    setDetailStatus("loading");
+    const request = ++detailRequest.current;
+    void fetchTransmissionDetail(torrent.hash).then(
+      (nextDetail) => {
+        if (detailRequest.current === request) {
+          setDetail(nextDetail);
+          setDetailStatus("ready");
+        }
+      },
+      (err: unknown) => {
+        if (detailRequest.current === request) {
+          setDetailError(
+            err instanceof Error ? err.message : "Failed to load torrent detail",
+          );
+          setDetailStatus("error");
+        }
+      },
+    );
+  };
+
   return (
-    <li className="admin-download-row">
-      <div className="admin-download-head">
-        <span className="admin-download-name">{torrent.name}</span>
-        <span className="admin-download-state">
-          {transmissionStateLabel(torrent.state)}
-        </span>
-      </div>
+    <li
+      className="admin-download-row"
+      onClick={(event) => {
+        const target = event.target;
+        if (
+          !(target instanceof Element) ||
+          target.closest(".admin-download-detail") ||
+          target.closest(".admin-download-summary")
+        ) {
+          return;
+        }
+        toggleDetail();
+      }}
+    >
+      <button
+        type="button"
+        className="admin-download-summary"
+        aria-expanded={expanded}
+        aria-label={`${expanded ? "Collapse" : "Expand"} ${torrent.name} details`}
+        onClick={toggleDetail}
+      >
+        <div className="admin-download-head">
+          <span className="admin-download-name">
+            <span aria-hidden="true" className="admin-download-chevron">
+              {expanded ? "▾" : "▸"}
+            </span>
+            {torrent.name}
+          </span>
+          <span className="admin-download-state">
+            {transmissionStateLabel(torrent.state)}
+          </span>
+        </div>
+      </button>
 
       {torrent.labels.length > 0 ? (
         <div className="admin-download-labels" aria-label="Labels">
@@ -432,8 +505,172 @@ function TransmissionTorrentRow({
           · <span>{formatDuration(torrent.etaSeconds)}</span>
         </p>
       )}
+
+      {expanded ? (
+        <div className="admin-download-detail">
+          {detailStatus === "loading" ? (
+            <p className="muted">Loading torrent detail…</p>
+          ) : null}
+          {detailStatus === "error" ? (
+            <p className="error">
+              {detailError ?? "Failed to load torrent detail"}
+            </p>
+          ) : null}
+          {detailStatus === "ready" && detail !== null ? (
+            <TransmissionTorrentDetailView detail={detail} />
+          ) : null}
+        </div>
+      ) : null}
     </li>
   );
+}
+
+function TransmissionTorrentDetailView({
+  detail,
+}: {
+  detail: TransmissionTorrentDetail;
+}) {
+  const { info } = detail;
+  return (
+    <>
+      <section className="admin-download-detail-section">
+        <h3>Info</h3>
+        <dl className="admin-download-info">
+          <DetailPair label="Size" value={formatBytes(info.totalSizeBytes)} />
+          <DetailPair
+            label="Pieces"
+            value={`${info.pieceCount} × ${formatBytes(info.pieceSizeBytes)}`}
+          />
+          <DetailPair label="Private" value={info.isPrivate ? "Yes" : "No"} />
+          <DetailPair label="Creator" value={info.creator || "Unknown"} />
+          <DetailPair label="Comment" value={info.comment || "None"} />
+          <DetailPair label="Created" value={formatDetailDate(info.createdAtMs)} />
+          <DetailPair label="Added" value={formatDetailDate(info.addedAtMs)} />
+          <DetailPair label="Completed" value={formatDetailDate(info.doneAtMs)} />
+          <DetailPair
+            label="Last activity"
+            value={formatDetailDate(info.lastActivityAtMs)}
+          />
+          <DetailPair label="Location" value={info.downloadDir} />
+          <DetailPair
+            label="Downloaded"
+            value={formatBytes(info.downloadedBytes)}
+          />
+          <DetailPair label="Uploaded" value={formatBytes(info.uploadedBytes)} />
+          <DetailPair label="Corrupt" value={formatBytes(info.corruptBytes)} />
+          <DetailPair label="Have valid" value={formatBytes(info.haveValidBytes)} />
+          <DetailPair
+            label="Downloading time"
+            value={formatDuration(info.secondsDownloading)}
+          />
+          <DetailPair
+            label="Seeding time"
+            value={formatDuration(info.secondsSeeding)}
+          />
+          <DetailPair label="Error" value={info.errorMessage ?? "None"} />
+        </dl>
+      </section>
+
+      <section className="admin-download-detail-section">
+        <h3>Files ({detail.files.length})</h3>
+        <div className="admin-download-detail-scroll">
+          {detail.files.length === 0 ? (
+            <p className="muted">No files</p>
+          ) : (
+            <ul className="admin-download-detail-list">
+              {detail.files.map((file, index) => (
+                <li key={`${file.name}-${index}`}>
+                  <strong>{file.name}</strong>
+                  <span className="muted">
+                    {formatBytes(file.completedBytes)} of{" "}
+                    {formatBytes(file.lengthBytes)} ·{" "}
+                    {(file.progress * 100).toFixed(1)}% ·{" "}
+                    {file.wanted ? "Wanted" : "Not wanted"} · Priority{" "}
+                    {file.priority}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+
+      <section className="admin-download-detail-section">
+        <h3>Peers</h3>
+        {detail.peers.length === 0 ? (
+          <p className="muted">No connected peers</p>
+        ) : (
+          <ul className="admin-download-detail-list">
+            {detail.peers.map((peer, index) => (
+              <li key={`${peer.address}:${peer.port}-${index}`}>
+                <strong>
+                  {peer.address}:{peer.port}
+                </strong>
+                <span className="muted">
+                  {peer.client || "Unknown client"} · {peer.flags || "No flags"} ·{" "}
+                  {(peer.progress * 100).toFixed(1)}% · ↓{" "}
+                  {formatBytesPerSecond(peer.rateToClient)} · ↑{" "}
+                  {formatBytesPerSecond(peer.rateToPeer)}
+                  {peer.isEncrypted ? " · Encrypted" : ""}
+                  {peer.isIncoming ? " · Incoming" : ""}
+                  {peer.isUtp ? " · uTP" : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="admin-download-detail-section">
+        <h3>Trackers ({detail.trackers.length})</h3>
+        <div className="admin-download-detail-scroll">
+          {detail.trackers.length === 0 ? (
+            <p className="muted">No trackers</p>
+          ) : (
+            <ul className="admin-download-detail-list">
+              {detail.trackers.map((tracker, index) => (
+                <li key={`${tracker.host}-${tracker.tier}-${index}`}>
+                  <strong>{tracker.host}</strong>
+                  <span className="muted">
+                    Tier {tracker.tier}
+                    {tracker.isBackup ? " · Backup" : ""} ·{" "}
+                    {formatTrackerCount(tracker.seeders, "seeders")} ·{" "}
+                    {formatTrackerCount(tracker.leechers, "leechers")} ·{" "}
+                    {formatTrackerCount(tracker.downloads, "downloads")} ·{" "}
+                    {tracker.lastAnnounceSucceeded
+                      ? "Last announce succeeded"
+                      : "Last announce failed"}
+                    {tracker.lastAnnounceResult
+                      ? `: ${tracker.lastAnnounceResult}`
+                      : ""}
+                    {" · Next announce "}
+                    {formatDetailDate(tracker.nextAnnounceAtMs)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function DetailPair({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
+  );
+}
+
+function formatDetailDate(timestampMs: number | null): string {
+  return timestampMs === null ? "Unknown" : new Date(timestampMs).toLocaleString();
+}
+
+function formatTrackerCount(count: number | null, label: string): string {
+  return count === null ? `Unknown ${label}` : `${count} ${label}`;
 }
 
 // System / Storage: host CPU, memory, load, temperatures, GPU and per-volume

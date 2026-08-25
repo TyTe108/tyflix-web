@@ -1608,6 +1608,24 @@ a {
   box-shadow: var(--shadow-1);
 }
 
+.admin-download-summary {
+  display: block;
+  width: 100%;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+}
+
+.admin-download-summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
 .admin-download-head {
   display: flex;
   align-items: baseline;
@@ -1619,6 +1637,12 @@ a {
   min-width: 0;
   overflow-wrap: anywhere;
   font-weight: 600;
+}
+
+.admin-download-chevron {
+  display: inline-block;
+  width: 1rem;
+  color: var(--text-muted);
 }
 
 .admin-download-state {
@@ -1666,6 +1690,96 @@ a {
 .admin-download-status {
   margin: 0.45rem 0 0;
   font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-download-detail {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.admin-download-detail > .muted,
+.admin-download-detail > .error {
+  margin: 0;
+}
+
+.admin-download-detail-section + .admin-download-detail-section {
+  margin-top: 1.25rem;
+}
+
+.admin-download-detail-section h3 {
+  margin: 0 0 0.55rem;
+  font-size: 1rem;
+}
+
+.admin-download-info {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.65rem 1rem;
+  margin: 0;
+}
+
+.admin-download-info > div {
+  min-width: 0;
+}
+
+.admin-download-info dt {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.admin-download-info dd {
+  margin: 0.15rem 0 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-download-detail-scroll {
+  max-height: 18rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.admin-download-detail-scroll > .muted {
+  margin: 0;
+  padding: 0.75rem;
+}
+
+.admin-download-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-download-detail-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: 0.65rem 0;
+}
+
+.admin-download-detail-scroll .admin-download-detail-list li {
+  padding-inline: 0.75rem;
+}
+
+.admin-download-detail-list li + li {
+  border-top: 1px solid var(--border);
+}
+
+.admin-download-detail-list strong,
+.admin-download-detail-list span {
+  overflow-wrap: anywhere;
+}
+
+.admin-download-detail-list span {
+  font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
 }
 

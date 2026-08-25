@@ -17,6 +17,7 @@ import {
 } from "../transmission/client";
 import {
   normalizeSessionStats,
+  normalizeTorrentDetailGetArguments,
   normalizeTorrentGetArguments,
   type TransmissionListResponse,
 } from "../transmission/normalize";
@@ -51,6 +52,33 @@ const TORRENT_GET_FIELDS = [
   "downloadDir",
   "recheckProgress",
   "metadataPercentComplete",
+] as const;
+
+const TORRENT_DETAIL_FIELDS = [
+  "hashString",
+  "name",
+  "totalSize",
+  "pieceCount",
+  "pieceSize",
+  "isPrivate",
+  "comment",
+  "creator",
+  "dateCreated",
+  "addedDate",
+  "doneDate",
+  "activityDate",
+  "downloadDir",
+  "downloadedEver",
+  "uploadedEver",
+  "corruptEver",
+  "haveValid",
+  "secondsDownloading",
+  "secondsSeeding",
+  "errorString",
+  "files",
+  "fileStats",
+  "peers",
+  "trackerStats",
 ] as const;
 
 /**
@@ -92,6 +120,27 @@ export function createAdminTransmissionRouter(
         session: normalizeSessionStats(sessionArgs),
       };
       res.status(200).json(body);
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
+  router.get("/torrents/:hash", async (req, res) => {
+    if (!requireAdminSession(res)) {
+      return;
+    }
+
+    try {
+      const torrentArgs = await transmission.listTorrents(
+        [...TORRENT_DETAIL_FIELDS],
+        [req.params.hash],
+      );
+      const detail = normalizeTorrentDetailGetArguments(torrentArgs);
+      if (detail === null) {
+        res.status(404).json({ error: "torrent not found" });
+        return;
+      }
+      res.status(200).json(detail);
     } catch (err) {
       respondUpstreamError(res, err);
     }

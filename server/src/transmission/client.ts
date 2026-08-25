@@ -51,7 +51,7 @@ const SESSION_HEADER = "X-Transmission-Session-Id";
 
 type RpcPayload = {
   method: string;
-  arguments?: { fields: string[] };
+  arguments?: { fields: string[]; ids?: string[] };
 };
 
 function isNonNullObject(value: unknown): value is Record<string, unknown> {
@@ -181,19 +181,25 @@ export function createTransmissionClient(options: TransmissionClientOptions) {
   }
 
   /**
-   * torrent-get for the given field names. Returns the parsed `arguments`
-   * object (`{ torrents: [...] }`). An empty torrents array means no torrents,
-   * not a failure. An empty arguments object is valid. A missing or non-object
-   * arguments value is not.
+   * torrent-get for the given field names, optionally scoped to torrent hashes.
+   * Returns the parsed `arguments` object (`{ torrents: [...] }`). An empty
+   * torrents array means no torrents, not a failure. An empty arguments object
+   * is valid. A missing or non-object arguments value is not.
    *
    * @throws TransmissionUpstreamError on handshake failure, a non-success
    * `result`, a non-2xx that is not a first-attempt 409, a transport failure,
    * a non-JSON body, a success with no non-null `arguments` object, or the
    * 10 second timeout.
    */
-  async function listTorrents(fields: string[]): Promise<object> {
+  async function listTorrents(
+    fields: string[],
+    ids?: string[],
+  ): Promise<object> {
     const arguments_ = await postRpc(
-      { method: "torrent-get", arguments: { fields } },
+      {
+        method: "torrent-get",
+        arguments: ids === undefined ? { fields } : { fields, ids },
+      },
       false,
     );
     if (!isNonNullObject(arguments_)) {
