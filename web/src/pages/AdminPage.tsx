@@ -97,6 +97,8 @@ import {
   formatDuration,
   transmissionProgressFillClass,
   transmissionStateLabel,
+  startTransmissionTorrent,
+  stopTransmissionTorrent,
   type TransmissionTorrentDetail,
   type TransmissionTorrentView,
 } from "../api/transmission";
@@ -306,12 +308,26 @@ function DownloadsPanel() {
     fetchTransmission,
     5000,
   );
-  const torrents = useMemo(
-    () =>
-      [...(data?.torrents ?? [])].sort(
-        (a, b) => a.queuePosition - b.queuePosition,
-      ),
-    [data],
+  const [torrents, setTorrents] = useState<TransmissionTorrentView[]>([]);
+
+  useEffect(() => {
+    if (data !== null) {
+      setTorrents(
+        [...data.torrents].sort((a, b) => a.queuePosition - b.queuePosition),
+      );
+    }
+  }, [data]);
+
+  const updateTorrent = useCallback(
+    (updated: TransmissionTorrentView) => {
+      setTorrents((current) =>
+        current.map((torrent) =>
+          torrent.hash === updated.hash ? updated : torrent,
+        ),
+      );
+      refresh();
+    },
+    [refresh],
   );
 
   return (
@@ -349,7 +365,11 @@ function DownloadsPanel() {
           ) : (
             <ul className="admin-downloads-list">
               {torrents.map((torrent) => (
-                <TransmissionTorrentRow key={torrent.hash} torrent={torrent} />
+                <TransmissionTorrentRow
+                  key={torrent.hash}
+                  torrent={torrent}
+                  onTorrentUpdated={updateTorrent}
+                />
               ))}
             </ul>
           )}
@@ -361,8 +381,10 @@ function DownloadsPanel() {
 
 function TransmissionTorrentRow({
   torrent,
+  onTorrentUpdated,
 }: {
   torrent: TransmissionTorrentView;
+  onTorrentUpdated: (torrent: TransmissionTorrentView) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<TransmissionTorrentDetail | null>(null);
@@ -370,7 +392,11 @@ function TransmissionTorrentRow({
     "idle" | "loading" | "ready" | "error"
   >("idle");
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [mutationPending, setMutationPending] = useState(false);
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const detailRequest = useRef(0);
+  const mutationInFlight = useRef(false);
+  const mounted = useRef(true);
   const progressPercent = Math.min(
     100,
     Math.max(0, torrent.progress * 100),
@@ -379,6 +405,7 @@ function TransmissionTorrentRow({
 
   useEffect(
     () => () => {
+      mounted.current = false;
       detailRequest.current += 1;
     },
     [],
@@ -413,6 +440,42 @@ function TransmissionTorrentRow({
     );
   };
 
+  const shouldStart =
+    torrent.state === "stopped" || torrent.state === "seeding-complete";
+  const mutationLabel = shouldStart ? "Start" : "Stop";
+
+  const mutateTorrent = () => {
+    if (mutationInFlight.current) {
+      return;
+    }
+    mutationInFlight.current = true;
+    setMutationPending(true);
+    setMutationError(null);
+
+    const mutation = shouldStart
+      ? startTransmissionTorrent(torrent.hash)
+      : stopTransmissionTorrent(torrent.hash);
+    void mutation.then(
+      (updated) => {
+        if (mounted.current) {
+          onTorrentUpdated(updated);
+        }
+      },
+      (err: unknown) => {
+        if (mounted.current) {
+          setMutationError(
+            err instanceof Error ? err.message : `Failed to ${mutationLabel.toLowerCase()} torrent`,
+          );
+        }
+      },
+    ).finally(() => {
+      mutationInFlight.current = false;
+      if (mounted.current) {
+        setMutationPending(false);
+      }
+    });
+  };
+
   return (
     <li
       className="admin-download-row"
@@ -428,14 +491,14 @@ function TransmissionTorrentRow({
         toggleDetail();
       }}
     >
-      <button
-        type="button"
-        className="admin-download-summary"
-        aria-expanded={expanded}
-        aria-label={`${expanded ? "Collapse" : "Expand"} ${torrent.name} details`}
-        onClick={toggleDetail}
-      >
-        <div className="admin-download-head">
+      <div className="admin-download-head">
+        <button
+          type="button"
+          className="admin-download-summary"
+          aria-expanded={expanded}
+          aria-label={`${expanded ? "Collapse" : "Expand"} ${torrent.name} details`}
+          onClick={toggleDetail}
+        >
           <span className="admin-download-name">
             <span aria-hidden="true" className="admin-download-chevron">
               {expanded ? "▾" : "▸"}
@@ -445,8 +508,20 @@ function TransmissionTorrentRow({
           <span className="admin-download-state">
             {transmissionStateLabel(torrent.state)}
           </span>
-        </div>
-      </button>
+        </button>
+        <button
+          type="button"
+          className="btn secondary admin-download-action"
+          aria-label={`${mutationLabel} ${torrent.name}`}
+          disabled={mutationPending}
+          onClick={(event) => {
+            event.stopPropagation();
+            mutateTorrent();
+          }}
+        >
+          {mutationLabel}
+        </button>
+      </div>
 
       {torrent.labels.length > 0 ? (
         <div className="admin-download-labels" aria-label="Labels">
@@ -505,6 +580,10 @@ function TransmissionTorrentRow({
           · <span>{formatDuration(torrent.etaSeconds)}</span>
         </p>
       )}
+
+      {mutationError !== null ? (
+        <p className="error admin-download-mutation-error">{mutationError}</p>
+      ) : null}
 
       {expanded ? (
         <div className="admin-download-detail">

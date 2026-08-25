@@ -32,6 +32,8 @@ import {
 import {
   fetchTransmission,
   fetchTransmissionDetail,
+  startTransmissionTorrent,
+  stopTransmissionTorrent,
   type TransmissionListResponse,
   type TransmissionTorrentDetail,
   type TransmissionTorrentView,
@@ -104,6 +106,8 @@ vi.mock("../api/transmission", async (importOriginal) => {
     ...actual,
     fetchTransmission: vi.fn(),
     fetchTransmissionDetail: vi.fn(),
+    startTransmissionTorrent: vi.fn(),
+    stopTransmissionTorrent: vi.fn(),
   };
 });
 
@@ -242,6 +246,14 @@ describe("AdminPage Downloads tab", () => {
     vi.mocked(fetchTransmission).mockResolvedValue(transmissionResponse());
     vi.mocked(fetchTransmissionDetail).mockReset();
     vi.mocked(fetchTransmissionDetail).mockResolvedValue(transmissionDetail());
+    vi.mocked(startTransmissionTorrent).mockReset();
+    vi.mocked(stopTransmissionTorrent).mockReset();
+    vi.mocked(startTransmissionTorrent).mockResolvedValue(
+      transmissionTorrent({ state: "downloading", status: 4 }),
+    );
+    vi.mocked(stopTransmissionTorrent).mockResolvedValue(
+      transmissionTorrent({ state: "stopped", status: 0 }),
+    );
     vi.mocked(useTransmissionEnabled).mockReset();
   });
 
@@ -385,6 +397,123 @@ describe("AdminPage Downloads tab", () => {
     );
 
     expect(await screen.findByText("No connected peers")).toBeTruthy();
+  });
+
+  it("renders Start for stopped rows and Stop for seeding rows", async () => {
+    vi.mocked(useTransmissionEnabled).mockReturnValue(true);
+    vi.mocked(fetchTransmission).mockResolvedValue(
+      transmissionResponse([
+        transmissionTorrent({
+          hash: "stopped-hash",
+          name: "Stopped.Torrent",
+          state: "stopped",
+          status: 0,
+          queuePosition: 0,
+        }),
+        transmissionTorrent({
+          hash: "seeding-hash",
+          name: "Seeding.Torrent",
+          state: "seeding",
+          status: 6,
+          queuePosition: 1,
+        }),
+      ]),
+    );
+    renderAdmin("downloads");
+
+    expect(
+      await screen.findByRole("button", { name: "Start Stopped.Torrent" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Stop Seeding.Torrent" }),
+    ).toBeTruthy();
+  });
+
+  it("disables the mutation button in flight and ignores a rapid second click", async () => {
+    vi.mocked(useTransmissionEnabled).mockReturnValue(true);
+    vi.mocked(fetchTransmission)
+      .mockResolvedValueOnce(
+        transmissionResponse([
+          transmissionTorrent({ state: "stopped", status: 0 }),
+        ]),
+      )
+      .mockResolvedValue(
+        transmissionResponse([
+          transmissionTorrent({ state: "downloading", status: 4 }),
+        ]),
+      );
+    let resolveStart!: (torrent: TransmissionTorrentView) => void;
+    vi.mocked(startTransmissionTorrent).mockReturnValue(
+      new Promise((resolve) => {
+        resolveStart = resolve;
+      }),
+    );
+    renderAdmin("downloads");
+
+    const start = await screen.findByRole("button", {
+      name: "Start Example.Show.S01E01",
+    });
+    fireEvent.click(start);
+    fireEvent.click(start);
+
+    expect((start as HTMLButtonElement).disabled).toBe(true);
+    expect(startTransmissionTorrent).toHaveBeenCalledTimes(1);
+    resolveStart(
+      transmissionTorrent({ state: "downloading", status: 4 }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Stop Example.Show.S01E01" }),
+      ).toBeTruthy(),
+    );
+    expect(startTransmissionTorrent).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not expand torrent detail when the mutation button is clicked", async () => {
+    vi.mocked(useTransmissionEnabled).mockReturnValue(true);
+    vi.mocked(fetchTransmission).mockResolvedValue(
+      transmissionResponse([
+        transmissionTorrent({ state: "stopped", status: 0 }),
+      ]),
+    );
+    renderAdmin("downloads");
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Start Example.Show.S01E01",
+      }),
+    );
+
+    expect(fetchTransmissionDetail).not.toHaveBeenCalled();
+    expect(screen.queryByText("Loading torrent detail…")).toBeNull();
+  });
+
+  it("surfaces a mutation failure without changing the row", async () => {
+    vi.mocked(useTransmissionEnabled).mockReturnValue(true);
+    vi.mocked(fetchTransmission).mockResolvedValue(
+      transmissionResponse([
+        transmissionTorrent({ state: "stopped", status: 0 }),
+      ]),
+    );
+    vi.mocked(startTransmissionTorrent).mockRejectedValue(
+      new Error("Transmission start command was accepted but the state did not change"),
+    );
+    renderAdmin("downloads");
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Start Example.Show.S01E01",
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Transmission start command was accepted but the state did not change",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Start Example.Show.S01E01" }),
+    ).toBeTruthy();
   });
 });
 

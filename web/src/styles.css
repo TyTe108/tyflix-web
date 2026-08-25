@@ -1609,7 +1609,11 @@ a {
 }
 
 .admin-download-summary {
-  display: block;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  min-width: 0;
   width: 100%;
   padding: 0;
   cursor: pointer;
@@ -1628,9 +1632,14 @@ a {
 
 .admin-download-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.admin-download-action {
+  flex: 0 0 auto;
+  min-height: 2.25rem;
 }
 
 .admin-download-name {
@@ -1687,7 +1696,8 @@ a {
 }
 
 .admin-download-size,
-.admin-download-status {
+.admin-download-status,
+.admin-download-mutation-error {
   margin: 0.45rem 0 0;
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;

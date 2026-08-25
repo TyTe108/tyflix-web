@@ -155,6 +155,43 @@ export async function fetchTransmissionDetail(
   return (await response.json()) as TransmissionTorrentDetail;
 }
 
+/** Starts one torrent and returns its verified, re-read list view. */
+export async function startTransmissionTorrent(
+  hash: string,
+): Promise<TransmissionTorrentView> {
+  return mutateTransmissionTorrent(hash, "start");
+}
+
+/** Stops one torrent and returns its verified, re-read list view. */
+export async function stopTransmissionTorrent(
+  hash: string,
+): Promise<TransmissionTorrentView> {
+  return mutateTransmissionTorrent(hash, "stop");
+}
+
+async function mutateTransmissionTorrent(
+  hash: string,
+  command: "start" | "stop",
+): Promise<TransmissionTorrentView> {
+  const response = await fetch(
+    `/api/admin/transmission/torrents/${encodeURIComponent(hash)}/${command}`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    let message = `Failed to ${command} torrent (${response.status})`;
+    try {
+      const body = (await response.json()) as { error?: unknown };
+      if (typeof body.error === "string") {
+        message = body.error;
+      }
+    } catch {
+      // Keep the status-based message when the error response is not JSON.
+    }
+    throw new Error(message);
+  }
+  return (await response.json()) as TransmissionTorrentView;
+}
+
 const STATE_LABELS: Record<TransmissionTorrentState, string> = {
   stopped: "Paused",
   "seeding-complete": "Seeding complete",

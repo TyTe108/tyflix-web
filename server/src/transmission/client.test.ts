@@ -38,13 +38,15 @@ function successResponse(arguments_: unknown): Response {
 }
 
 describe("createTransmissionClient", () => {
-  it("exposes only listTorrents and getSessionStats", () => {
+  it("exposes only the supported torrent reads and mutations", () => {
     const client = createTransmissionClient({
       baseUrl: "http://transmission:9091",
     });
     assert.deepEqual(Object.keys(client).sort(), [
       "getSessionStats",
       "listTorrents",
+      "startTorrent",
+      "stopTorrent",
     ]);
   });
 
@@ -63,6 +65,24 @@ describe("createTransmissionClient", () => {
     assert.deepEqual(body, {
       method: "torrent-get",
       arguments: { fields: ["hashString"], ids: ["abc123"] },
+    });
+  });
+
+  it("sends torrent-stop with the selected hash", async () => {
+    let body: unknown;
+    globalThis.fetch = async (_input, init) => {
+      body = JSON.parse(String(init?.body));
+      return successResponse({});
+    };
+    const client = createTransmissionClient({
+      baseUrl: "http://transmission:9091",
+    });
+
+    await client.stopTorrent("abc123");
+
+    assert.deepEqual(body, {
+      method: "torrent-stop",
+      arguments: { ids: ["abc123"] },
     });
   });
 });

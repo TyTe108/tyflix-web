@@ -42,9 +42,12 @@ function createTrackingDeps(options: {
   idsSeen?: Array<string[] | undefined>;
   listResult?: unknown;
   detailResult?: unknown;
+  scopedResults?: unknown[];
   listError?: Error;
   statsResult?: unknown;
   statsError?: Error;
+  mutationsSeen?: Array<{ command: "start" | "stop"; hash: string }>;
+  mutationError?: Error;
 }): AdminTransmissionRouterDeps {
   return {
     transmission: {
@@ -53,6 +56,9 @@ function createTrackingDeps(options: {
         options.idsSeen?.push(ids);
         if (options.listError) {
           throw options.listError;
+        }
+        if (ids !== undefined && options.scopedResults?.length) {
+          return options.scopedResults.shift() as object;
         }
         if (ids !== undefined && options.detailResult !== undefined) {
           return options.detailResult as object;
@@ -69,8 +75,26 @@ function createTrackingDeps(options: {
         }
         return options.statsResult ?? SESSION_STATS_ARGUMENTS;
       },
+      async startTorrent(hash: string) {
+        options.mutationsSeen?.push({ command: "start", hash });
+        if (options.mutationError) {
+          throw options.mutationError;
+        }
+      },
+      async stopTorrent(hash: string) {
+        options.mutationsSeen?.push({ command: "stop", hash });
+        if (options.mutationError) {
+          throw options.mutationError;
+        }
+      },
     },
   };
+}
+
+function listRow(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return { ...TORRENT_GET_ROW, hashString: "abc123", ...overrides };
 }
 
 const DETAIL_ROW = {
@@ -253,6 +277,185 @@ describe("GET /api/admin/transmission/torrents/:hash", () => {
       "/api/admin/transmission/torrents/missing",
     );
     assert.equal(response.status, 404);
+  });
+});
+
+describe("POST /api/admin/transmission/torrents/:hash/start and /stop", () => {
+  it("returns 401 with no session", async () => {
+    const mutationsSeen: Array<{
+      command: "start" | "stop";
+      hash: string;
+    }> = [];
+    const response = await fetchLocal(
+      createApp(createTrackingDeps({ fieldsSeen: [], mutationsSeen }), null),
+      "/api/admin/transmission/torrents/abc123/start",
+      { method: "POST" },
+    );
+    assert.equal(response.status, 401);
+    assert.deepEqual(mutationsSeen, []);
+  });
+
+  it("returns 403 with a non-admin session", async () => {
+    const mutationsSeen: Array<{
+      command: "start" | "stop";
+      hash: string;
+    }> = [];
+    const response = await fetchLocal(
+      createApp(
+        createTrackingDeps({ fieldsSeen: [], mutationsSeen }),
+        nonAdminSession,
+      ),
+      "/api/admin/transmission/torrents/abc123/stop",
+      { method: "POST" },
+    );
+    assert.equal(response.status, 403);
+    assert.deepEqual(mutationsSeen, []);
+  });
+
+  it("does not return 200 when start is accepted but status remains stopped", async () => {
+    const originalConsoleError = console.error;
+    console.error = () => undefined;
+    try {
+      const response = await fetchLocal(
+        createApp(
+          createTrackingDeps({
+            fieldsSeen: [],
+            scopedResults: [
+              {
+                torrents: [listRow({ status: 0, isFinished: false })],
+              },
+            ],
+          }),
+        ),
+        "/api/admin/transmission/torrents/abc123/start",
+        { method: "POST" },
+      );
+      assert.equal(response.status, 502);
+      const body = (await response.json()) as { error: string };
+      assert.match(body.error, /accepted.*state did not change/i);
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
+  it("returns 404 when the verification re-read finds no torrent", async () => {
+    const response = await fetchLocal(
+      createApp(
+        createTrackingDeps({
+          fieldsSeen: [],
+          scopedResults: [{ torrents: [] }],
+        }),
+      ),
+      "/api/admin/transmission/torrents/missing/stop",
+      { method: "POST" },
+    );
+    assert.equal(response.status, 404);
+  });
+
+  it("returns the re-read queued row after a successful start", async () => {
+    const mutationsSeen: Array<{
+      command: "start" | "stop";
+      hash: string;
+    }> = [];
+    const response = await fetchLocal(
+      createApp(
+        createTrackingDeps({
+          fieldsSeen: [],
+          mutationsSeen,
+          scopedResults: [
+            {
+              torrents: [
+                listRow({
+                  name: "Re-read queued row",
+                  status: 3,
+                  isFinished: false,
+                }),
+              ],
+            },
+          ],
+        }),
+      ),
+      "/api/admin/transmission/torrents/abc123/start",
+      { method: "POST" },
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(mutationsSeen, [{ command: "start", hash: "abc123" }]);
+    const body = (await response.json()) as {
+      hash: string;
+      name: string;
+      status: number;
+      state: string;
+    };
+    assert.deepEqual(
+      {
+        hash: body.hash,
+        name: body.name,
+        status: body.status,
+        state: body.state,
+      },
+      {
+        hash: "abc123",
+        name: "Re-read queued row",
+        status: 3,
+        state: "download-wait",
+      },
+    );
+  });
+
+  it("returns the re-read stopped row after a successful stop", async () => {
+    const response = await fetchLocal(
+      createApp(
+        createTrackingDeps({
+          fieldsSeen: [],
+          scopedResults: [
+            {
+              torrents: [
+                listRow({
+                  name: "Re-read stopped row",
+                  status: 0,
+                  isFinished: false,
+                }),
+              ],
+            },
+          ],
+        }),
+      ),
+      "/api/admin/transmission/torrents/abc123/stop",
+      { method: "POST" },
+    );
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      name: string;
+      status: number;
+      state: string;
+    };
+    assert.deepEqual(body, {
+      ...body,
+      name: "Re-read stopped row",
+      status: 0,
+      state: "stopped",
+    });
+  });
+
+  it("returns 502 when the mutation RPC throws", async () => {
+    const originalConsoleError = console.error;
+    console.error = () => undefined;
+    try {
+      const response = await fetchLocal(
+        createApp(
+          createTrackingDeps({
+            fieldsSeen: [],
+            mutationError: new TransmissionUpstreamError("upstream denied", 409),
+          }),
+        ),
+        "/api/admin/transmission/torrents/abc123/start",
+        { method: "POST" },
+      );
+      assert.equal(response.status, 502);
+      assert.deepEqual(await response.json(), { error: "upstream denied" });
+    } finally {
+      console.error = originalConsoleError;
+    }
   });
 });
 

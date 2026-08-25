@@ -51,7 +51,7 @@ const SESSION_HEADER = "X-Transmission-Session-Id";
 
 type RpcPayload = {
   method: string;
-  arguments?: { fields: string[]; ids?: string[] };
+  arguments?: { fields?: string[]; ids?: string[] };
 };
 
 function isNonNullObject(value: unknown): value is Record<string, unknown> {
@@ -59,10 +59,10 @@ function isNonNullObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Builds the Transmission RPC client. Exposes only listTorrents and
- * getSessionStats; start/stop/remove/session-set are later increments.
+ * Builds the Transmission RPC client. Exposes torrent reads plus single-torrent
+ * start and stop. Remove and session-set are later increments.
  *
- * @throws TransmissionUpstreamError from either method on handshake failure,
+ * @throws TransmissionUpstreamError from these methods on handshake failure,
  * a non-success `result`, a non-2xx that is not a first-attempt 409, a
  * transport failure, a non-JSON body, a success with no `arguments` object,
  * or the 10 second timeout.
@@ -77,8 +77,8 @@ export function createTransmissionClient(options: TransmissionClientOptions) {
   /**
    * POSTs one RPC payload to /transmission/rpc and returns the parsed
    * `arguments` value as Transmission sent it, including an empty object.
-   * Does not require `arguments` to be present: that rule belongs on
-   * listTorrents and getSessionStats.
+   * Does not require `arguments` to be present: each public wrapper validates
+   * that shape, with mutation wrappers explicitly accepting an empty object.
    *
    * @throws TransmissionUpstreamError on a 409 replay, a missing session
    * header, a non-2xx, a non-success `result`, a non-JSON body, a transport
@@ -231,11 +231,44 @@ export function createTransmissionClient(options: TransmissionClientOptions) {
     return arguments_;
   }
 
-  return { listTorrents, getSessionStats };
+  /**
+   * Starts one torrent. Mutations legitimately return an empty arguments
+   * object, so `{}` is accepted as a complete success response.
+   */
+  async function startTorrent(hash: string): Promise<void> {
+    const arguments_ = await postRpc(
+      { method: "torrent-start", arguments: { ids: [hash] } },
+      false,
+    );
+    if (!isNonNullObject(arguments_)) {
+      throw new TransmissionUpstreamError(
+        "Transmission torrent-start returned no arguments object",
+        502,
+      );
+    }
+  }
+
+  /**
+   * Stops one torrent. Mutations legitimately return an empty arguments object,
+   * so `{}` is accepted as a complete success response.
+   */
+  async function stopTorrent(hash: string): Promise<void> {
+    const arguments_ = await postRpc(
+      { method: "torrent-stop", arguments: { ids: [hash] } },
+      false,
+    );
+    if (!isNonNullObject(arguments_)) {
+      throw new TransmissionUpstreamError(
+        "Transmission torrent-stop returned no arguments object",
+        502,
+      );
+    }
+  }
+
+  return { listTorrents, getSessionStats, startTorrent, stopTorrent };
 }
 
 /**
- * The object returned by createTransmissionClient. Public surface is
- * listTorrents and getSessionStats only.
+ * The object returned by createTransmissionClient.
  */
 export type TransmissionClient = ReturnType<typeof createTransmissionClient>;

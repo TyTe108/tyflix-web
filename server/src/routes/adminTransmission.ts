@@ -23,7 +23,10 @@ import {
 } from "../transmission/normalize";
 
 export type AdminTransmissionRouterDeps = {
-  transmission: Pick<TransmissionClient, "listTorrents" | "getSessionStats">;
+  transmission: Pick<
+    TransmissionClient,
+    "listTorrents" | "getSessionStats" | "startTorrent" | "stopTorrent"
+  >;
 };
 
 const TORRENT_GET_FIELDS = [
@@ -146,7 +149,73 @@ export function createAdminTransmissionRouter(
     }
   });
 
+  router.post("/torrents/:hash/start", async (req, res) => {
+    if (!requireAdminSession(res)) {
+      return;
+    }
+
+    try {
+      await transmission.startTorrent(req.params.hash);
+      await respondWithVerifiedMutation(
+        transmission,
+        req.params.hash,
+        "start",
+        res,
+      );
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
+  router.post("/torrents/:hash/stop", async (req, res) => {
+    if (!requireAdminSession(res)) {
+      return;
+    }
+
+    try {
+      await transmission.stopTorrent(req.params.hash);
+      await respondWithVerifiedMutation(
+        transmission,
+        req.params.hash,
+        "stop",
+        res,
+      );
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
   return router;
+}
+
+async function respondWithVerifiedMutation(
+  transmission: AdminTransmissionRouterDeps["transmission"],
+  hash: string,
+  command: "start" | "stop",
+  res: import("express").Response,
+): Promise<void> {
+  // Transmission returns "success" even for a nonexistent id, so the mutation
+  // response proves only that the command parsed. Re-read this hash once and
+  // verify the requested state before reporting success to the caller.
+  const torrentArgs = await transmission.listTorrents(
+    [...TORRENT_GET_FIELDS],
+    [hash],
+  );
+  const torrents = normalizeTorrentGetArguments(torrentArgs);
+  const torrent = torrents[0];
+  if (torrent === undefined) {
+    res.status(404).json({ error: "torrent not found" });
+    return;
+  }
+
+  const changed = command === "start" ? torrent.status !== 0 : torrent.status === 0;
+  if (!changed) {
+    throw new TransmissionUpstreamError(
+      `Transmission ${command} command was accepted but the state did not change`,
+      502,
+    );
+  }
+  res.status(200).json(torrent);
 }
 
 function requireAdminSession(
