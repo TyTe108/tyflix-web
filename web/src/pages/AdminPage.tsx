@@ -403,13 +403,15 @@ function TransmissionTorrentRow({
   );
   const complete = torrent.progress >= 1;
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // StrictMode remounts effects in development; without this setup a
+    // cleanup-only mounted ref stays false forever after the simulated unmount.
+    mounted.current = true;
+    return () => {
       mounted.current = false;
       detailRequest.current += 1;
-    },
-    [],
-  );
+    };
+  }, []);
 
   const toggleDetail = () => {
     if (expanded) {
@@ -458,7 +460,11 @@ function TransmissionTorrentRow({
     void mutation.then(
       (updated) => {
         if (mounted.current) {
-          onTorrentUpdated(updated);
+          onTorrentUpdated(
+            shouldStart
+              ? updated
+              : { ...updated, state: "stopped", status: 0 },
+          );
         }
       },
       (err: unknown) => {

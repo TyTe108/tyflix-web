@@ -312,30 +312,27 @@ describe("POST /api/admin/transmission/torrents/:hash/start and /stop", () => {
     assert.deepEqual(mutationsSeen, []);
   });
 
-  it("does not return 200 when start is accepted but status remains stopped", async () => {
-    const originalConsoleError = console.error;
-    console.error = () => undefined;
-    try {
-      const response = await fetchLocal(
-        createApp(
-          createTrackingDeps({
-            fieldsSeen: [],
-            scopedResults: [
-              {
-                torrents: [listRow({ status: 0, isFinished: false })],
-              },
-            ],
-          }),
-        ),
-        "/api/admin/transmission/torrents/abc123/start",
-        { method: "POST" },
-      );
-      assert.equal(response.status, 502);
-      const body = (await response.json()) as { error: string };
-      assert.match(body.error, /accepted.*state did not change/i);
-    } finally {
-      console.error = originalConsoleError;
-    }
+  it("returns 200 when stop is accepted but the immediate re-read still has the old status", async () => {
+    // A live stop took 373ms to settle while the immediate re-read still
+    // reported status 6. That transient old state is not a command failure.
+    const response = await fetchLocal(
+      createApp(
+        createTrackingDeps({
+          fieldsSeen: [],
+          scopedResults: [
+            {
+              torrents: [listRow({ status: 6, isFinished: false })],
+            },
+          ],
+        }),
+      ),
+      "/api/admin/transmission/torrents/abc123/stop",
+      { method: "POST" },
+    );
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { status: number; state: string };
+    assert.equal(body.status, 6);
+    assert.equal(body.state, "seeding");
   });
 
   it("returns 404 when the verification re-read finds no torrent", async () => {

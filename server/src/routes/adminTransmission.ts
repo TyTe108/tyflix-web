@@ -156,10 +156,9 @@ export function createAdminTransmissionRouter(
 
     try {
       await transmission.startTorrent(req.params.hash);
-      await respondWithVerifiedMutation(
+      await respondWithRereadTorrent(
         transmission,
         req.params.hash,
-        "start",
         res,
       );
     } catch (err) {
@@ -174,10 +173,9 @@ export function createAdminTransmissionRouter(
 
     try {
       await transmission.stopTorrent(req.params.hash);
-      await respondWithVerifiedMutation(
+      await respondWithRereadTorrent(
         transmission,
         req.params.hash,
-        "stop",
         res,
       );
     } catch (err) {
@@ -188,15 +186,14 @@ export function createAdminTransmissionRouter(
   return router;
 }
 
-async function respondWithVerifiedMutation(
+async function respondWithRereadTorrent(
   transmission: AdminTransmissionRouterDeps["transmission"],
   hash: string,
-  command: "start" | "stop",
   res: import("express").Response,
 ): Promise<void> {
-  // Transmission returns "success" even for a nonexistent id, so the mutation
-  // response proves only that the command parsed. Re-read this hash once and
-  // verify the requested state before reporting success to the caller.
+  // Transmission returns "success" even for a nonexistent id. Re-read this
+  // hash once to establish that the torrent exists; its state may still be
+  // settling, especially while Stop tears down peer connections.
   const torrentArgs = await transmission.listTorrents(
     [...TORRENT_GET_FIELDS],
     [hash],
@@ -208,13 +205,6 @@ async function respondWithVerifiedMutation(
     return;
   }
 
-  const changed = command === "start" ? torrent.status !== 0 : torrent.status === 0;
-  if (!changed) {
-    throw new TransmissionUpstreamError(
-      `Transmission ${command} command was accepted but the state did not change`,
-      502,
-    );
-  }
   res.status(200).json(torrent);
 }
 

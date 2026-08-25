@@ -9,6 +9,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { StrictMode } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -466,6 +467,13 @@ describe("AdminPage Downloads tab", () => {
         screen.getByRole("button", { name: "Stop Example.Show.S01E01" }),
       ).toBeTruthy(),
     );
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Stop Example.Show.S01E01",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
     expect(startTransmissionTorrent).toHaveBeenCalledTimes(1);
   });
 
@@ -514,6 +522,76 @@ describe("AdminPage Downloads tab", () => {
     expect(
       screen.getByRole("button", { name: "Start Example.Show.S01E01" }),
     ).toBeTruthy();
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Start Example.Show.S01E01",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+  });
+
+  it("re-enables the mutation button after StrictMode remounts its effects", async () => {
+    vi.mocked(useTransmissionEnabled).mockReturnValue(true);
+    let started = false;
+    vi.mocked(fetchTransmission).mockImplementation(async () =>
+      transmissionResponse([
+        transmissionTorrent(
+          started
+            ? { state: "downloading", status: 4 }
+            : { state: "stopped", status: 0 },
+        ),
+      ]),
+    );
+    vi.mocked(startTransmissionTorrent).mockImplementation(async () => {
+      started = true;
+      return transmissionTorrent({ state: "downloading", status: 4 });
+    });
+
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={["/admin?tab=downloads"]}>
+          <AdminPage />
+        </MemoryRouter>
+      </StrictMode>,
+    );
+
+    const action = await screen.findByRole("button", {
+      name: "Start Example.Show.S01E01",
+    });
+    fireEvent.click(action);
+
+    await waitFor(() =>
+      expect((action as HTMLButtonElement).disabled).toBe(false),
+    );
+  });
+
+  it("optimistically shows a stopped row when stop re-reads the old seeding status", async () => {
+    vi.mocked(useTransmissionEnabled).mockReturnValue(true);
+    vi.mocked(fetchTransmission)
+      .mockResolvedValueOnce(
+        transmissionResponse([
+          transmissionTorrent({ state: "seeding", status: 6 }),
+        ]),
+      )
+      .mockImplementation(() => new Promise(() => undefined));
+    vi.mocked(stopTransmissionTorrent).mockResolvedValue(
+      transmissionTorrent({ state: "seeding", status: 6 }),
+    );
+    renderAdmin("downloads");
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Stop Example.Show.S01E01",
+      }),
+    );
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Start Example.Show.S01E01",
+      }),
+    ).toBeTruthy();
+    expect(screen.getByText("Paused")).toBeTruthy();
   });
 });
 
