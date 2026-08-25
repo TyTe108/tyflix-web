@@ -12,7 +12,7 @@
 //
 // Mount-order rules are load-bearing. Everything public (/api/auth,
 // /api/config, /api/access-requests) has to be registered before that /api 404
-// guard. /api/admin/media, /api/admin/blocklist, and
+// guard. /api/admin/media, /api/admin/blocklist, /api/admin/transmission, and
 // /api/admin/access-requests have to come before /api/admin because Express
 // matches prefixes in registration order. Note that most routers are gated by
 // requireAuth/requireAdmin right here at the mount, but the admin
@@ -48,6 +48,7 @@ import { createAdminAccessRequestsRouter } from "./routes/adminAccessRequests";
 import { createAdminBlocklistRouter } from "./routes/adminBlocklist";
 import { createAdminMediaRouter } from "./routes/adminMedia";
 import { createAdminRouter } from "./routes/admin";
+import { createAdminTransmissionRouter } from "./routes/adminTransmission";
 import { createAuthRouter } from "./routes/auth";
 import { createConfigRouter } from "./routes/config";
 import { createDiscoverRouter } from "./routes/discover";
@@ -64,6 +65,7 @@ import { createUserPreferencesStore } from "./preferences/store";
 import { createSonarrClient } from "./sonarr/client";
 import { createTmdbClient } from "./tmdb/client";
 import { createMediaEnrichment } from "./tmdb/enrichment";
+import { createTransmissionClient } from "./transmission/client";
 
 loadLocalEnvFile();
 
@@ -164,6 +166,13 @@ async function start(): Promise<void> {
   const dashboard = createDashboardClient({
     baseUrl: config.dashboardUrl,
   });
+
+  // Unset TRANSMISSION_URL leaves this undefined and the admin torrents route
+  // unmounted.
+  const transmission =
+    config.transmissionUrl !== undefined
+      ? createTransmissionClient({ baseUrl: config.transmissionUrl })
+      : undefined;
 
   // TMDB supplies discovery metadata and poster art. mediaEnrichment is the
   // reverse direction: hydrating a bare TMDB id from Seerr into something with
@@ -292,6 +301,16 @@ async function start(): Promise<void> {
     requireAdmin(config.sessionSecret, seerr, sessionRevocation),
     createAdminBlocklistRouter({ seerr, mediaEnrichment }),
   );
+
+  // More specific than /api/admin. requireAdmin at the mount; handlers also
+  // check isAdmin themselves. Unset TRANSMISSION_URL leaves this unmounted.
+  if (transmission !== undefined) {
+    app.use(
+      "/api/admin/transmission",
+      requireAdmin(config.sessionSecret, seerr, sessionRevocation),
+      createAdminTransmissionRouter({ transmission }),
+    );
+  }
 
   // More specific than /api/admin — mount before it. Same ACCESS_REQUESTS_FILE
   // gate as the public submit route.

@@ -59,4 +59,6 @@ export const TORRENT_GET_ROW = {
   sizeWhenDone: 4578806439,
   status: 0,
   totalSize: 4578806439,
+  uploadedEver: 9158541625,
+  uploadRatio: 2.0002028942108154,
 };
