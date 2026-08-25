@@ -23,10 +23,15 @@ describe("transmissionStateLabel", () => {
 });
 
 describe("Transmission display formatters", () => {
-  it("formats bytes and byte rates with SI (1000-based) units", () => {
-    expect(formatBytes(1000 ** 3)).toBe("1.0 GB");
-    expect(formatBytesPerSecond(1000 ** 2)).toBe("1.0 MB/s");
+  it("formats bytes with SI (1000-based) magnitudes, matching Transmission", () => {
+    expect(formatBytes(999)).toBe("999 B");
+    expect(formatBytes(1000)).toBe("1.0 kB");
     expect(formatBytes(4_578_806_439)).toBe("4.6 GB");
+    expect(formatBytes(9_158_541_625)).toBe("9.2 GB");
+  });
+
+  it("formats byte rates on the same SI scale", () => {
+    expect(formatBytesPerSecond(1000 ** 2)).toBe("1.0 MB/s");
   });
 
   it("formats a duration and preserves the unknown sentinel", () => {

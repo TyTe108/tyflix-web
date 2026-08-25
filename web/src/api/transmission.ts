@@ -94,7 +94,39 @@ export function transmissionStateLabel(
   return STATE_LABELS[state];
 }
 
-/** Formats a byte count the way Transmission does: SI units (1000-based). */
+// States Transmission paints as live transfers. Everything else is drawn in
+// the muted colour, mirroring how its own UI greys inactive rows.
+const ACTIVE_STATES: ReadonlySet<TransmissionTorrentState> = new Set([
+  "downloading",
+  "seeding",
+  "checking",
+]);
+
+/**
+ * Modifier class for a row's progress fill: active, idle, or error.
+ *
+ * An error outranks the state, so a stalled-but-errored transfer reads as a
+ * problem rather than as progress.
+ */
+export function transmissionProgressFillClass(torrent: {
+  state: TransmissionTorrentState;
+  error: { code: number; message: string } | null;
+}): string {
+  if (torrent.error !== null) {
+    return "admin-download-progress-fill is-error";
+  }
+  return ACTIVE_STATES.has(torrent.state)
+    ? "admin-download-progress-fill is-active"
+    : "admin-download-progress-fill is-idle";
+}
+
+/**
+ * Formats a byte count in SI units (1000-based), not binary (1024-based),
+ * because that is the scale Transmission itself displays.
+ *
+ * "kB" is lowercase deliberately: it is both Transmission's own label and the
+ * SI symbol for 1000 bytes.
+ */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) {
     return "0 B";

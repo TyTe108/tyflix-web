@@ -94,6 +94,7 @@ import {
   formatBytes,
   formatBytesPerSecond,
   formatDuration,
+  transmissionProgressFillClass,
   transmissionStateLabel,
   type TransmissionTorrentView,
 } from "../api/transmission";
@@ -392,7 +393,10 @@ function TransmissionTorrentRow({
         aria-valuemax={100}
         aria-valuenow={progressPercent}
       >
-        <span style={{ width: `${progressPercent}%` }} />
+        <span
+          className={transmissionProgressFillClass(torrent)}
+          style={{ width: `${progressPercent}%` }}
+        />
       </div>
 
       <p className="admin-download-size muted">

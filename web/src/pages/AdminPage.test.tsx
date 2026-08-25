@@ -245,6 +245,62 @@ describe("AdminPage Downloads tab", () => {
     ).toBeTruthy();
   });
 
+  it("paints active and inactive progress fills differently", async () => {
+    vi.mocked(useTransmissionEnabled).mockReturnValue(true);
+    vi.mocked(fetchTransmission).mockResolvedValue(
+      transmissionResponse([
+        transmissionTorrent({
+          hash: "seeding-hash",
+          name: "Seeding.Torrent",
+          state: "seeding",
+          queuePosition: 0,
+        }),
+        transmissionTorrent({
+          hash: "stopped-hash",
+          name: "Stopped.Torrent",
+          state: "stopped",
+          queuePosition: 1,
+        }),
+      ]),
+    );
+    renderAdmin("downloads");
+
+    const seeding = await screen.findByRole("progressbar", {
+      name: "Seeding.Torrent progress",
+    });
+    const stopped = screen.getByRole("progressbar", {
+      name: "Stopped.Torrent progress",
+    });
+
+    const seedingFill = seeding.querySelector("span");
+    const stoppedFill = stopped.querySelector("span");
+    expect(seedingFill?.className).toBeTruthy();
+    expect(stoppedFill?.className).toBeTruthy();
+    expect(seedingFill?.className).not.toBe(stoppedFill?.className);
+    expect(seedingFill?.classList.contains("is-active")).toBe(true);
+    expect(stoppedFill?.classList.contains("is-idle")).toBe(true);
+  });
+
+  it("paints an errored row's progress fill as an error regardless of state", async () => {
+    vi.mocked(useTransmissionEnabled).mockReturnValue(true);
+    vi.mocked(fetchTransmission).mockResolvedValue(
+      transmissionResponse([
+        transmissionTorrent({
+          state: "downloading",
+          error: { code: 3, message: "Tracker gave an error" },
+        }),
+      ]),
+    );
+    renderAdmin("downloads");
+
+    const bar = await screen.findByRole("progressbar", {
+      name: "Example.Show.S01E01 progress",
+    });
+    const fill = bar.querySelector("span");
+    expect(fill?.classList.contains("is-error")).toBe(true);
+    expect(fill?.classList.contains("is-active")).toBe(false);
+  });
+
   it("shows a torrent error message instead of normal transfer status", async () => {
     vi.mocked(useTransmissionEnabled).mockReturnValue(true);
     vi.mocked(fetchTransmission).mockResolvedValue(
