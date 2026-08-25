@@ -311,4 +311,36 @@ describe("loadConfig", () => {
     );
   });
 
+  it("leaves transmissionUrl undefined when TRANSMISSION_URL is absent or blank", () => {
+    const unset = loadConfig(validEnv);
+    assert.equal(unset.transmissionUrl, undefined);
+
+    const blank = loadConfig({ ...validEnv, TRANSMISSION_URL: "" });
+    assert.equal(blank.transmissionUrl, undefined);
+
+    const whitespace = loadConfig({ ...validEnv, TRANSMISSION_URL: "  " });
+    assert.equal(whitespace.transmissionUrl, undefined);
+  });
+
+  it("accepts an absolute http TRANSMISSION_URL and strips trailing slashes", () => {
+    const config = loadConfig({
+      ...validEnv,
+      TRANSMISSION_URL: "http://transmission:9091///",
+    });
+    assert.equal(config.transmissionUrl, "http://transmission:9091");
+  });
+
+  it("throws naming TRANSMISSION_URL when the value is not an absolute http(s) URL", () => {
+    assert.throws(
+      () => loadConfig({ ...validEnv, TRANSMISSION_URL: "not-a-url" }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("TRANSMISSION_URL"),
+    );
+    assert.throws(
+      () => loadConfig({ ...validEnv, TRANSMISSION_URL: "ftp://host:9091" }),
+      (err: unknown) =>
+        err instanceof Error && err.message.includes("TRANSMISSION_URL"),
+    );
+  });
+
 });

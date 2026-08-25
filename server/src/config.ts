@@ -7,10 +7,10 @@
 // clean value or throws with the variable's name in the message, so the log
 // line at boot tells you exactly which one to fix. Two variables have
 // defaults (PORT, NODE_ENV), USER_PREFERENCES_FILE defaults next to the
-// session-revocation file when unset, and only ACCESS_REQUESTS_FILE is
-// genuinely optional. Everything else is required, because every one of them
-// is a credential, an upstream address, or core auth infrastructure the app
-// can't work without.
+// session-revocation file when unset, and ACCESS_REQUESTS_FILE and
+// TRANSMISSION_URL are genuinely optional. Everything else is required, because
+// every one of them is a credential, an upstream address, or core auth
+// infrastructure the app can't work without.
 //
 // loadConfig takes the env as a parameter defaulting to process.env, which is
 // what lets config.test.ts exercise all of this without mutating the real
@@ -49,6 +49,11 @@ export type AppConfig = {
   sessionRevocationFile: string;
   /** Absolute path to the user-preferences JSON file. Always present. */
   userPreferencesFile: string;
+  /**
+   * Transmission RPC base URL, no trailing slash. Absent = feature off;
+   * nothing constructs the client yet.
+   */
+  transmissionUrl?: string;
 };
 
 /**
@@ -174,6 +179,32 @@ function parseTmdbApiKey(raw: string | undefined): string {
 }
 
 /**
+ * Optional: unset/whitespace → feature off (undefined). When set, must be an
+ * absolute http: or https: URL. Trailing slashes are stripped so callers can
+ * build paths as `${baseUrl}/transmission/rpc` without a double slash.
+ */
+function parseTransmissionUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === "") {
+    return undefined;
+  }
+  const stripped = raw.trim().replace(/\/+$/, "");
+  let parsed: URL;
+  try {
+    parsed = new URL(stripped);
+  } catch {
+    throw new Error(
+      "Invalid TRANSMISSION_URL: must be an absolute http: or https: URL",
+    );
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(
+      "Invalid TRANSMISSION_URL: must be an absolute http: or https: URL",
+    );
+  }
+  return stripped;
+}
+
+/**
  * Truly optional: unset/whitespace → feature off (undefined). When set, must
  * be a non-empty absolute path — a relative path means the Docker volume mount
  * is wrong and should fail loud at boot.
@@ -226,6 +257,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   // Resolved up front so the conditional spread at the bottom can leave the key
   // off the object entirely instead of setting it to undefined.
   const accessRequestsFile = parseAccessRequestsFile(env.ACCESS_REQUESTS_FILE);
+  const transmissionUrl = parseTransmissionUrl(env.TRANSMISSION_URL);
   const sessionRevocationFile = parseSessionRevocationFile(
     env.SESSION_REVOCATION_FILE,
   );
@@ -253,5 +285,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     sessionRevocationFile,
     userPreferencesFile,
     ...(accessRequestsFile !== undefined ? { accessRequestsFile } : {}),
+    ...(transmissionUrl !== undefined ? { transmissionUrl } : {}),
   };
 }
