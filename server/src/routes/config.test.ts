@@ -3,10 +3,16 @@ import { describe, it } from "node:test";
 import express from "express";
 import { createConfigRouter } from "./config";
 
-function buildApp(accessRequestsEnabled: boolean): express.Express {
+function buildApp(
+  accessRequestsEnabled: boolean,
+  transmissionEnabled: boolean,
+): express.Express {
   const app = express();
   app.use(express.json());
-  app.use("/api/config", createConfigRouter({ accessRequestsEnabled }));
+  app.use(
+    "/api/config",
+    createConfigRouter({ accessRequestsEnabled, transmissionEnabled }),
+  );
   return app;
 }
 
@@ -27,14 +33,20 @@ async function getConfig(app: express.Express): Promise<Response> {
 
 describe("GET /api/config", () => {
   it("returns accessRequestsEnabled true when the feature is on", async () => {
-    const response = await getConfig(buildApp(true));
+    const response = await getConfig(buildApp(true, false));
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { accessRequestsEnabled: true });
+    assert.deepEqual(await response.json(), {
+      accessRequestsEnabled: true,
+      transmissionEnabled: false,
+    });
   });
 
   it("returns accessRequestsEnabled false when the feature is off", async () => {
-    const response = await getConfig(buildApp(false));
+    const response = await getConfig(buildApp(false, true));
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { accessRequestsEnabled: false });
+    assert.deepEqual(await response.json(), {
+      accessRequestsEnabled: false,
+      transmissionEnabled: true,
+    });
   });
 });

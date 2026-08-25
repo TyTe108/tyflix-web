@@ -13,9 +13,13 @@
 
 export type PublicConfig = {
   accessRequestsEnabled: boolean;
+  transmissionEnabled: boolean;
 };
 
-const DISABLED: PublicConfig = { accessRequestsEnabled: false };
+const DISABLED: PublicConfig = {
+  accessRequestsEnabled: false,
+  transmissionEnabled: false,
+};
 
 let cached: PublicConfig | null = null;
 let inflight: Promise<PublicConfig> | null = null;
@@ -53,6 +57,8 @@ async function probe(): Promise<PublicConfig> {
       typeof body !== "object" ||
       body === null ||
       typeof (body as { accessRequestsEnabled?: unknown }).accessRequestsEnabled !==
+        "boolean" ||
+      typeof (body as { transmissionEnabled?: unknown }).transmissionEnabled !==
         "boolean"
     ) {
       cached = DISABLED;
@@ -61,6 +67,8 @@ async function probe(): Promise<PublicConfig> {
     cached = {
       accessRequestsEnabled: (body as { accessRequestsEnabled: boolean })
         .accessRequestsEnabled,
+      transmissionEnabled: (body as { transmissionEnabled: boolean })
+        .transmissionEnabled,
     };
     return cached;
   } catch {

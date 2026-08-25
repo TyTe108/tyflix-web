@@ -29,6 +29,12 @@ import {
   fetchAllRequests,
   type RequestView,
 } from "../api/requests";
+import {
+  fetchTransmission,
+  type TransmissionListResponse,
+  type TransmissionTorrentView,
+} from "../api/transmission";
+import { useTransmissionEnabled } from "../hooks/useTransmissionEnabled";
 import { AdminPage } from "./AdminPage";
 
 vi.mock("../api/admin", async (importOriginal) => {
@@ -90,6 +96,18 @@ vi.mock("../api/badgeCounts", async (importOriginal) => {
   };
 });
 
+vi.mock("../api/transmission", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/transmission")>();
+  return {
+    ...actual,
+    fetchTransmission: vi.fn(),
+  };
+});
+
+vi.mock("../hooks/useTransmissionEnabled", () => ({
+  useTransmissionEnabled: vi.fn(),
+}));
+
 const ZERO_BADGE_COUNTS: BadgeCounts = {
   mine: { requests: 0, issues: 0 },
   admin: { requests: 0, issues: 0, access: 0 },
@@ -128,6 +146,121 @@ function renderAdmin(tab?: string) {
     </MemoryRouter>,
   );
 }
+
+function transmissionTorrent(
+  overrides: Partial<TransmissionTorrentView> = {},
+): TransmissionTorrentView {
+  return {
+    hash: "abc123",
+    name: "Example.Show.S01E01",
+    labels: ["tv-sonarr"],
+    state: "downloading",
+    status: 4,
+    isStalled: false,
+    progress: 0.5,
+    sizeBytes: 2 * 1024 ** 3,
+    downloadedBytes: 1024 ** 3,
+    uploadedBytes: 128 * 1024 ** 2,
+    ratio: 0.125,
+    rateDownload: 1024 ** 2,
+    rateUpload: 128 * 1024,
+    etaSeconds: null,
+    peers: { connected: 8, sendingToUs: 3, gettingFromUs: 0 },
+    error: null,
+    queuePosition: 1,
+    downloadDir: "/downloads",
+    addedAtMs: 1_700_000_000_000,
+    doneAtMs: null,
+    recheckProgress: 0,
+    metadataPercentComplete: 1,
+    ...overrides,
+  };
+}
+
+function transmissionResponse(
+  torrents: TransmissionTorrentView[] = [transmissionTorrent()],
+): TransmissionListResponse {
+  return {
+    torrents,
+    session: {
+      torrentCount: torrents.length,
+      activeCount: torrents.length,
+      pausedCount: 0,
+      rateDownload: 1024 ** 2,
+      rateUpload: 128 * 1024,
+    },
+  };
+}
+
+describe("AdminPage Downloads tab", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  beforeEach(() => {
+    vi.mocked(fetchBadgeCounts).mockReset();
+    vi.mocked(fetchBadgeCounts).mockResolvedValue(ZERO_BADGE_COUNTS);
+    vi.mocked(fetchAllRequests).mockReset();
+    vi.mocked(fetchAllRequests).mockResolvedValue([]);
+    vi.mocked(fetchTransmission).mockReset();
+    vi.mocked(fetchTransmission).mockResolvedValue(transmissionResponse());
+    vi.mocked(useTransmissionEnabled).mockReset();
+  });
+
+  it("omits Downloads when transmissionEnabled is false", async () => {
+    vi.mocked(useTransmissionEnabled).mockReturnValue(false);
+    renderAdmin();
+
+    await screen.findByRole("heading", { name: "Requests" });
+    expect(screen.queryByRole("tab", { name: "Downloads" })).toBeNull();
+  });
+
+  it("shows Downloads when transmissionEnabled is true", async () => {
+    vi.mocked(useTransmissionEnabled).mockReturnValue(true);
+    renderAdmin();
+
+    expect(
+      await screen.findByRole("tab", { name: "Downloads" }),
+    ).toBeTruthy();
+  });
+
+  it("falls back to the default tab for a bookmarked Downloads URL when disabled", async () => {
+    vi.mocked(useTransmissionEnabled).mockReturnValue(false);
+    renderAdmin("downloads");
+
+    const requestsTab = await screen.findByRole("tab", { name: "Requests" });
+    expect(requestsTab.getAttribute("aria-selected")).toBe("true");
+    expect(
+      await screen.findByRole("heading", { name: "Requests" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Downloads" })).toBeNull();
+  });
+
+  it("renders unknown remaining time when etaSeconds is null", async () => {
+    vi.mocked(useTransmissionEnabled).mockReturnValue(true);
+    renderAdmin("downloads");
+
+    expect(
+      await screen.findByText("remaining time unknown"),
+    ).toBeTruthy();
+  });
+
+  it("shows a torrent error message instead of normal transfer status", async () => {
+    vi.mocked(useTransmissionEnabled).mockReturnValue(true);
+    vi.mocked(fetchTransmission).mockResolvedValue(
+      transmissionResponse([
+        transmissionTorrent({
+          error: { code: 3, message: "Tracker gave an error" },
+        }),
+      ]),
+    );
+    renderAdmin("downloads");
+
+    const message = await screen.findByText("Tracker gave an error");
+    expect(message.classList.contains("error")).toBe(true);
+    expect(screen.queryByText(/Downloading from/)).toBeNull();
+  });
+});
 
 describe("AdminPage blocklist tab", () => {
   afterEach(() => {

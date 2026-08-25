@@ -265,6 +265,7 @@ async function start(): Promise<void> {
     "/api/config",
     createConfigRouter({
       accessRequestsEnabled: accessRequestStore !== undefined,
+      transmissionEnabled: transmission !== undefined,
     }),
   );
 

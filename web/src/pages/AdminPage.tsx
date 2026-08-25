@@ -1,4 +1,4 @@
-// The admin console at /admin. One page, eight tabs, everything behind the
+// The admin console at /admin. One page, nine possible tabs, everything behind the
 // admin permission bit: AdminRoute gates the route on the client, and on the
 // server most of these endpoints sit behind requireAdmin. GET /api/issues/all
 // is the exception, mounted behind plain requireAuth with an inline admin check
@@ -13,6 +13,8 @@
 //               GET /api/issues/all, every 60s
 //   Blocklist   titles an admin has removed or blocked by hand
 //               GET /api/admin/blocklist, every 60s
+//   Downloads   Transmission torrents and aggregate transfer rates
+//               GET /api/admin/transmission/torrents, every 5s
 //   Access      the self-serve access queue. Approving sends a real Plex invite
 //               GET /api/admin/access-requests, every 30s
 //   Users       per-user watched-versus-requested analytics
@@ -87,6 +89,14 @@ import {
   type AdminUser,
   type AdminUsersResponse,
 } from "../api/admin";
+import {
+  fetchTransmission,
+  formatBytes,
+  formatBytesPerSecond,
+  formatDuration,
+  transmissionStateLabel,
+  type TransmissionTorrentView,
+} from "../api/transmission";
 import { fetchBadgeCounts } from "../api/badgeCounts";
 import {
   approveRequest,
@@ -110,14 +120,17 @@ import {
   issueTypeLabel,
 } from "../api/issues";
 import { usePolledResource } from "../hooks/usePolledResource";
+import { useTransmissionEnabled } from "../hooks/useTransmissionEnabled";
 import { usePagination } from "../hooks/usePagination";
 
-// Tab order as rendered. Also the allowlist for ?tab=, via isAdminTab.
+// Possible tab order. The rendered list and ?tab= allowlist are filtered by
+// feature flags in AdminPage.
 // badgeKey maps to admin.{key} on GET /api/me/badge-counts when present.
 const ADMIN_TABS = [
   { id: "requests", label: "Requests", badgeKey: "requests" },
   { id: "issues", label: "Issues", badgeKey: "issues" },
   { id: "blocklist", label: "Blocklist" },
+  { id: "downloads", label: "Downloads" },
   { id: "access", label: "Access", badgeKey: "access" },
   { id: "users", label: "Users" },
   { id: "system", label: "System" },
@@ -131,10 +144,14 @@ type AdminBadgeKey = "requests" | "issues" | "access";
 const DEFAULT_TAB: AdminTab = "requests";
 const BADGE_COUNT_POLL_MS = 60_000;
 
-// Anything else in ?tab= falls back to DEFAULT_TAB rather than rendering an
-// empty panel.
-function isAdminTab(value: string | null): value is AdminTab {
-  return ADMIN_TABS.some((tab) => tab.id === value);
+// Anything absent from the currently rendered tabs falls back to DEFAULT_TAB
+// rather than rendering an empty panel. This includes a bookmarked Downloads
+// URL when Transmission is disabled.
+function isAvailableAdminTab(
+  value: string | null,
+  tabs: readonly (typeof ADMIN_TABS)[number][],
+): value is AdminTab {
+  return tabs.some((tab) => tab.id === value);
 }
 
 function adminTabBadgeCount(
@@ -176,8 +193,18 @@ function AdminTabBadgeDot() {
  */
 export function AdminPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const transmissionEnabled = useTransmissionEnabled();
+  const availableTabs = useMemo(
+    () =>
+      ADMIN_TABS.filter(
+        (tab) => tab.id !== "downloads" || transmissionEnabled === true,
+      ),
+    [transmissionEnabled],
+  );
   const rawTab = searchParams.get("tab");
-  const activeTab: AdminTab = isAdminTab(rawTab) ? rawTab : DEFAULT_TAB;
+  const activeTab: AdminTab = isAvailableAdminTab(rawTab, availableTabs)
+    ? rawTab
+    : DEFAULT_TAB;
 
   const { data: badgeCounts, refresh: refreshBadges } = usePolledResource(
     fetchBadgeCounts,
@@ -208,7 +235,7 @@ export function AdminPage() {
       {/* Tab strip. Wired up as a real ARIA tablist so the ids here line up
           with the panel's aria-labelledby below. */}
       <div className="admin-tabs" role="tablist" aria-label="Admin sections">
-        {ADMIN_TABS.map((tab) => {
+        {availableTabs.map((tab) => {
           const selected = activeTab === tab.id;
           const count =
             "badgeKey" in tab
@@ -252,6 +279,7 @@ export function AdminPage() {
         ) : null}
         {activeTab === "issues" ? <IssuesPanel /> : null}
         {activeTab === "blocklist" ? <BlocklistPanel /> : null}
+        {activeTab === "downloads" ? <DownloadsPanel /> : null}
         {activeTab === "access" ? (
           <AccessPanel refreshBadges={refreshBadges} />
         ) : null}
@@ -261,6 +289,146 @@ export function AdminPage() {
         {activeTab === "containers" ? <ContainersPanel /> : null}
       </div>
     </main>
+  );
+}
+
+// Downloads: Transmission's transfer list, polled every 5 seconds. It costs the
+// same rate-limit budget as System or Containers because only the active panel
+// is mounted at a time. fetchTransmission is a module-level function; keeping
+// that reference stable prevents usePolledResource from resetting its interval.
+function DownloadsPanel() {
+  const { data, status, error, lastUpdated, refresh } = usePolledResource(
+    fetchTransmission,
+    5000,
+  );
+  const torrents = useMemo(
+    () =>
+      [...(data?.torrents ?? [])].sort(
+        (a, b) => a.queuePosition - b.queuePosition,
+      ),
+    [data],
+  );
+
+  return (
+    <section className="admin-section" aria-labelledby="downloads-heading">
+      <h2 id="downloads-heading">Downloads</h2>
+
+      {status === "loading" ? (
+        <p className="muted">Loading downloads…</p>
+      ) : null}
+
+      {status === "error" ? (
+        <div className="stats-error">
+          <p className="error">{error ?? "Failed to load downloads"}</p>
+          <button type="button" className="btn secondary" onClick={refresh}>
+            Retry
+          </button>
+        </div>
+      ) : null}
+
+      {status === "ready" && data !== null ? (
+        <>
+          <UpdatedLine lastUpdated={lastUpdated} refreshError={error} />
+          <div className="admin-downloads-session" aria-label="Transfer totals">
+            <span>
+              <strong>{data.session.torrentCount}</strong> torrents
+            </span>
+            <span>
+              ↓ {formatBytesPerSecond(data.session.rateDownload)}
+            </span>
+            <span>↑ {formatBytesPerSecond(data.session.rateUpload)}</span>
+          </div>
+
+          {torrents.length === 0 ? (
+            <p className="muted">No torrents.</p>
+          ) : (
+            <ul className="admin-downloads-list">
+              {torrents.map((torrent) => (
+                <TransmissionTorrentRow key={torrent.hash} torrent={torrent} />
+              ))}
+            </ul>
+          )}
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function TransmissionTorrentRow({
+  torrent,
+}: {
+  torrent: TransmissionTorrentView;
+}) {
+  const progressPercent = Math.min(
+    100,
+    Math.max(0, torrent.progress * 100),
+  );
+  const complete = torrent.progress >= 1;
+
+  return (
+    <li className="admin-download-row">
+      <div className="admin-download-head">
+        <span className="admin-download-name">{torrent.name}</span>
+        <span className="admin-download-state">
+          {transmissionStateLabel(torrent.state)}
+        </span>
+      </div>
+
+      {torrent.labels.length > 0 ? (
+        <div className="admin-download-labels" aria-label="Labels">
+          {torrent.labels.map((label) => (
+            <span className="stats-tag" key={label}>
+              {label}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div
+        className="admin-download-progress"
+        role="progressbar"
+        aria-label={`${torrent.name} progress`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progressPercent}
+      >
+        <span style={{ width: `${progressPercent}%` }} />
+      </div>
+
+      <p className="admin-download-size muted">
+        {complete
+          ? `${formatBytes(torrent.sizeBytes)}, uploaded ${formatBytes(
+              torrent.uploadedBytes,
+            )} (Ratio: ${torrent.ratio.toFixed(2)})`
+          : `${formatBytes(torrent.downloadedBytes)} of ${formatBytes(
+              torrent.sizeBytes,
+            )} (${progressPercent.toFixed(1)}%)`}
+      </p>
+
+      {torrent.error !== null ? (
+        <p className="error admin-download-status">{torrent.error.message}</p>
+      ) : (
+        <p className="muted admin-download-status">
+          {torrent.state === "downloading" ? (
+            <>
+              Downloading from {torrent.peers.sendingToUs} of{" "}
+              {torrent.peers.connected} peers · ↓{" "}
+              {formatBytesPerSecond(torrent.rateDownload)} · ↑{" "}
+              {formatBytesPerSecond(torrent.rateUpload)}
+            </>
+          ) : torrent.state === "seeding" ? (
+            <>
+              Seeding to {torrent.peers.gettingFromUs} of{" "}
+              {torrent.peers.connected} peers · ↑{" "}
+              {formatBytesPerSecond(torrent.rateUpload)}
+            </>
+          ) : (
+            transmissionStateLabel(torrent.state)
+          )}{" "}
+          · <span>{formatDuration(torrent.etaSeconds)}</span>
+        </p>
+      )}
+    </li>
   );
 }
 
