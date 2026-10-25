@@ -31,6 +31,7 @@ import { createAccessRequestStore } from "./accessRequests/store";
 import { loadConfig, type AppConfig } from "./config";
 import { createDashboardClient } from "./dashboard/client";
 import { requireAdmin, requireAuth } from "./middleware/auth";
+import { jsonBody } from "./middleware/jsonBody";
 import {
   accessRequestLimiter,
   apiRateLimiter,
@@ -231,7 +232,8 @@ async function start(): Promise<void> {
 
   // JSON bodies only. There's deliberately no cookie-parser: session.ts reads
   // the Cookie header itself, so the session format stays in one file.
-  app.use(express.json());
+  // This parser refuses compressed bodies before body-parser can decompress them.
+  app.use(jsonBody);
 
   // Liveness probe, outside /api so the rate limiter never counts it. Vite
   // proxies this path in dev alongside /api.
