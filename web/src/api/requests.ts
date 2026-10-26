@@ -139,15 +139,33 @@ export async function fetchMyRequests(): Promise<RequestView[]> {
  * GET /api/requests/all. Everybody's requests, for the admin queue. Same shape
  * as fetchMyRequests.
  *
- * @throws Error on any non-2xx, including 403 for a non-admin.
+ * @throws Error on any non-2xx, including 403 for a non-admin. The message is
+ * `Failed to load all requests (<status>)`, with `: <error>` appended when the
+ * body has a non-empty string `error` field.
  */
 export async function fetchAllRequests(): Promise<RequestView[]> {
   const res = await fetch("/api/requests/all");
   if (!res.ok) {
-    throw new Error(`Failed to load all requests (${res.status})`);
+    throw new Error(await allRequestsErrorMessage(res));
   }
   const body = (await res.json()) as { results: RequestView[] };
   return body.results;
+}
+
+// Prefers a non-empty `{ error }` string from a failed response, appended to
+// the status fallback. A body that will not parse, or an error that is missing,
+// not a string, or blank, keeps the fallback alone.
+async function allRequestsErrorMessage(res: Response): Promise<string> {
+  const fallback = `Failed to load all requests (${res.status})`;
+  try {
+    const body = (await res.json()) as { error?: unknown };
+    if (typeof body.error === "string" && body.error.trim() !== "") {
+      return `${fallback}: ${body.error}`;
+    }
+  } catch {
+    // fall through
+  }
+  return fallback;
 }
 
 /**
