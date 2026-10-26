@@ -11,6 +11,13 @@ import {
 } from "../seerr/client";
 import { issueSession, SESSION_COOKIE_NAME } from "../session";
 import {
+  TmdbUpstreamError,
+  type MovieDetail,
+  type TmdbClient,
+  type TvDetail,
+} from "../tmdb/client";
+import { createMediaEnrichment } from "../tmdb/enrichment";
+import {
   createRequestsRouter,
   type RequestsRouterDeps,
 } from "./requests";
@@ -144,7 +151,89 @@ function createStubSeerr(
   };
 }
 
-function createStubTmdb(): RequestsRouterDeps["tmdb"] & {
+function titledRequest(
+  id: number,
+  type: "movie" | "tv",
+  tmdbId: number,
+  status = 1,
+): SeerrRequest {
+  return seerrRequest({
+    id,
+    status,
+    type,
+    media: {
+      tmdbId,
+      tvdbId: null,
+      mediaType: type,
+      status: 2,
+      ratingKey: null,
+    },
+  });
+}
+
+function posterFor(type: "movie" | "tv", id: number): string {
+  return `https://posters.test/${type}/${id}.jpg`;
+}
+
+function createTitledTmdb(failing = new Set<string>()): {
+  calls: string[];
+  failing: Set<string>;
+  movieDetail(id: number): Promise<MovieDetail>;
+  tvDetail(id: number): Promise<TvDetail>;
+} {
+  const calls: string[] = [];
+
+  function rejectIfFailing(key: string, id: number, type: "movie" | "tv"): void {
+    if (!failing.has(key)) {
+      return;
+    }
+    const path = type === "movie" ? `/movie/${id}` : `/tv/${id}`;
+    throw new TmdbUpstreamError(`TMDB ${path} failed (429)`, 429);
+  }
+
+  return {
+    calls,
+    failing,
+    async movieDetail(id) {
+      const key = `movie:${id}`;
+      calls.push(key);
+      rejectIfFailing(key, id, "movie");
+      return {
+        tmdbId: id,
+        mediaType: "movie",
+        title: `Stub Movie ${id}`,
+        year: null,
+        overview: "",
+        posterUrl: posterFor("movie", id),
+        backdropUrl: null,
+        runtime: null,
+        genres: [],
+        status: "",
+        collection: null,
+      };
+    },
+    async tvDetail(id) {
+      const key = `tv:${id}`;
+      calls.push(key);
+      rejectIfFailing(key, id, "tv");
+      return {
+        tmdbId: id,
+        mediaType: "tv",
+        title: `Stub Show ${id}`,
+        year: null,
+        overview: "",
+        posterUrl: posterFor("tv", id),
+        backdropUrl: null,
+        genres: [],
+        status: "",
+        tvdbId: null,
+        seasons: [],
+      };
+    },
+  };
+}
+
+function createStubTmdb(): Pick<TmdbClient, "movieDetail" | "tvDetail"> & {
   movieCalls: number[];
   tvCalls: number[];
 } {
@@ -190,7 +279,7 @@ function createStubTmdb(): RequestsRouterDeps["tmdb"] & {
 
 function createApp(
   seerr: RequestsRouterDeps["seerr"],
-  tmdb = createStubTmdb(),
+  tmdb: Pick<TmdbClient, "movieDetail" | "tvDetail"> = createStubTmdb(),
 ): express.Express {
   const app = express();
   app.use(express.json());
@@ -199,7 +288,7 @@ function createApp(
     requireAuth(SECRET, seerr, { isRevoked: () => false }),
     createRequestsRouter({
       seerr,
-      tmdb,
+      mediaEnrichment: createMediaEnrichment(tmdb),
       sessionSecret: SECRET,
       sessionRevocation: { isRevoked: () => false },
     }),
@@ -399,6 +488,258 @@ describe("Seerr-backed request routes", () => {
       { cookie: sessionCookie() },
     );
     assert.equal(unavailableResponse.status, 502);
+  });
+});
+
+describe("degraded TMDB titles on request routes", () => {
+  const threeRequests = [
+    titledRequest(1, "movie", 100),
+    titledRequest(2, "movie", 200),
+    titledRequest(3, "movie", 300),
+  ];
+
+  async function listResponse(
+    method: "user" | "all",
+    tmdb: ReturnType<typeof createTitledTmdb>,
+    requests: SeerrRequest[],
+  ): Promise<Response> {
+    const seerr = createStubSeerr(
+      method === "all"
+        ? {
+            async listAllRequests() {
+              return requests;
+            },
+          }
+        : {
+            async listUserRequests() {
+              return requests;
+            },
+          },
+    );
+    return fetchLocal(
+      createApp(seerr, tmdb),
+      "GET",
+      method === "all" ? "/api/requests/all" : "/api/requests",
+      {
+        cookie: sessionCookie(
+          method === "all" ? ADMIN_PERMISSION : 0,
+        ),
+      },
+    );
+  }
+
+  it("GET /all returns every request when one TMDB lookup fails", async () => {
+    const response = await listResponse(
+      "all",
+      createTitledTmdb(new Set(["movie:300"])),
+      threeRequests,
+    );
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      results: Array<{ title: string; posterUrl: string | null }>;
+    };
+    assert.equal(body.results.length, 3);
+    assert.deepEqual(
+      body.results.map((row) => ({ title: row.title, posterUrl: row.posterUrl })),
+      [
+        { title: "Stub Movie 100", posterUrl: posterFor("movie", 100) },
+        { title: "Stub Movie 200", posterUrl: posterFor("movie", 200) },
+        { title: "Title unavailable (movie 300)", posterUrl: null },
+      ],
+    );
+  });
+
+  it("GET / returns every request when one TMDB lookup fails", async () => {
+    const response = await listResponse(
+      "user",
+      createTitledTmdb(new Set(["movie:300"])),
+      threeRequests,
+    );
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      results: Array<{ title: string; posterUrl: string | null }>;
+    };
+    assert.equal(body.results.length, 3);
+    assert.deepEqual(
+      body.results.map((row) => ({ title: row.title, posterUrl: row.posterUrl })),
+      [
+        { title: "Stub Movie 100", posterUrl: posterFor("movie", 100) },
+        { title: "Stub Movie 200", posterUrl: posterFor("movie", 200) },
+        { title: "Title unavailable (movie 300)", posterUrl: null },
+      ],
+    );
+  });
+
+  it("GET /all returns placeholders when every TMDB lookup fails", async () => {
+    const response = await listResponse(
+      "all",
+      createTitledTmdb(new Set(["movie:100", "movie:200", "movie:300"])),
+      threeRequests,
+    );
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      results: Array<{ title: string; posterUrl: string | null }>;
+    };
+    assert.deepEqual(
+      body.results.map((row) => ({ title: row.title, posterUrl: row.posterUrl })),
+      [
+        { title: "Title unavailable (movie 100)", posterUrl: null },
+        { title: "Title unavailable (movie 200)", posterUrl: null },
+        { title: "Title unavailable (movie 300)", posterUrl: null },
+      ],
+    );
+  });
+
+  it("gives a movie and a show that share a tmdbId their own titles", async () => {
+    const tmdb = createTitledTmdb();
+    const response = await listResponse("all", tmdb, [
+      titledRequest(1, "movie", 100),
+      titledRequest(2, "tv", 100),
+    ]);
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { results: Array<{ title: string }> };
+    assert.deepEqual(
+      body.results.map((row) => row.title),
+      ["Stub Movie 100", "Stub Show 100"],
+    );
+    assert.deepEqual(tmdb.calls, ["movie:100", "tv:100"]);
+  });
+
+  it("retries only a failed lookup on the next GET /all", async () => {
+    const failing = new Set(["movie:300"]);
+    const tmdb = createTitledTmdb(failing);
+    const seerr = createStubSeerr({
+      async listAllRequests() {
+        return threeRequests;
+      },
+    });
+    const app = createApp(seerr, tmdb);
+    const cookie = sessionCookie(ADMIN_PERMISSION);
+
+    const first = await fetchLocal(app, "GET", "/api/requests/all", { cookie });
+    assert.equal(first.status, 200);
+    assert.deepEqual(tmdb.calls, ["movie:100", "movie:200", "movie:300"]);
+
+    const second = await fetchLocal(app, "GET", "/api/requests/all", { cookie });
+    assert.equal(second.status, 200);
+    assert.deepEqual(tmdb.calls, [
+      "movie:100",
+      "movie:200",
+      "movie:300",
+      "movie:300",
+    ]);
+
+    failing.clear();
+    const third = await fetchLocal(app, "GET", "/api/requests/all", { cookie });
+    assert.equal(third.status, 200);
+    assert.deepEqual(tmdb.calls, [
+      "movie:100",
+      "movie:200",
+      "movie:300",
+      "movie:300",
+      "movie:300",
+    ]);
+    const body = (await third.json()) as {
+      results: Array<{ title: string; posterUrl: string | null }>;
+    };
+    assert.equal(body.results[2].title, "Stub Movie 300");
+    assert.equal(body.results[2].posterUrl, posterFor("movie", 300));
+  });
+
+  it("POST returns 201 with a placeholder after Seerr has accepted the request", async () => {
+    const seerr = createStubSeerr();
+    seerr.createRequest = async (input) => {
+      seerr.createCalls.push(input);
+      return titledRequest(12, "movie", 300);
+    };
+    const response = await fetchLocal(
+      createApp(seerr, createTitledTmdb(new Set(["movie:300"]))),
+      "POST",
+      "/api/requests",
+      {
+        cookie: sessionCookie(0, 44),
+        body: { tmdbId: 300, mediaType: "movie" },
+      },
+    );
+    assert.equal(response.status, 201);
+    assert.equal(seerr.createCalls.length, 1);
+    const body = (await response.json()) as {
+      title: string;
+      posterUrl: string | null;
+    };
+    assert.equal(body.title, "Title unavailable (movie 300)");
+    assert.equal(body.posterUrl, null);
+  });
+
+  it("approve and decline return the new status with a placeholder title", async () => {
+    const seerr = createStubSeerr();
+    seerr.approveRequest = async (id) => {
+      seerr.approveCalls.push(id);
+      return titledRequest(id, "movie", 300, 2);
+    };
+    seerr.declineRequest = async (id) => {
+      seerr.declineCalls.push(id);
+      return titledRequest(id, "movie", 300, 3);
+    };
+    const app = createApp(seerr, createTitledTmdb(new Set(["movie:300"])));
+    const options = { cookie: sessionCookie(ADMIN_PERMISSION) };
+
+    const approved = await fetchLocal(
+      app,
+      "POST",
+      "/api/requests/31/approve",
+      options,
+    );
+    const declined = await fetchLocal(
+      app,
+      "POST",
+      "/api/requests/32/decline",
+      options,
+    );
+
+    assert.equal(approved.status, 200);
+    assert.equal(declined.status, 200);
+    const approvedBody = (await approved.json()) as {
+      requestStatus: string;
+      title: string;
+    };
+    const declinedBody = (await declined.json()) as {
+      requestStatus: string;
+      title: string;
+    };
+    assert.equal(approvedBody.requestStatus, "approved");
+    assert.equal(declinedBody.requestStatus, "declined");
+    assert.equal(approvedBody.title, "Title unavailable (movie 300)");
+    assert.equal(declinedBody.title, "Title unavailable (movie 300)");
+  });
+
+  it("still returns 502 when Seerr fails or a request status is unknown", async () => {
+    const unavailable = createStubSeerr({
+      async listAllRequests() {
+        throw new SeerrUpstreamError("unavailable", 503);
+      },
+    });
+    const unavailableResponse = await fetchLocal(
+      createApp(unavailable, createTitledTmdb()),
+      "GET",
+      "/api/requests/all",
+      { cookie: sessionCookie(ADMIN_PERMISSION) },
+    );
+    assert.equal(unavailableResponse.status, 502);
+    assert.deepEqual(await unavailableResponse.json(), { error: "unavailable" });
+
+    const unknown = createStubSeerr({
+      async listAllRequests() {
+        return [titledRequest(9, "movie", 100, 99)];
+      },
+    });
+    const unknownResponse = await fetchLocal(
+      createApp(unknown, createTitledTmdb()),
+      "GET",
+      "/api/requests/all",
+      { cookie: sessionCookie(ADMIN_PERMISSION) },
+    );
+    assert.equal(unknownResponse.status, 502);
   });
 });
 

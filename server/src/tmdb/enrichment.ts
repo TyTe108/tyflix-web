@@ -1,10 +1,14 @@
 // Cached batch lookup of a title and poster for a list of TMDB ids.
 //
 // Seerr's rows carry ids but no artwork, so anything showing Seerr data needs
-// a TMDB round trip per title before it can render a card. The watchlist and
-// issues routers both call this with a whole page of items at once. It exists
-// so that showing twenty requests doesn't mean twenty uncached TMDB calls every
-// time someone refreshes.
+// a TMDB round trip per title before it can render a card. The watchlist,
+// issues, requests, admin media, and admin blocklist routers call this. It
+// exists so that showing twenty titles doesn't mean twenty uncached TMDB calls
+// every time someone refreshes.
+//
+// A lookup that throws is left out of the returned map and is not cached. When
+// at least one lookup in the call threw, enrich() logs a single warning with
+// that call's failure count and the first error message.
 //
 // The cache is in-process and unbounded, which is fine at household scale.
 // Titles and posters barely change, so the ten-minute TTL is generous on
@@ -78,6 +82,7 @@ export function createMediaEnrichment(
 
     // Fetch the misses in parallel. Latency here is one TMDB round trip rather
     // than one per title, which is the whole reason this takes a batch.
+    const failureMessages = new Map<string, string>();
     await Promise.all(
       missing.map(async ([key, item]) => {
         try {
@@ -94,12 +99,32 @@ export function createMediaEnrichment(
             expiresAt: Date.now() + CACHE_TTL_MS,
           });
           result.set(key, value);
-        } catch {
+        } catch (err) {
           // A single failed lookup must not prevent other media from enriching.
           // Failures aren't cached either, so the next call retries.
+          failureMessages.set(
+            key,
+            err instanceof Error ? err.message : String(err),
+          );
         }
       }),
     );
+
+    if (failureMessages.size > 0) {
+      // One line for this call, and the message only. The TMDB client puts its
+      // API key in the request URL, so logging the error object would print it.
+      let message = "";
+      for (const item of items) {
+        const failed = failureMessages.get(mediaEnrichmentKey(item));
+        if (failed !== undefined) {
+          message = failed;
+          break;
+        }
+      }
+      console.warn(
+        `TMDB enrichment: ${failureMessages.size} of ${missing.length} lookups failed; first error: ${message}`,
+      );
+    }
 
     return result;
   }

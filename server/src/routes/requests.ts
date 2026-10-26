@@ -13,8 +13,11 @@
 // optional profileId field needs it.
 //
 // Tyflix doesn't run the download pipeline. Seerr does, and Radarr and Sonarr
-// sit behind Seerr. Everything here is a thin pass to Seerr plus a TMDB lookup
-// for the title and poster, since Seerr's request rows only carry ids.
+// sit behind Seerr. Everything here is a thin pass to Seerr plus a title and
+// poster from the shared mediaEnrichment cache, since Seerr's request rows
+// only carry ids. A TMDB lookup that fails leaves that one request titled
+// "Title unavailable (<type> <id>)" with no poster, and the response still
+// succeeds.
 
 import { Router } from "express";
 import { requireAdmin } from "../middleware/auth";
@@ -27,7 +30,10 @@ import {
 } from "../seerr/client";
 import type { SessionRevocationStore } from "../sessionRevocation";
 import { isAdmin, type SessionPayload } from "../session";
-import type { TmdbClient } from "../tmdb/client";
+import {
+  mediaEnrichmentKey,
+  type MediaEnrichment,
+} from "../tmdb/enrichment";
 
 export type RequestsRouterDeps = {
   seerr: Pick<
@@ -40,13 +46,13 @@ export type RequestsRouterDeps = {
     | "declineRequest"
     | "getUserById"
   >;
-  tmdb: Pick<TmdbClient, "movieDetail" | "tvDetail">;
+  mediaEnrichment: MediaEnrichment;
   sessionSecret: string;
   sessionRevocation: Pick<SessionRevocationStore, "isRevoked">;
 };
 
 export function createRequestsRouter(deps: RequestsRouterDeps): Router {
-  const { seerr, tmdb, sessionSecret, sessionRevocation } = deps;
+  const { seerr, mediaEnrichment, sessionSecret, sessionRevocation } = deps;
   const router = Router();
   const admin = requireAdmin(sessionSecret, seerr, sessionRevocation);
 
@@ -130,7 +136,7 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
         userId: session.seerrUserId,
         ...profileOverride,
       });
-      const view = await enrichRequest(request, tmdb, new Map());
+      const [view] = await enrichRequests([request], mediaEnrichment);
       res.status(201).json(view);
     } catch (err) {
       // Seerr's 409 is a duplicate request, which is a normal thing for a user
@@ -159,7 +165,7 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
 
     try {
       const requests = await seerr.listUserRequests(session.seerrUserId);
-      res.json({ results: await enrichRequests(requests, tmdb) });
+      res.json({ results: await enrichRequests(requests, mediaEnrichment) });
     } catch (err) {
       respondUpstreamError(res, err);
     }
@@ -174,7 +180,7 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
   router.get("/all", admin, async (_req, res) => {
     try {
       const requests = await seerr.listAllRequests();
-      res.json({ results: await enrichRequests(requests, tmdb) });
+      res.json({ results: await enrichRequests(requests, mediaEnrichment) });
     } catch (err) {
       respondUpstreamError(res, err);
     }
@@ -201,7 +207,8 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
 
     try {
       const request = await seerr.approveRequest(id);
-      res.json(await enrichRequest(request, tmdb, new Map()));
+      const [view] = await enrichRequests([request], mediaEnrichment);
+      res.json(view);
     } catch (err) {
       respondUpstreamError(res, err);
     }
@@ -224,7 +231,8 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
 
     try {
       const request = await seerr.declineRequest(id);
-      res.json(await enrichRequest(request, tmdb, new Map()));
+      const [view] = await enrichRequests([request], mediaEnrichment);
+      res.json(view);
     } catch (err) {
       respondUpstreamError(res, err);
     }
@@ -233,44 +241,35 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
   return router;
 }
 
-// The bit of TMDB metadata a request row is missing. Seerr gives us ids.
-type RequestDetail = { title: string; posterUrl: string | null };
-
-// Enriches a whole list in parallel, sharing one in-flight map so a season pack
-// or a repeated title only costs a single TMDB call.
+/**
+ * Turns Seerr requests into the views sent to the browser. Looks each title
+ * up once, through one mediaEnrichment.enrich call for the whole list.
+ *
+ * A title TMDB could not give comes back as `Title unavailable (<type> <id>)`
+ * with posterUrl null. That request is still in the returned list.
+ */
 async function enrichRequests(
   requests: SeerrRequest[],
-  tmdb: Pick<TmdbClient, "movieDetail" | "tvDetail">,
+  mediaEnrichment: MediaEnrichment,
 ): Promise<RequestView[]> {
-  const details = new Map<number, Promise<RequestDetail>>();
-  return Promise.all(
-    requests.map((request) => enrichRequest(request, tmdb, details)),
+  const enriched = await mediaEnrichment.enrich(
+    requests.map((request) => ({
+      mediaType: request.type,
+      tmdbId: request.media.tmdbId,
+    })),
   );
-}
-
-// Attaches title and poster to one request. The `details` map is keyed by tmdbId
-// and holds promises, not values, so concurrent callers await the same lookup.
-// Single-request callers pass a throwaway map.
-async function enrichRequest(
-  request: SeerrRequest,
-  tmdb: Pick<TmdbClient, "movieDetail" | "tvDetail">,
-  details: Map<number, Promise<RequestDetail>>,
-): Promise<RequestView> {
-  let detail = details.get(request.media.tmdbId);
-  if (detail === undefined) {
-    detail =
-      request.type === "movie"
-        ? tmdb.movieDetail(request.media.tmdbId).then((movie) => ({
-            title: movie.title,
-            posterUrl: movie.posterUrl,
-          }))
-        : tmdb.tvDetail(request.media.tmdbId).then((tv) => ({
-            title: tv.title,
-            posterUrl: tv.posterUrl,
-          }));
-    details.set(request.media.tmdbId, detail);
-  }
-  return toRequestView(request, await detail);
+  return requests.map((request) => {
+    const detail = enriched.get(
+      mediaEnrichmentKey({
+        mediaType: request.type,
+        tmdbId: request.media.tmdbId,
+      }),
+    ) ?? {
+      title: `Title unavailable (${request.type} ${request.media.tmdbId})`,
+      posterUrl: null,
+    };
+    return toRequestView(request, detail);
+  });
 }
 
 // Validates the POST / body. The return type is a discriminated union so a

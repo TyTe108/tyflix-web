@@ -177,7 +177,8 @@ async function start(): Promise<void> {
 
   // TMDB supplies discovery metadata and poster art. mediaEnrichment is the
   // reverse direction: hydrating a bare TMDB id from Seerr into something with
-  // a title and artwork.
+  // a title and artwork. The watchlist, issues, requests, admin media, and
+  // admin blocklist routers share this one instance.
   const tmdb = createTmdbClient({
     apiKey: config.tmdbApiKey,
   });
@@ -388,7 +389,7 @@ async function start(): Promise<void> {
     requireAuth(config.sessionSecret, seerr, sessionRevocation),
     createRequestsRouter({
       seerr,
-      tmdb,
+      mediaEnrichment,
       sessionSecret: config.sessionSecret,
       sessionRevocation,
     }),
