@@ -112,7 +112,8 @@ export function createMediaEnrichment(
 
     if (failureMessages.size > 0) {
       // One line for this call, and the message only. The TMDB client puts its
-      // API key in the request URL, so logging the error object would print it.
+      // API key in the request URL, so nothing that could carry the URL (the
+      // error object, a cause) goes to the log.
       let message = "";
       for (const item of items) {
         const failed = failureMessages.get(mediaEnrichmentKey(item));

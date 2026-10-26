@@ -3,9 +3,10 @@
 // the server. TMDB knows what exists.
 //
 // createTmdbClient() runs once in server/src/index.ts and feeds the
-// /api/discover router, the requests router (which needs a title and poster for
-// each Seerr request) and the enrichment cache. The API key rides the query
-// string and never reaches the browser.
+// /api/discover router and the enrichment cache. The requests, watchlist,
+// issues, admin media and admin blocklist routers get their titles and posters
+// through that cache. The API key rides the query string and never reaches the
+// browser.
 //
 // Two conventions to know before reading the mappers. TMDB speaks snake_case
 // and this file is the boundary where it becomes camelCase. And `media_type`
