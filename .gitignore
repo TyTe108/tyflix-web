@@ -15,3 +15,6 @@ data/
 docs/**/*.md
 # ...except the code tour, which is written for people reading the public repo.
 !docs/CODE_TOUR.md
+
+# macOS Finder metadata
+.DS_Store
