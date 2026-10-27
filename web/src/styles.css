@@ -865,6 +865,66 @@ a {
   background: var(--surface);
 }
 
+/* Phase 50: Previous / Next episode links under the player. Same 64rem cap
+   and centering as .watch-player-frame, so the edges line up on desktop.
+   Stacks at 32rem and below. */
+.watch-episode-nav {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  max-width: 64rem;
+  margin: 1rem auto 0;
+}
+
+.watch-episode-nav-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: 0.65rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  transition:
+    background var(--transition),
+    border-color var(--transition);
+}
+
+.watch-episode-nav-link--previous {
+  grid-column: 1;
+}
+
+.watch-episode-nav-link--next {
+  grid-column: 2;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.watch-episode-nav-direction {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+@media (hover: hover) {
+  .watch-episode-nav-link:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+}
+
+@media (max-width: 32rem) {
+  .watch-episode-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .watch-episode-nav-link--next {
+    grid-column: 1;
+  }
+}
+
 .watch-player-shell {
   position: relative;
   width: 100%;

@@ -1,7 +1,7 @@
 // Client for the server's watch router (server/src/routes/watch.ts), mounted at
 // /api/watch behind requireAuth. Everything WatchPage needs: play descriptors,
-// the episode list, next-episode lookup, subtitle selection, progress
-// reporting, and the Continue Watching rail.
+// the episode list, next-episode lookup, previous-episode lookup, subtitle
+// selection, progress reporting, and the Continue Watching rail.
 //
 // The thing to understand before reading any of this is what a play descriptor
 // is. Video deliberately doesn't go through the Cloudflare Tunnel. The server
@@ -14,9 +14,9 @@
 // Errors follow the api/discover.ts convention with one improvement: the
 // descriptor and episode fetchers read the server's `{ error }` body back out,
 // so a user sees "not playable" or "re-login required" instead of a status
-// code. The soft-fail calls at the bottom (timeline, next episode, continue
-// watching) never throw at all, because none of them are worth interrupting
-// playback over.
+// code. The soft-fail calls at the bottom (timeline, next episode, previous
+// episode, continue watching) never throw at all, because none of them are
+// worth interrupting playback over.
 //
 // Status codes worth knowing, from the server: 404 "not playable" usually means
 // Seerr has no Plex ratingKey for the title, so it isn't on the server, though
@@ -261,6 +261,10 @@ export type NextEpisode = {
   thumb: string | null;
 };
 
+// The episode before this one. The server builds this and NextEpisode from the
+// same episode row.
+export type PreviousEpisode = NextEpisode;
+
 export type EpisodesResponse = {
   showRatingKey: string;
   episodes: Episode[];
@@ -323,6 +327,49 @@ export async function fetchNextEpisode(
     const body = (await res.json()) as { nextEpisode?: unknown };
     return parseNextEpisode(body.nextEpisode);
   } catch {
+    return null;
+  }
+}
+
+/**
+ * GET /api/watch/episode/:ratingKey/previous. The episode before this one, or
+ * null when there isn't one.
+ *
+ * A 200 whose previousEpisode is null is the normal answer for the first
+ * episode, and for a numbered season whose predecessor is a special. That case
+ * logs nothing. A non-OK response, a missing or malformed row, a body that
+ * isn't JSON, or a rejected fetch also returns null, and each logs once.
+ * Never throws, so a failed lookup does not break playback.
+ */
+export async function fetchPreviousEpisode(
+  ratingKey: string,
+): Promise<PreviousEpisode | null> {
+  try {
+    const res = await fetch(`/api/watch/episode/${ratingKey}/previous`);
+    if (!res.ok) {
+      console.error(`Previous episode fetch failed (${res.status})`);
+      return null;
+    }
+    const body = (await res.json()) as { previousEpisode?: unknown };
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      !("previousEpisode" in body)
+    ) {
+      console.error("Previous episode response was missing previousEpisode");
+      return null;
+    }
+    if (body.previousEpisode === null) {
+      return null;
+    }
+    const parsed = parseNextEpisode(body.previousEpisode);
+    if (parsed === null) {
+      console.error("Previous episode response was malformed");
+      return null;
+    }
+    return parsed;
+  } catch (err) {
+    console.error("Previous episode fetch failed", err);
     return null;
   }
 }

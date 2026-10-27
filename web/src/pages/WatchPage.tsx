@@ -18,7 +18,8 @@
 //
 // The rest of the screen hangs off that one descriptor. viewOffsetMs (read
 // under this user's own Plex token, so it's their position and not the owner's)
-// opens the resume dialog, creditsOffsetMs fires Up Next, streams.audio and
+// opens the resume dialog, creditsOffsetMs fires Up Next, and on an episode
+// Previous and Next links sit under the player. streams.audio and
 // streams.subtitle fill the settings menu, and POST /api/watch/timeline reports
 // progress back so Plex and the TV in the other room agree on where you stopped.
 //
@@ -35,10 +36,12 @@ import {
   fetchItemWatch,
   fetchMovieWatch,
   fetchNextEpisode,
+  fetchPreviousEpisode,
   reportTimeline,
   reportTimelineBeacon,
   selectSubtitle,
   type NextEpisode,
+  type PreviousEpisode,
   type SubtitleStream,
   type TimelineState,
   type WatchConnections,
@@ -46,6 +49,7 @@ import {
   type WatchTuning,
 } from "../api/watch";
 import { CastStatusOverlay } from "../components/CastStatusOverlay";
+import { EpisodeNav } from "../components/EpisodeNav";
 import {
   PlayerControls,
   type QualityId,
@@ -654,6 +658,8 @@ export function WatchPage() {
   const [error, setError] = useState<string | null>(null);
   const [autoPlay, setAutoPlay] = useState(readStoredAutoPlay);
   const [nextEpisode, setNextEpisode] = useState<NextEpisode | null>(null);
+  const [previousEpisode, setPreviousEpisode] =
+    useState<PreviousEpisode | null>(null);
   const [upNextDismissed, setUpNextDismissed] = useState(false);
   const [playbackClock, setPlaybackClock] = useState<PlaybackClock>({
     currentTime: 0,
@@ -859,6 +865,27 @@ export function WatchPage() {
     void fetchNextEpisode(ratingKey).then((next) => {
       if (!cancelled) {
         setNextEpisode(next);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isEpisode, ratingKey]);
+
+  // Prefetch the previous episode for the link under the player. Separate from
+  // the next-episode effect. Soft-fail: null just hides that link.
+  useEffect(() => {
+    if (!isEpisode || ratingKey === null) {
+      setPreviousEpisode(null);
+      return;
+    }
+
+    let cancelled = false;
+    setPreviousEpisode(null);
+    void fetchPreviousEpisode(ratingKey).then((previous) => {
+      if (!cancelled) {
+        setPreviousEpisode(previous);
       }
     });
 
@@ -1879,6 +1906,9 @@ export function WatchPage() {
             />
           </PlayerControls>
         </div>
+      ) : null}
+      {isEpisode && status === "ready" && descriptor !== null ? (
+        <EpisodeNav previous={previousEpisode} next={nextEpisode} />
       ) : null}
     </main>
   );
