@@ -853,7 +853,18 @@ async function fetchLocal(
   path: string,
   cookie: string,
 ): Promise<Response> {
-  const server = app.listen(0);
+  // On macOS a wildcard listen on port 0 can share a port another app holds on 127.0.0.1, and the request then goes to that app (HANDOFF §9).
+  const server = app.listen(0, "127.0.0.1");
+  // Node binds on the next tick when a host is passed, so address() is null
+  // until listening fires.
+  await new Promise<void>((resolve, reject) => {
+    const onError = (err: Error) => reject(err);
+    server.once("error", onError);
+    server.once("listening", () => {
+      server.off("error", onError);
+      resolve();
+    });
+  });
   try {
     const address = server.address();
     if (address === null || typeof address === "string") {
