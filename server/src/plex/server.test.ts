@@ -144,6 +144,38 @@ describe("plexServer.episodes", () => {
   });
 });
 
+// Scrambled on purpose. Sorted order is S0E1, S0E2, S1E1, S1E2.
+const specialsLeaves = {
+  MediaContainer: {
+    Metadata: [
+      {
+        ratingKey: 202,
+        parentIndex: 1,
+        index: 2,
+        title: "Second",
+      },
+      {
+        ratingKey: 101,
+        parentIndex: 0,
+        index: 1,
+        title: "Cold Open",
+      },
+      {
+        ratingKey: 201,
+        parentIndex: 1,
+        index: 1,
+        title: "Pilot",
+      },
+      {
+        ratingKey: 102,
+        parentIndex: 0,
+        index: 2,
+        title: "Behind the Scenes",
+      },
+    ],
+  },
+};
+
 describe("plexServer.nextEpisode", () => {
   const leaves = {
     MediaContainer: {
@@ -235,6 +267,250 @@ describe("plexServer.nextEpisode", () => {
       })) as typeof fetch;
 
     assert.equal(await client().nextEpisode("202"), null);
+  });
+
+  // Pins today's order: season 0 sorts first, so the episode after the last
+  // special is the first numbered episode. previousEpisode must not change this.
+  it("returns the first numbered episode after the last special", async () => {
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      if (url === `${BASE_URL}/library/metadata/102`) {
+        return jsonResponse(200, {
+          MediaContainer: {
+            Metadata: [{ grandparentRatingKey: 9000 }],
+          },
+        });
+      }
+      if (url === `${BASE_URL}/library/metadata/9000/allLeaves`) {
+        return jsonResponse(200, specialsLeaves);
+      }
+      return jsonResponse(404, {});
+    }) as typeof fetch;
+
+    const next = await client().nextEpisode("102");
+
+    assert.deepEqual(next, {
+      ratingKey: "201",
+      seasonNumber: 1,
+      episodeNumber: 1,
+      title: "Pilot",
+      thumb: null,
+    });
+  });
+});
+
+describe("plexServer.previousEpisode", () => {
+  function requestUrl(input: Parameters<typeof fetch>[0]): string {
+    return typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : (input as Request).url;
+  }
+
+  function installShow(
+    episodeRatingKeys: string[],
+    leavesBody: unknown,
+    grandparent: number | string = 9000,
+  ): void {
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = requestUrl(input);
+      if (
+        episodeRatingKeys.some(
+          (ratingKey) => url === `${BASE_URL}/library/metadata/${ratingKey}`,
+        )
+      ) {
+        return jsonResponse(200, {
+          MediaContainer: {
+            Metadata: [{ grandparentRatingKey: grandparent }],
+          },
+        });
+      }
+      if (url === `${BASE_URL}/library/metadata/${grandparent}/allLeaves`) {
+        return jsonResponse(200, leavesBody);
+      }
+      return jsonResponse(404, {});
+    }) as typeof fetch;
+  }
+
+  // Response order is scrambled. 201 has no thumb.
+  const threeEpisodes = {
+    MediaContainer: {
+      Metadata: [
+        {
+          ratingKey: 202,
+          parentIndex: 1,
+          index: 2,
+          title: "Second",
+          thumb: "/library/metadata/202/thumb/1",
+        },
+        {
+          ratingKey: 203,
+          parentIndex: 1,
+          index: 3,
+          title: "Finale",
+          thumb: "/library/metadata/203/thumb/2",
+        },
+        {
+          ratingKey: 201,
+          parentIndex: 1,
+          index: 1,
+          title: "Pilot",
+        },
+      ],
+    },
+  };
+
+  const acrossSeasons = {
+    MediaContainer: {
+      Metadata: [
+        {
+          ratingKey: 301,
+          parentIndex: 2,
+          index: 1,
+          title: "Season Two Opener",
+          thumb: "/library/metadata/301/thumb/9",
+        },
+        {
+          ratingKey: 202,
+          parentIndex: 1,
+          index: 2,
+          title: "Second",
+        },
+        {
+          ratingKey: 201,
+          parentIndex: 1,
+          index: 1,
+          title: "Pilot",
+          thumb: "/library/metadata/201/thumb/4",
+        },
+      ],
+    },
+  };
+
+  it("returns the preceding episode for a middle episode", async () => {
+    installShow(["202"], threeEpisodes);
+
+    const previous = await client().previousEpisode("202");
+
+    assert.deepEqual(previous, {
+      ratingKey: "201",
+      seasonNumber: 1,
+      episodeNumber: 1,
+      title: "Pilot",
+      thumb: null,
+    });
+  });
+
+  it("returns null for the first episode", async () => {
+    installShow(["201"], threeEpisodes);
+
+    assert.equal(await client().previousEpisode("201"), null);
+  });
+
+  it("returns the last episode of the previous season", async () => {
+    installShow(["301"], acrossSeasons);
+
+    const previous = await client().previousEpisode("301");
+
+    assert.deepEqual(previous, {
+      ratingKey: "202",
+      seasonNumber: 1,
+      episodeNumber: 2,
+      title: "Second",
+      thumb: null,
+    });
+  });
+
+  it("does not step from a numbered season back into specials", async () => {
+    installShow(["201", "102", "202"], specialsLeaves);
+
+    assert.equal(await client().previousEpisode("201"), null);
+    assert.deepEqual(await client().previousEpisode("102"), {
+      ratingKey: "101",
+      seasonNumber: 0,
+      episodeNumber: 1,
+      title: "Cold Open",
+      thumb: null,
+    });
+    assert.deepEqual(await client().previousEpisode("202"), {
+      ratingKey: "201",
+      seasonNumber: 1,
+      episodeNumber: 1,
+      title: "Pilot",
+      thumb: null,
+    });
+  });
+
+  it("returns null when the episode is not in its show's list", async () => {
+    installShow(["999"], threeEpisodes);
+
+    assert.equal(await client().previousEpisode("999"), null);
+  });
+
+  it("returns null when grandparentRatingKey is absent", async () => {
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = requestUrl(input);
+      if (url === `${BASE_URL}/library/metadata/202`) {
+        return jsonResponse(200, {
+          MediaContainer: {
+            Metadata: [{ title: "Orphan Episode" }],
+          },
+        });
+      }
+      return jsonResponse(404, {});
+    }) as typeof fetch;
+
+    assert.equal(await client().previousEpisode("202"), null);
+  });
+
+  it("throws a 502 when the metadata response has no Metadata row", async () => {
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = requestUrl(input);
+      if (url === `${BASE_URL}/library/metadata/202`) {
+        return jsonResponse(200, { MediaContainer: {} });
+      }
+      return jsonResponse(404, {});
+    }) as typeof fetch;
+
+    await assert.rejects(client().previousEpisode("202"), (err: unknown) => {
+      assert.ok(err instanceof PlexServerUpstreamError);
+      assert.equal(err.status, 502);
+      assert.equal(err.message, "Plex episode metadata missing for 202");
+      return true;
+    });
+  });
+
+  it("throws when allLeaves answers 503", async () => {
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = requestUrl(input);
+      if (url === `${BASE_URL}/library/metadata/202`) {
+        return jsonResponse(200, {
+          MediaContainer: {
+            Metadata: [{ grandparentRatingKey: 9000 }],
+          },
+        });
+      }
+      if (url === `${BASE_URL}/library/metadata/9000/allLeaves`) {
+        return jsonResponse(503, {});
+      }
+      return jsonResponse(404, {});
+    }) as typeof fetch;
+
+    await assert.rejects(client().previousEpisode("202"), (err: unknown) => {
+      assert.ok(err instanceof PlexServerUpstreamError);
+      assert.equal(err.status, 503);
+      assert.equal(
+        err.message,
+        "Plex server /library/metadata/9000/allLeaves failed (503)",
+      );
+      return true;
+    });
   });
 });
 

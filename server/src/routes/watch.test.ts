@@ -866,6 +866,154 @@ describe("GET /api/watch/episode/:ratingKey/next", () => {
   });
 });
 
+describe("GET /api/watch/episode/:ratingKey/previous", () => {
+  it("rejects a non-numeric ratingKey with 400", async () => {
+    const app = createApp(baseDeps());
+    const response = await fetchLocal(
+      app,
+      "/api/watch/episode/abc/previous",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      error: "ratingKey must be numeric",
+    });
+  });
+
+  it("returns { previousEpisode } for the preceding episode", async () => {
+    let previousArg: string | null = null;
+    const previousEpisode = {
+      ratingKey: "201",
+      seasonNumber: 1,
+      episodeNumber: 1,
+      title: "Pilot",
+      thumb: null,
+    };
+    const deps = baseDeps();
+    deps.plexServer = {
+      async episodes() {
+        return [];
+      },
+      async nextEpisode() {
+        return {
+          ratingKey: "203",
+          seasonNumber: 1,
+          episodeNumber: 3,
+          title: "Finale",
+          thumb: "/library/metadata/203/thumb/1",
+        };
+      },
+      async previousEpisode(episodeRatingKey: string) {
+        previousArg = episodeRatingKey;
+        return previousEpisode;
+      },
+      async playbackMeta() {
+        return {
+          durationMs: null,
+          creditsOffsetMs: null,
+          partId: "9001",
+          audio: [],
+          subtitle: [],
+          title: null,
+          subheading: null,
+        };
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/episode/202/previous",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { previousEpisode });
+    assert.equal(previousArg, "202");
+  });
+
+  it("returns { previousEpisode: null } when there is no previous episode", async () => {
+    const deps = baseDeps();
+    deps.plexServer = {
+      async episodes() {
+        return [];
+      },
+      async nextEpisode() {
+        return null;
+      },
+      async previousEpisode() {
+        return null;
+      },
+      async playbackMeta() {
+        return {
+          durationMs: null,
+          creditsOffsetMs: null,
+          partId: "9001",
+          audio: [],
+          subtitle: [],
+          title: null,
+          subheading: null,
+        };
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/episode/201/previous",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { previousEpisode: null });
+  });
+
+  it("returns 502 when the lookup throws", async () => {
+    const deps = baseDeps();
+    deps.plexServer = {
+      async episodes() {
+        return [];
+      },
+      async nextEpisode() {
+        throw new Error("previous lookup blew up");
+      },
+      async previousEpisode() {
+        throw new Error("previous lookup blew up");
+      },
+      async playbackMeta() {
+        return {
+          durationMs: null,
+          creditsOffsetMs: null,
+          partId: "9001",
+          audio: [],
+          subtitle: [],
+          title: null,
+          subheading: null,
+        };
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const originalConsoleError = console.error;
+    console.error = () => undefined;
+    try {
+      const response = await fetchLocal(
+        app,
+        "/api/watch/episode/202/previous",
+        sessionCookie({ plexToken: USER_TOKEN }),
+      );
+
+      assert.equal(response.status, 502);
+      assert.deepEqual(await response.json(), {
+        error: "previous lookup blew up",
+      });
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+});
+
 describe("GET /api/watch/episode/:ratingKey", () => {
   it("rejects a non-numeric ratingKey with 400", async () => {
     const app = createApp(baseDeps());

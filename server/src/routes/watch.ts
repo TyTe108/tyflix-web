@@ -1,14 +1,15 @@
 // Playback. This is the entrypoint for every "press play" in the app, mounted
-// at /api/watch behind requireAuth. Eight endpoints:
+// at /api/watch behind requireAuth. Nine endpoints:
 //
-//   GET /continue                 the Continue Watching rail
-//   GET /movie/:tmdbId            play descriptor for a movie, by TMDB id
-//   GET /tv/:tmdbId/episodes      episode list for a show
-//   GET /episode/:ratingKey       play descriptor for an episode
-//   GET /episode/:ratingKey/next  what auto-advances after this one
-//   GET /item/:ratingKey          play descriptor for any Plex item
-//   PUT /subtitle/:ratingKey      pick or clear the burned-in subtitle
-//   POST /timeline                report progress back to Plex
+//   GET /continue                     the Continue Watching rail
+//   GET /movie/:tmdbId                play descriptor for a movie, by TMDB id
+//   GET /tv/:tmdbId/episodes          episode list for a show
+//   GET /episode/:ratingKey           play descriptor for an episode
+//   GET /episode/:ratingKey/next      what auto-advances after this one
+//   GET /episode/:ratingKey/previous  the episode before this one
+//   GET /item/:ratingKey              play descriptor for any Plex item
+//   PUT /subtitle/:ratingKey          pick or clear the burned-in subtitle
+//   POST /timeline                    report progress back to Plex
 //
 // The important thing here is what a play descriptor is. Video does not go
 // through the Cloudflare Tunnel. Proxying a movie through the edge would be
@@ -410,6 +411,32 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
     try {
       const next = await plexServer.nextEpisode(ratingKey);
       res.json({ nextEpisode: next });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
+  /**
+   * GET /api/watch/episode/:ratingKey/previous
+   *
+   * `{ previousEpisode }`, the episode before this one in the same show, or
+   * null at the start of a series. Also null when this episode is in season 1
+   * or later and the episode before it is a special: specials sort first, and
+   * a numbered season's first episode should not lead back into them.
+   *
+   * 400 for a non-numeric ratingKey, 502 if Plex fails. The start of a show
+   * is a 200 with null, not a 404.
+   */
+  router.get("/episode/:ratingKey/previous", async (req, res) => {
+    const ratingKey = req.params.ratingKey;
+    if (!/^\d+$/.test(ratingKey)) {
+      res.status(400).json({ error: "ratingKey must be numeric" });
+      return;
+    }
+
+    try {
+      const previous = await plexServer.previousEpisode(ratingKey);
+      res.json({ previousEpisode: previous });
     } catch (err) {
       respondUpstreamError(res, err);
     }

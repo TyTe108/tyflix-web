@@ -548,19 +548,18 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
   }
 
   /**
-   * The episode that follows this one, or null when there isn't one.
+   * This episode's index in its show's season-then-episode list.
    *
-   * Because it walks the show's full flattened leaf list, rolling from a season
-   * finale into the next season's premiere falls out for free. Null means either
-   * the end of the show or an episode Plex doesn't file under a show.
+   * Fetches the episode metadata, reads grandparentRatingKey as the show, and
+   * returns that show's episodes together with this episode's index. Returns
+   * null when there is no grandparent, or when this episode isn't in the list.
    *
-   * Two round trips per call, and nothing here is cached.
-   *
-   * @throws PlexServerUpstreamError when the episode has no metadata document.
+   * @throws PlexServerUpstreamError when the metadata response has no Metadata
+   * row. An allLeaves failure propagates from episodes().
    */
-  async function nextEpisode(
+  async function episodeInShow(
     episodeRatingKey: string,
-  ): Promise<PlexEpisode | null> {
+  ): Promise<{ list: PlexEpisode[]; index: number } | null> {
     const body = await getJson(`/library/metadata/${episodeRatingKey}`);
     const meta = firstMetadata(body);
     if (!meta) {
@@ -582,14 +581,66 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
       return null;
     }
 
-    // Find this episode in its show's ordered list and take the one after it.
-    // The guard covers both ends: not found at all, or already the last leaf.
     const list = await episodes(String(grandparent));
-    const idx = list.findIndex((ep) => ep.ratingKey === episodeRatingKey);
-    if (idx < 0 || idx >= list.length - 1) {
+    const index = list.findIndex((ep) => ep.ratingKey === episodeRatingKey);
+    if (index < 0) {
       return null;
     }
-    return list[idx + 1] ?? null;
+    return { list, index };
+  }
+
+  /**
+   * The episode that follows this one, or null when there isn't one.
+   *
+   * Because it walks the show's full flattened leaf list, rolling from a season
+   * finale into the next season's premiere falls out for free. Null means either
+   * the end of the show or an episode Plex doesn't file under a show.
+   *
+   * Two round trips per call, and nothing here is cached.
+   *
+   * @throws PlexServerUpstreamError when the episode has no metadata document.
+   */
+  async function nextEpisode(
+    episodeRatingKey: string,
+  ): Promise<PlexEpisode | null> {
+    const found = await episodeInShow(episodeRatingKey);
+    // Not found is already null from the helper. This guard is the last leaf.
+    if (found === null || found.index >= found.list.length - 1) {
+      return null;
+    }
+    return found.list[found.index + 1] ?? null;
+  }
+
+  /**
+   * The episode that precedes this one, or null when there isn't one.
+   *
+   * Walks the same flattened leaf list as nextEpisode, so a season premiere's
+   * previous episode is the previous season's finale. Null means the start of
+   * the show, an episode Plex doesn't file under a show, or an episode that
+   * isn't in the list.
+   *
+   * Season 0 sorts first. When this episode's seasonNumber is above 0 and the
+   * one before it has seasonNumber 0, this returns null, so the first episode
+   * of a numbered season doesn't lead back into the specials.
+   *
+   * Two round trips per call, and nothing here is cached.
+   *
+   * @throws PlexServerUpstreamError when the metadata response has no Metadata
+   * row. An allLeaves failure propagates from episodes().
+   */
+  async function previousEpisode(
+    episodeRatingKey: string,
+  ): Promise<PlexEpisode | null> {
+    const found = await episodeInShow(episodeRatingKey);
+    if (found === null || found.index === 0) {
+      return null;
+    }
+    const previous = found.list[found.index - 1];
+    const current = found.list[found.index];
+    if (current.seasonNumber > 0 && previous.seasonNumber === 0) {
+      return null;
+    }
+    return previous;
   }
 
   /**
@@ -1247,6 +1298,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     item,
     episodes,
     nextEpisode,
+    previousEpisode,
     playbackMeta,
     sections,
     sectionItems,
