@@ -17,7 +17,7 @@
   "devDependencies": {
     "@types/express": "5.0.3",
     "@types/node": "22.15.32",
-    "concurrently": "9.2.4",
+    "concurrently": "9.2.5",
     "typescript": "5.8.3"
   }
 }
