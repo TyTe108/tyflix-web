@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchAllRequests } from "./requests";
+import { approveRequest, declineRequest, fetchAllRequests } from "./requests";
 
 describe("fetchAllRequests", () => {
   afterEach(() => {
@@ -62,6 +62,66 @@ describe("fetchAllRequests", () => {
   });
 });
 
+describe("approveRequest", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("includes the server error text from a 409 JSON body", async () => {
+    stubFetch(409, { error: "request is not pending" });
+    await expect(messageOf(approveRequest(283))).resolves.toBe(
+      "Failed to approve request (409): request is not pending",
+    );
+  });
+
+  it("keeps the status-only message when the body is not JSON", async () => {
+    stubFetch(502, undefined, true);
+    await expect(messageOf(approveRequest(283))).resolves.toBe(
+      "Failed to approve request (502)",
+    );
+  });
+
+  it("keeps the status-only message when error is blank", async () => {
+    stubFetch(502, { error: "   " });
+    await expect(messageOf(approveRequest(283))).resolves.toBe(
+      "Failed to approve request (502)",
+    );
+  });
+
+  it("resolves the body on 200", async () => {
+    const request = { id: 283, title: "Stub Movie 100" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => request,
+      }),
+    );
+    await expect(approveRequest(283)).resolves.toEqual(request);
+  });
+});
+
+describe("declineRequest", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("includes the server error text from a 409 JSON body", async () => {
+    stubFetch(409, { error: "request is not pending" });
+    await expect(messageOf(declineRequest(283))).resolves.toBe(
+      "Failed to decline request (409): request is not pending",
+    );
+  });
+
+  it("keeps the status-only message when the body is not JSON", async () => {
+    stubFetch(502, undefined, true);
+    await expect(messageOf(declineRequest(283))).resolves.toBe(
+      "Failed to decline request (502)",
+    );
+  });
+});
+
 function stubFetch(status: number, body: unknown, jsonThrows = false): void {
   vi.stubGlobal(
     "fetch",
@@ -84,5 +144,5 @@ async function messageOf(pending: Promise<unknown>): Promise<string> {
   } catch (err) {
     return err instanceof Error ? err.message : String(err);
   }
-  throw new Error("expected fetchAllRequests to reject");
+  throw new Error("expected the call to reject");
 }

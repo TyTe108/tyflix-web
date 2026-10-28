@@ -146,17 +146,24 @@ export async function fetchMyRequests(): Promise<RequestView[]> {
 export async function fetchAllRequests(): Promise<RequestView[]> {
   const res = await fetch("/api/requests/all");
   if (!res.ok) {
-    throw new Error(await allRequestsErrorMessage(res));
+    throw new Error(
+      await responseErrorMessage(
+        res,
+        `Failed to load all requests (${res.status})`,
+      ),
+    );
   }
   const body = (await res.json()) as { results: RequestView[] };
   return body.results;
 }
 
 // Prefers a non-empty `{ error }` string from a failed response, appended to
-// the status fallback. A body that will not parse, or an error that is missing,
-// not a string, or blank, keeps the fallback alone.
-async function allRequestsErrorMessage(res: Response): Promise<string> {
-  const fallback = `Failed to load all requests (${res.status})`;
+// the fallback the caller passes. A body that will not parse, or an error that
+// is missing, not a string, or blank, keeps the fallback alone.
+async function responseErrorMessage(
+  res: Response,
+  fallback: string,
+): Promise<string> {
   try {
     const body = (await res.json()) as { error?: unknown };
     if (typeof body.error === "string" && body.error.trim() !== "") {
@@ -192,13 +199,20 @@ export async function fetchRequestProfiles(
  * Sonarr, so this is the click that actually starts a download. Returns the
  * updated row for an in-place swap in the table.
  *
- * @throws Error on any non-2xx. An id Seerr doesn't recognise reads as 502
- * rather than 404.
+ * @throws Error on any non-2xx. The message is
+ * `Failed to approve request (<status>)`, with `: <error>` appended when the
+ * body has a non-empty string `error` field. An id Seerr doesn't recognise
+ * reads as 502 rather than 404.
  */
 export async function approveRequest(id: number): Promise<RequestView> {
   const res = await fetch(`/api/requests/${id}/approve`, { method: "POST" });
   if (!res.ok) {
-    throw new Error(`Failed to approve request (${res.status})`);
+    throw new Error(
+      await responseErrorMessage(
+        res,
+        `Failed to approve request (${res.status})`,
+      ),
+    );
   }
   return (await res.json()) as RequestView;
 }
@@ -206,12 +220,19 @@ export async function approveRequest(id: number): Promise<RequestView> {
 /**
  * POST /api/requests/:id/decline. Mirror of approveRequest.
  *
- * @throws Error on any non-2xx.
+ * @throws Error on any non-2xx. The message is
+ * `Failed to decline request (<status>)`, with `: <error>` appended when the
+ * body has a non-empty string `error` field.
  */
 export async function declineRequest(id: number): Promise<RequestView> {
   const res = await fetch(`/api/requests/${id}/decline`, { method: "POST" });
   if (!res.ok) {
-    throw new Error(`Failed to decline request (${res.status})`);
+    throw new Error(
+      await responseErrorMessage(
+        res,
+        `Failed to decline request (${res.status})`,
+      ),
+    );
   }
   return (await res.json()) as RequestView;
 }

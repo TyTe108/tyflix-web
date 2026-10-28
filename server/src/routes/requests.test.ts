@@ -459,6 +459,74 @@ describe("Seerr-backed request routes", () => {
     );
   });
 
+  it("answers 409 when Seerr refuses an approve that is not pending", async () => {
+    const seerr = createStubSeerr({
+      async approveRequest() {
+        throw new SeerrUpstreamError("not pending", 409);
+      },
+    });
+    const response = await fetchLocal(
+      createApp(seerr),
+      "POST",
+      "/api/requests/283/approve",
+      { cookie: sessionCookie(ADMIN_PERMISSION) },
+    );
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), {
+      error: "request is not pending",
+    });
+  });
+
+  it("answers 409 when Seerr refuses a decline that is not pending", async () => {
+    const seerr = createStubSeerr({
+      async declineRequest() {
+        throw new SeerrUpstreamError("not pending", 409);
+      },
+    });
+    const response = await fetchLocal(
+      createApp(seerr),
+      "POST",
+      "/api/requests/283/decline",
+      { cookie: sessionCookie(ADMIN_PERMISSION) },
+    );
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), {
+      error: "request is not pending",
+    });
+  });
+
+  it("answers 502 when Seerr approve fails with 503", async () => {
+    const seerr = createStubSeerr({
+      async approveRequest() {
+        throw new SeerrUpstreamError("unavailable", 503);
+      },
+    });
+    const response = await fetchLocal(
+      createApp(seerr),
+      "POST",
+      "/api/requests/283/approve",
+      { cookie: sessionCookie(ADMIN_PERMISSION) },
+    );
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), { error: "unavailable" });
+  });
+
+  it("answers 502 when Seerr approve fails with 404", async () => {
+    const seerr = createStubSeerr({
+      async approveRequest() {
+        throw new SeerrUpstreamError("not found", 404);
+      },
+    });
+    const response = await fetchLocal(
+      createApp(seerr),
+      "POST",
+      "/api/requests/283/approve",
+      { cookie: sessionCookie(ADMIN_PERMISSION) },
+    );
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), { error: "not found" });
+  });
+
   it("maps a Seerr duplicate to 409 and other failures to 502", async () => {
     const duplicate = createStubSeerr({
       async createRequest() {

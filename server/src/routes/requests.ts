@@ -191,7 +191,8 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
    *
    * Approves a Seerr request, which is what actually releases it to Radarr or
    * Sonarr. `:id` is Seerr's request id. Returns the updated, enriched request.
-   * 400 for a non-numeric id, 403 for non-admins, 502 if Seerr fails.
+   * 400 for a non-numeric id, 403 for non-admins, 409 when Seerr says the
+   * request is not pending, 502 if Seerr fails otherwise.
    *
    * An id Seerr doesn't recognise comes back as 502, not 404, because the
    * client surfaces every Seerr error the same way.
@@ -210,6 +211,12 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
       const [view] = await enrichRequests([request], mediaEnrichment);
       res.json(view);
     } catch (err) {
+      // Seerr answers 409 when the request is no longer pending. Pass that
+      // through instead of flattening it into a 502.
+      if (err instanceof SeerrUpstreamError && err.status === 409) {
+        res.status(409).json({ error: "request is not pending" });
+        return;
+      }
       respondUpstreamError(res, err);
     }
   });
@@ -218,7 +225,8 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
    * POST /api/requests/:id/decline
    *
    * Mirror of approve. Returns the updated, enriched request. 400 for a
-   * non-numeric id, 403 for non-admins, 502 if Seerr fails.
+   * non-numeric id, 403 for non-admins, 409 when Seerr says the request is not
+   * pending, 502 if Seerr fails otherwise.
    */
   router.post("/:id/decline", admin, async (req, res) => {
     const id = parseNumericId(
@@ -234,6 +242,12 @@ export function createRequestsRouter(deps: RequestsRouterDeps): Router {
       const [view] = await enrichRequests([request], mediaEnrichment);
       res.json(view);
     } catch (err) {
+      // Seerr answers 409 when the request is no longer pending. Pass that
+      // through instead of flattening it into a 502.
+      if (err instanceof SeerrUpstreamError && err.status === 409) {
+        res.status(409).json({ error: "request is not pending" });
+        return;
+      }
       respondUpstreamError(res, err);
     }
   });
@@ -360,8 +374,8 @@ function parseNumericId(raw: string | undefined): number | null {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
-// Everything Seerr or TMDB throws becomes a 502, except the 409 that POST /
-// intercepts before it gets here.
+// Everything Seerr or TMDB throws becomes a 502, except the 409s that POST /,
+// POST /:id/approve, and POST /:id/decline intercept before they get here.
 function respondUpstreamError(
   res: import("express").Response,
   err: unknown,
