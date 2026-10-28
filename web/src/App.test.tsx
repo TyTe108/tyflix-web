@@ -128,7 +128,7 @@ describe("Seerr title links", () => {
     vi.mocked(fetchMe).mockResolvedValue(null);
     renderAt("/tv/1396");
     expect((await screen.findByTestId("location")).textContent).toBe(
-      "login /login null REPLACE",
+      'login /login {"returnTo":"/media/tv/1396"} REPLACE',
     );
   });
 

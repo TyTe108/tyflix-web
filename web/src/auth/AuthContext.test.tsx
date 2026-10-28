@@ -120,3 +120,74 @@ describe("AuthProvider preferences", () => {
     expect(vi.mocked(fetchMe)).toHaveBeenCalledTimes(1);
   });
 });
+
+function FlagProbe() {
+  const { suppressReturnTo, status, logout, refresh } = useAuth();
+  return (
+    <div>
+      <span data-testid="flag">{String(suppressReturnTo)}</span>
+      <span data-testid="status">{status}</span>
+      <button type="button" onClick={() => void logout()}>
+        logout
+      </button>
+      <button type="button" onClick={() => void refresh()}>
+        refresh
+      </button>
+    </div>
+  );
+}
+
+describe("AuthProvider suppressReturnTo", () => {
+  beforeEach(() => {
+    vi.mocked(fetchMe).mockReset();
+    vi.mocked(logoutRequest).mockReset();
+    vi.mocked(logoutRequest).mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("is false on first load, true after logout(), and false after a successful refresh()", async () => {
+    let resolveMe!: (value: MeResponse | null) => void;
+    vi.mocked(fetchMe).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveMe = resolve;
+        }),
+    );
+
+    render(
+      <AuthProvider>
+        <FlagProbe />
+      </AuthProvider>,
+    );
+
+    expect(screen.getByTestId("flag").textContent).toBe("false");
+
+    await act(async () => {
+      resolveMe(meResponse());
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("status").textContent).toBe("authed");
+    });
+    expect(screen.getByTestId("flag").textContent).toBe("false");
+
+    await act(async () => {
+      screen.getByRole("button", { name: "logout" }).click();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("status").textContent).toBe("anon");
+    });
+    expect(screen.getByTestId("flag").textContent).toBe("true");
+
+    vi.mocked(fetchMe).mockResolvedValue(meResponse());
+    await act(async () => {
+      screen.getByRole("button", { name: "refresh" }).click();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("status").textContent).toBe("authed");
+    });
+    expect(screen.getByTestId("flag").textContent).toBe("false");
+  });
+});

@@ -21,6 +21,11 @@
 // made the call, and the session state here doesn't move. In practice the
 // cookie either works for everything or has expired for everything, so that
 // gap hasn't mattered.
+//
+// suppressReturnTo is set only by logout() and cleared only when refresh()
+// gets a session back. ProtectedRoute leaves the return path off /login while
+// it's set, so the next sign-in in this tab doesn't reopen the page that was
+// just left.
 
 import {
   createContext,
@@ -48,6 +53,9 @@ type AuthContextValue = {
   isAdmin: boolean; // decided server-side from Seerr's permission bits
   preferences: UserPreferences;
   status: AuthStatus;
+  // True from logout() until a refresh() gets a session. ProtectedRoute
+  // omits returnTo on its /login redirect while this is set.
+  suppressReturnTo: boolean;
   refresh: () => Promise<void>; // re-read the session, e.g. right after login
   logout: () => Promise<void>;
   // Replaces the held preferences without another /api/auth/me round trip.
@@ -74,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     DEFAULT_USER_PREFERENCES,
   );
   const [status, setStatus] = useState<AuthStatus>("loading");
+  const [suppressReturnTo, setSuppressReturnTo] = useState(false);
 
   // Re-reads the session from the cookie. Both failure shapes land in the same
   // place: fetchMe returning null (a clean 401) and fetchMe throwing (network
@@ -95,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsAdmin(me.isAdmin);
       setPreferences(me.preferences);
       setStatus("authed");
+      setSuppressReturnTo(false);
     } catch {
       setUser(null);
       setIsAdmin(false);
@@ -106,7 +116,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Clears local state in a finally block, so a failed logout call still logs
   // you out of the UI. The cookie may survive that case, but the server is the
   // one enforcing anything, and the alternative is a user stuck looking at a
-  // signed-in shell they can't get out of.
+  // signed-in shell they can't get out of. suppressReturnTo is set here too,
+  // including when the request throws, so the next /login has no return path.
   const logout = useCallback(async () => {
     try {
       await logoutRequest();
@@ -115,6 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsAdmin(false);
       setPreferences(DEFAULT_USER_PREFERENCES);
       setStatus("anon");
+      setSuppressReturnTo(true);
     }
   }, []);
 
@@ -130,11 +142,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAdmin,
       preferences,
       status,
+      suppressReturnTo,
       refresh,
       logout,
       setPreferences,
     }),
-    [user, isAdmin, preferences, status, refresh, logout, setPreferences],
+    [
+      user,
+      isAdmin,
+      preferences,
+      status,
+      suppressReturnTo,
+      refresh,
+      logout,
+      setPreferences,
+    ],
   );
 
   return (

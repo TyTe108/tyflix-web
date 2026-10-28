@@ -12,12 +12,19 @@
 // The popup is why the app's Cross-Origin-Opener-Policy is loosened. This page
 // keeps a handle on the window so it can close it the moment sign-in lands,
 // and a strict COOP would sever that handle.
+//
+// A session, whether it was already there or this page just created it, leaves
+// for the return path recorded on this entry, or for "/" when that path is
+// missing or not one this app should open. The navigation carries the landing
+// state, so a title page opened this way treats Back as a link home.
 
 import { useEffect, useRef, useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router";
+import { Link, Navigate, useLocation, useNavigate } from "react-router";
 import { completePlexLogin } from "../api/auth";
 import { useAuth } from "../auth/AuthContext";
+import { resolveReturnTo } from "../auth/returnTo";
 import { useAccessRequestsEnabled } from "../hooks/useAccessRequestsEnabled";
+import { landingState } from "../lib/landing";
 import {
   buildPlexAuthUrl,
   checkPlexPin,
@@ -37,12 +44,17 @@ type LoginPhase = "idle" | "waiting" | "error" | "forbidden";
 /**
  * Plex PIN sign-in.
  *
- * Redirects to "/" as soon as AuthContext reports a session, which covers both
- * a successful login and someone who was already signed in hitting /login.
+ * Once there's a session, replaces this entry with the resolved return path
+ * and the landing state. That covers a finished login and someone already
+ * signed in opening /login. The early redirect and the navigate() after
+ * refresh() both use `destination`: refresh() flips status to authed, so the
+ * early redirect can render before that navigate() call runs.
  */
 export function LoginPage() {
   const { status, refresh } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const destination = resolveReturnTo(location.state);
   const accessRequestsEnabled = useAccessRequestsEnabled();
   const [phase, setPhase] = useState<LoginPhase>("idle");
   const [message, setMessage] = useState<string | null>(null);
@@ -66,7 +78,7 @@ export function LoginPage() {
   }
 
   if (status === "authed") {
-    return <Navigate to="/" replace />;
+    return <Navigate to={destination} replace state={landingState} />;
   }
 
   // Tears down both timers together. Every exit from the waiting phase goes
@@ -175,7 +187,7 @@ export function LoginPage() {
 
         if (result.kind === "ok") {
           await refresh();
-          navigate("/", { replace: true });
+          navigate(destination, { replace: true, state: landingState });
           return;
         }
 
