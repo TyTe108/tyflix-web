@@ -1,7 +1,9 @@
 // Season checklist behavior on MediaDetail: tapping a season's label toggles
 // its checkbox (the thumb-usable label pattern for 36.4). Also covers the
-// admin-only Manage entry point on the title page, and that ▶ Play latches
-// { enterFullscreen: true } onto the watch-route navigation state.
+// admin-only Manage entry point on the title page, that ▶ Play latches
+// { enterFullscreen: true } onto the watch-route navigation state, and which
+// Back control renders: a link home on a direct load or a landing entry, and
+// a button after in-app navigation.
 import {
   cleanup,
   fireEvent,
@@ -221,5 +223,90 @@ describe("Play navigation enterFullscreen state", () => {
     expect(screen.getByTestId("location-state").textContent).toBe(
       JSON.stringify({ enterFullscreen: true }),
     );
+  });
+});
+
+describe("MediaDetailPage Back control", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  async function renderBack(
+    initialEntries: Array<string | { pathname: string; state?: unknown }>,
+    initialIndex?: number,
+  ) {
+    vi.mocked(fetchMe).mockResolvedValue(meUser(false));
+    vi.mocked(fetchTv).mockResolvedValue(tvDetail);
+    render(
+      <MemoryRouter
+        initialEntries={initialEntries}
+        initialIndex={initialIndex}
+      >
+        <AuthProvider>
+          <Routes>
+            <Route path="/media/:type/:id" element={<MediaDetailPage />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    expect(
+      await screen.findByRole("heading", { name: /Breaking Bad/ }),
+    ).toBeTruthy();
+  }
+
+  it("links home on a direct load", async () => {
+    await renderBack(["/media/tv/1396"]);
+    expect(screen.getByRole("link", { name: "Back" }).getAttribute("href")).toBe(
+      "/",
+    );
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+  });
+
+  // Two entries, and the title is the current one, so location.key is not
+  // "default". The landing marker is what still asks for the link home.
+  it("links home when the entry carries a landing state", async () => {
+    await renderBack(
+      ["/library", { pathname: "/media/tv/1396", state: { landing: true } }],
+      1,
+    );
+    expect(screen.getByRole("link", { name: "Back" }).getAttribute("href")).toBe(
+      "/",
+    );
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+  });
+
+  it("renders a button after in-app navigation", async () => {
+    await renderBack(["/library", "/media/tv/1396"], 1);
+    expect(screen.getByRole("button", { name: "Back" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Back" })).toBeNull();
+  });
+
+  // What /tv/abc becomes after the redirect: an invalid id on a landing
+  // entry. The error state draws a second Back, so both have to be links.
+  it("links home for an invalid id carrying a landing state", async () => {
+    vi.mocked(fetchMe).mockResolvedValue(meUser(false));
+    render(
+      <MemoryRouter
+        initialEntries={[
+          "/library",
+          { pathname: "/media/tv/abc", state: { landing: true } },
+        ]}
+        initialIndex={1}
+      >
+        <AuthProvider>
+          <Routes>
+            <Route path="/media/:type/:id" element={<MediaDetailPage />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Invalid media link.")).toBeTruthy();
+    const backs = screen.getAllByRole("link", { name: "Back" });
+    expect(backs).toHaveLength(2);
+    for (const back of backs) {
+      expect(back.getAttribute("href")).toBe("/");
+    }
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
   });
 });

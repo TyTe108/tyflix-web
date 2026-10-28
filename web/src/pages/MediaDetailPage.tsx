@@ -24,6 +24,7 @@ import {
   type FormEvent,
 } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
+import { isLandingState } from "../lib/landing";
 import {
   fetchCredits,
   fetchMovie,
@@ -127,10 +128,13 @@ export function MediaDetailPage() {
   const id = parseId(params.id);
   const navigate = useNavigate();
   const location = useLocation();
-  // react-router stamps location.key "default" on a first entry, meaning the
-  // user landed here directly and there's no history to pop. Going back in
-  // that case would leave the app, so it falls back to a link home.
-  const canGoBack = location.key !== "default";
+  // react-router stamps location.key "default" on a first entry, so there's
+  // no history to pop and Back is a link home. Going back would leave the
+  // app. A <Navigate replace> mints a fresh key, so an entry opened by the
+  // /movie or /tv redirect would look like in-app history. Those entries
+  // carry a landing state, and a landing entry gets the link home too.
+  const canGoBack =
+    location.key !== "default" && !isLandingState(location.state);
   const backControl = canGoBack ? (
     <button
       type="button"

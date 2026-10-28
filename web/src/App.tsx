@@ -2,7 +2,7 @@
 // else, so this is the fastest way to get oriented in the frontend.
 //
 // Three tiers of access. /login and /request-access are public, because you
-// need both of them before you have a session. Everything else nests inside
+// need both of them before you have a session. The pages nest inside
 // <ProtectedRoute>, which bounces you to /login when there's no session, and
 // then inside <AppShell>, which draws the persistent sidebar around whatever
 // page renders. /admin stacks <AdminRoute> on top of that and checks the admin
@@ -19,6 +19,7 @@
 //   /issues, /issues/:id           problems you reported on a title
 //   /settings                      account preferences (fullscreen-on-Play)
 //   /media/:type/:id               title page, :type is movie or tv
+//   /movie/:tmdbId, /tv/:tmdbId    Seerr title links, sent to /media/:type/:id
 //   /person/:id                    a TMDB person and their credits
 //   /collection/:id                a TMDB collection
 //   /admin                         dashboard and queues          admin only
@@ -35,11 +36,16 @@
 //                               which the tmdbId route can't resolve.
 //
 // "/" redirects to /library, not /home, and the catch-all sends anything
-// unmatched to "/" as well. That catch-all sits outside ProtectedRoute, so a
-// stale bookmark from a logged-out browser still ends up at /login.
+// unmatched to "/" as well. /movie/:tmdbId and /tv/:tmdbId sit next to that
+// catch-all, outside ProtectedRoute. Each replaces the entry with
+// /media/:type/:id, renders nothing, and carries a landing state so the
+// title page's Back control links home. A signed-out visitor still meets
+// the /media guard and ends up at /login. A stale bookmark from a
+// signed-out browser hits the catch-all and ends up at /login the same way.
 
 import { Navigate, Route, Routes } from "react-router";
 import { AppShell } from "./components/AppShell";
+import { SeerrTitleRedirect } from "./components/SeerrTitleRedirect";
 import { AdminRoute, ProtectedRoute } from "./auth/ProtectedRoute";
 import { AdminPage } from "./pages/AdminPage";
 import { CollectionPage } from "./pages/CollectionPage";
@@ -91,6 +97,14 @@ export function App() {
           </Route>
         </Route>
       </Route>
+      <Route
+        path="/movie/:tmdbId"
+        element={<SeerrTitleRedirect mediaType="movie" />}
+      />
+      <Route
+        path="/tv/:tmdbId"
+        element={<SeerrTitleRedirect mediaType="tv" />}
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
