@@ -18,7 +18,7 @@
 // rather than a failure. completePlexLogin never throws at all, because the
 // login page wants every outcome as a result variant. See each one below.
 
-// The identity the app renders: sidebar name, avatar, permission bits. `email`
+// The identity the app renders: top bar initial, drawer name, avatar, permission bits. `email`
 // only ever comes back from completePlexLogin, since the session cookie doesn't
 // carry it and /me is built purely from the cookie.
 export type AuthUser = {

@@ -1,5 +1,5 @@
 // Viewport branch for the authenticated chrome. AppShell reads this to choose
-// between the desktop sidebar and MobileNav; the matching CSS lives in
+// between the desktop top bar and MobileNav; the matching CSS lives in
 // styles.css under the same media query.
 import { useEffect, useState } from "react";
 

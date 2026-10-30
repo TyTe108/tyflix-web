@@ -4,7 +4,7 @@
 // Three tiers of access. /login and /request-access are public, because you
 // need both of them before you have a session. The pages nest inside
 // <ProtectedRoute>, which bounces you to /login when there's no session, and
-// then inside <AppShell>, which draws the persistent sidebar around whatever
+// then inside <AppShell>, which draws the top bar and menu drawer around whatever
 // page renders. /admin stacks <AdminRoute> on top of that and checks the admin
 // flag the server reported on /api/auth/me.
 //

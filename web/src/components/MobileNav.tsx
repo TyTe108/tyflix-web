@@ -1,6 +1,6 @@
 // Bottom tab bar + More sheet for viewports below 48rem. AppShell mounts this
-// instead of the desktop sidebar when useIsMobile() is true; only one primary
-// nav landmark exists at a time.
+// instead of the desktop top bar and menu drawer when useIsMobile() is true;
+// only one primary nav landmark exists at a time.
 //
 // Destinations come from navItems.tsx. Badge counts are passed in from
 // AppShell, which owns the /api/me/badge-counts poll — this file only decides

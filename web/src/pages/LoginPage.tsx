@@ -1,6 +1,6 @@
 // The sign-in screen, and one of only two routes you can reach without a
 // session. Rendered at /login by App.tsx, outside ProtectedRoute and outside
-// AppShell, so there's no sidebar here.
+// AppShell, so there's no top bar or menu drawer here.
 //
 // Drives Plex's PIN flow in the browser: opens a popup, creates a PIN against
 // plex.tv (so the PIN is born from the user's IP), navigates the popup to

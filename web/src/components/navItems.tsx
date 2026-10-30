@@ -1,10 +1,10 @@
 // Single source of truth for the authenticated primary nav destinations.
-// AppShell (desktop sidebar) and MobileNav (bottom tabs + More sheet) both
+// DesktopNav (top bar menu drawer) and MobileNav (bottom tabs + More sheet) both
 // import from here so labels, order, paths, and icons cannot drift between the
 // two renderers.
 import type { ReactNode } from "react";
 
-// One sidebar / tab / sheet entry. `adminOnly` hides the row from non-admins.
+// One drawer / tab / sheet entry. `adminOnly` hides the row from non-admins.
 // `end` is react-router's exact-match flag for the active class, though no
 // entry in NAV_ITEMS sets it today, so it's always undefined.
 export type NavItem = {
@@ -111,7 +111,39 @@ export const MoreIcon = (
   </svg>
 );
 
-// Sidebar order, top to bottom. Library leads because "/" redirects there, so
+/** Hamburger glyph for the desktop top bar's menu button. */
+export const MenuIcon = (
+  <svg
+    width={24}
+    height={24}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.8}
+    strokeLinecap="round"
+    aria-hidden={true}
+  >
+    <path d="M4 7h16M4 12h16M4 17h16" />
+  </svg>
+);
+
+/** X glyph for the desktop menu drawer's close button. */
+export const CloseIcon = (
+  <svg
+    width={24}
+    height={24}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.8}
+    strokeLinecap="round"
+    aria-hidden={true}
+  >
+    <path d="M6 6l12 12M18 6L6 18" />
+  </svg>
+);
+
+// Drawer order, top to bottom. Library leads because "/" redirects there, so
 // it's the first thing anyone sees after signing in.
 export const NAV_ITEMS: NavItem[] = [
   { to: "/library", label: "Library", icon: LibraryIcon },

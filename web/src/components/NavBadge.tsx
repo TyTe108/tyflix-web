@@ -1,9 +1,9 @@
-// Shared numeric badge for primary-nav destinations. AppShell (sidebar) and
-// MobileNav (bottom tabs + More sheet) both render through this so the 99+
+// Shared numeric badge for primary-nav destinations. DesktopNav (menu drawer)
+// and MobileNav (bottom tabs + More sheet) both render through this so the 99+
 // cap and "render nothing at 0" rule cannot drift.
 //
-// className is a prop rather than baked in because the desktop sidebar and
-// the mobile tab bar already have their own CSS rules (.sidebar-badge /
+// className is a prop rather than baked in because the desktop drawer and
+// the mobile tab bar already have their own CSS rules (.nav-drawer-badge /
 // .mobile-nav-badge); this component only owns the markup and the count text.
 
 type NavBadgeProps = {

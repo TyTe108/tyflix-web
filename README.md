@@ -77,7 +77,7 @@ Beyond what's in the screenshots:
 
 Tyflix is one Node service. It serves a JSON API and the built React app from the same origin.
 
-- **Frontend:** React, Vite, TypeScript. Dark, poster-forward, persistent sidebar.
+- **Frontend:** React, Vite, TypeScript. Dark, poster-forward, with a top bar and menu drawer.
 - **Backend:** Node, Express, TypeScript. It holds every credential and talks to four upstreams: Plex for accounts and the library, Seerr for requests and media status and issues, TMDB for discovery metadata and images, and a small host-metrics service that feeds the admin dashboard.
 - **Auth:** users sign in with their Plex account over Plex's PIN flow. The browser only ever holds a signed, httpOnly session cookie. The Plex token stays on the server.
 - **Playback:** the server mints a short-lived Plex *transient* token from the user's stored token and hands the browser Plex's own `plex.direct` address, so video goes straight from Plex to the in-page player and never touches the tunnel. Plex transcodes on demand. The durable token never leaves the backend.

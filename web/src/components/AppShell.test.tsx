@@ -1,5 +1,6 @@
-// Characterization test for AppShell's sidebar nav: which links each role sees,
-// and when badges appear on My Requests, My Issues, and Admin.
+// Characterization test for AppShell's desktop top bar and menu drawer: which
+// links each role sees, and when badges appear on My Requests, My Issues, and
+// Admin.
 //
 // This file is the web harness's proof-of-life (vitest + jsdom + Testing
 // Library wired into `npm test -w web`) and the regression net for the mobile
@@ -14,7 +15,14 @@
 // hang the suite. Link-inventory and viewport tests keep every count at 0 so
 // exact accessible-name assertions stay valid; badge-specific tests alone use
 // regex names when a badge's aria-label joins the link's accessible name.
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { useEffect } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -93,6 +101,11 @@ function renderAppShell() {
   );
 }
 
+async function openMenuDrawer() {
+  fireEvent.click(screen.getByRole("button", { name: /^Menu/ }));
+  return screen.findByRole("dialog", { name: "Menu" });
+}
+
 describe("AppShell", () => {
   beforeEach(() => {
     vi.mocked(fetchMe).mockReset();
@@ -116,12 +129,13 @@ describe("AppShell", () => {
 
     renderAppShell();
 
-    // Display name only appears once AuthProvider has applied a successful
+    // The account link only appears once AuthProvider has applied a successful
     // fetchMe. If the auth mock is missing, this find throws instead of
     // letting an empty anon shell pass the link assertions below.
-    await screen.findByText("Test User");
+    await screen.findByRole("link", { name: "Account settings, Test User" });
 
-    const nav = screen.getByRole("navigation", { name: "Primary" });
+    const dialog = await openMenuDrawer();
+    const nav = within(dialog).getByRole("navigation", { name: "Primary" });
     const links = within(nav).getAllByRole("link");
     expect(links).toHaveLength(7);
 
@@ -137,10 +151,11 @@ describe("AppShell", () => {
 
     renderAppShell();
 
-    await screen.findByText("Test User");
-    const adminLink = await screen.findByRole("link", { name: "Admin" });
+    await screen.findByRole("link", { name: "Account settings, Test User" });
+    const dialog = await openMenuDrawer();
+    const adminLink = await within(dialog).findByRole("link", { name: "Admin" });
 
-    const nav = screen.getByRole("navigation", { name: "Primary" });
+    const nav = within(dialog).getByRole("navigation", { name: "Primary" });
     const links = within(nav).getAllByRole("link");
     expect(links).toHaveLength(8);
 
@@ -159,7 +174,8 @@ describe("AppShell", () => {
 
     renderAppShell();
 
-    await screen.findByText("Test User");
+    await screen.findByRole("link", { name: "Account settings, Test User" });
+    await openMenuDrawer();
 
     const requestsBadge = await screen.findByLabelText(
       "3 requests in progress",
@@ -181,8 +197,9 @@ describe("AppShell", () => {
 
     renderAppShell();
 
-    await screen.findByText("Test User");
-    await screen.findByRole("link", { name: "Admin" });
+    await screen.findByRole("link", { name: "Account settings, Test User" });
+    const dialog = await openMenuDrawer();
+    await within(dialog).findByRole("link", { name: "Admin" });
 
     expect(screen.queryByLabelText(/in progress/)).toBeNull();
     expect(screen.queryByLabelText(/open issue/)).toBeNull();
@@ -198,7 +215,8 @@ describe("AppShell", () => {
 
     renderAppShell();
 
-    await screen.findByText("Test User");
+    await screen.findByRole("link", { name: "Account settings, Test User" });
+    await openMenuDrawer();
     const badge = await screen.findByLabelText("100 requests in progress");
     expect(badge.textContent).toBe("99+");
   });
@@ -209,8 +227,9 @@ describe("AppShell", () => {
 
     renderAppShell();
 
-    await screen.findByText("Test User");
-    await screen.findByRole("link", { name: "Admin" });
+    await screen.findByRole("link", { name: "Account settings, Test User" });
+    const dialog = await openMenuDrawer();
+    await within(dialog).findByRole("link", { name: "Admin" });
 
     expect(screen.queryByLabelText(/in progress/)).toBeNull();
     expect(screen.queryByLabelText(/open issue/)).toBeNull();
@@ -228,9 +247,10 @@ describe("AppShell", () => {
 
     renderAppShell();
 
-    await screen.findByText("Test User");
+    await screen.findByRole("link", { name: "Account settings, Test User" });
+    const dialog = await openMenuDrawer();
 
-    const nav = screen.getByRole("navigation", { name: "Primary" });
+    const nav = within(dialog).getByRole("navigation", { name: "Primary" });
     expect(within(nav).queryByRole("link", { name: /Admin/ })).toBeNull();
 
     expect(
@@ -239,48 +259,72 @@ describe("AppShell", () => {
     expect(screen.getByLabelText("4 open issues").textContent).toBe("4");
   });
 
-  it("renders the sidebar and not the mobile tab bar above 48rem", async () => {
+  it("renders the top bar and not the mobile tab bar above 48rem", async () => {
     setViewport("desktop");
     vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: false }));
 
     renderAppShell();
-    await screen.findByText("Test User");
+    await screen.findByRole("link", { name: "Account settings, Test User" });
 
-    screen.getByRole("complementary");
-    const nav = screen.getByRole("navigation", { name: "Primary" });
+    screen.getByRole("button", { name: /^Menu/ });
+    const dialog = await openMenuDrawer();
+    const nav = within(dialog).getByRole("navigation", { name: "Primary" });
     within(nav).getByRole("link", { name: "Home" });
     expect(screen.queryByRole("button", { name: "More" })).toBeNull();
   });
 
-  it("renders the mobile tab bar and not the sidebar below 48rem", async () => {
+  it("renders the mobile tab bar and not the top bar below 48rem", async () => {
     setViewport("mobile");
     vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: false }));
 
     renderAppShell();
     await screen.findByRole("button", { name: "More" });
 
-    expect(screen.queryByRole("complementary")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Menu/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /^Account settings/ })).toBeNull();
     const nav = screen.getByRole("navigation", { name: "Primary" });
     within(nav).getByRole("link", { name: "Library" });
     within(nav).getByRole("button", { name: "More" });
     expect(within(nav).queryByRole("link", { name: "Home" })).toBeNull();
   });
 
-  it("switches between sidebar and mobile nav when the viewport crosses 48rem", async () => {
+  it("switches between the top bar and mobile nav when the viewport crosses 48rem", async () => {
     setViewport("desktop");
     vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: false }));
 
     renderAppShell();
-    await screen.findByText("Test User");
-    screen.getByRole("complementary");
+    await screen.findByRole("link", { name: "Account settings, Test User" });
+    screen.getByRole("button", { name: /^Menu/ });
 
     setViewport("mobile");
     await screen.findByRole("button", { name: "More" });
-    expect(screen.queryByRole("complementary")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Menu/ })).toBeNull();
 
     setViewport("desktop");
-    await screen.findByRole("complementary");
+    await screen.findByRole("button", { name: /^Menu/ });
     expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+  });
+
+  it("closes an open drawer when the viewport drops below 48rem and leaves it closed on the way back", async () => {
+    setViewport("desktop");
+    vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: false }));
+
+    renderAppShell();
+    await screen.findByRole("link", { name: "Account settings, Test User" });
+    await openMenuDrawer();
+
+    act(() => {
+      setViewport("mobile");
+    });
+    await screen.findByRole("button", { name: "More" });
+    expect(screen.queryByRole("dialog", { name: "Menu" })).toBeNull();
+
+    act(() => {
+      setViewport("desktop");
+    });
+    const menu = await screen.findByRole("button", { name: /^Menu/ });
+    expect(menu.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("dialog", { name: "Menu" })).toBeNull();
   });
 });
 
@@ -322,7 +366,7 @@ describe("AppShell outlet identity across breakpoint", () => {
       </MemoryRouter>,
     );
 
-    await screen.findByText("Test User");
+    await screen.findByRole("link", { name: "Account settings, Test User" });
     const videoBefore = screen.getByTestId("outlet-probe-video");
     expect(outletMountCount).toBe(1);
 
@@ -330,15 +374,45 @@ describe("AppShell outlet identity across breakpoint", () => {
       setViewport("mobile");
     });
     await screen.findByRole("button", { name: "More" });
-    expect(screen.queryByRole("complementary")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Menu/ })).toBeNull();
     expect(screen.getByTestId("outlet-probe-video")).toBe(videoBefore);
     expect(outletMountCount).toBe(1);
 
     act(() => {
       setViewport("desktop");
     });
-    await screen.findByRole("complementary");
+    await screen.findByRole("button", { name: /^Menu/ });
     expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+    expect(screen.getByTestId("outlet-probe-video")).toBe(videoBefore);
+    expect(outletMountCount).toBe(1);
+  });
+
+  it("keeps the routed page mounted when the menu drawer opens and closes", async () => {
+    setViewport("desktop");
+    vi.mocked(fetchMe).mockResolvedValue(meResponse({ isAdmin: false }));
+
+    render(
+      <MemoryRouter initialEntries={["/library"]}>
+        <AuthProvider>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/library" element={<OutletMountProbe />} />
+            </Route>
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole("link", { name: "Account settings, Test User" });
+    const videoBefore = screen.getByTestId("outlet-probe-video");
+    expect(outletMountCount).toBe(1);
+
+    const dialog = await openMenuDrawer();
+    expect(screen.getByTestId("outlet-probe-video")).toBe(videoBefore);
+    expect(outletMountCount).toBe(1);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close menu" }));
+    expect(screen.queryByRole("dialog", { name: "Menu" })).toBeNull();
     expect(screen.getByTestId("outlet-probe-video")).toBe(videoBefore);
     expect(outletMountCount).toBe(1);
   });

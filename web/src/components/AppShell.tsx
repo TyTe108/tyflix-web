@@ -1,7 +1,7 @@
-// The persistent chrome around every signed-in page: sidebar on the left on
-// desktop, bottom tab bar on viewports below 48rem, and the routed page in a
-// stable middle slot so rotating a phone across the breakpoint does not
-// remount the page inside.
+// The persistent chrome around every signed-in page: a top bar and menu
+// drawer at 48rem and up, a bottom tab bar on viewports below that, and the
+// routed page in a stable middle slot so rotating a phone across the
+// breakpoint does not remount the page inside.
 //
 // App.tsx mounts this as a layout route nested inside ProtectedRoute, so it
 // wraps everything from /library through /admin and never renders for /login or
@@ -13,70 +13,22 @@
 // fail; a failure leaves the last good counts alone and never surfaces an
 // error in the nav.
 import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router";
-import {
-  adminBadgeRollup,
-  fetchBadgeCounts,
-  type BadgeCounts,
-} from "../api/badgeCounts";
-import { useAuth } from "../auth/AuthContext";
+import { Outlet } from "react-router";
+import { fetchBadgeCounts, type BadgeCounts } from "../api/badgeCounts";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { DesktopNav } from "./DesktopNav";
 import { MobileNav } from "./MobileNav";
-import { NavBadge } from "./NavBadge";
-import { LogoutIcon, NAV_ITEMS } from "./navItems";
 
 const BADGE_COUNT_POLL_MS = 60_000;
 
-function badgeForPath(
-  path: string,
-  counts: BadgeCounts | null,
-): { count: number; label: string } | null {
-  if (counts === null) {
-    return null;
-  }
-
-  if (path === "/requests") {
-    const count = counts.mine.requests;
-    return {
-      count,
-      label:
-        count === 1
-          ? "1 request in progress"
-          : `${count} requests in progress`,
-    };
-  }
-
-  if (path === "/issues") {
-    const count = counts.mine.issues;
-    return {
-      count,
-      label: count === 1 ? "1 open issue" : `${count} open issues`,
-    };
-  }
-
-  if (path === "/admin") {
-    const count = adminBadgeRollup(counts.admin);
-    return {
-      count,
-      label:
-        count === 1
-          ? "1 admin item needing attention"
-          : `${count} admin items needing attention`,
-    };
-  }
-
-  return null;
-}
-
 /**
- * Layout route for the whole authenticated app: sidebar or mobile nav, plus an
- * <Outlet /> for the current page.
+ * Layout route for the whole authenticated app: desktop top bar and menu
+ * drawer, or mobile nav, plus an <Outlet /> for the current page.
  *
  * Hiding the Admin link from non-admins is cosmetic. The real gate is
  * AdminRoute on the client and the admin permission bit on the server.
  */
 export function AppShell() {
-  const { user, isAdmin, logout } = useAuth();
   const isMobile = useIsMobile();
   const [badgeCounts, setBadgeCounts] = useState<BadgeCounts | null>(null);
 
@@ -107,73 +59,12 @@ export function AppShell() {
     };
   }, []);
 
-  // One tree, stable child indexes: sidebar | content | mobile nav. React
+  // One tree, stable child indexes: DesktopNav | content | mobile nav. React
   // reconciles by index, so swapping a two-branch layout would remount
   // <Outlet /> and take the player's fullscreen element and <video> with it.
   return (
     <div className={isMobile ? "app-shell app-shell--mobile" : "app-shell"}>
-      {isMobile ? null : (
-        <aside className="sidebar">
-          {/* Both brand marks are always in the DOM. A media query at 820px
-              narrows the sidebar to a 64px rail and swaps the word for the T. */}
-          <div className="sidebar-brand">
-            <span className="sidebar-brand-full">Tyflix</span>
-            <span className="sidebar-brand-short" aria-hidden="true">
-              T
-            </span>
-          </div>
-
-          {/* Primary nav. Admin-only rows are filtered out; Requests, Issues,
-              and Admin carry badges when their counts are above zero. */}
-          <nav className="sidebar-nav" aria-label="Primary">
-            {NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin).map((item) => {
-              const badge = badgeForPath(item.to, badgeCounts);
-              return (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.end}
-                  className={({ isActive }) =>
-                    isActive ? "sidebar-link active" : "sidebar-link"
-                  }
-                >
-                  <span className="sidebar-link-icon">
-                    {item.icon}
-                    {badge ? (
-                      <NavBadge
-                        count={badge.count}
-                        label={badge.label}
-                        className="sidebar-badge"
-                      />
-                    ) : null}
-                  </span>
-                  <span className="sidebar-link-label">{item.label}</span>
-                </NavLink>
-              );
-            })}
-          </nav>
-
-          {/* Footer: who's signed in, plus the way out. */}
-          <div className="sidebar-footer">
-            {user ? (
-              <div className="sidebar-user">
-                <span className="sidebar-user-name">{user.displayName}</span>
-                {isAdmin ? (
-                  <span className="sidebar-admin-chip">admin</span>
-                ) : null}
-              </div>
-            ) : null}
-            <button
-              type="button"
-              className="sidebar-logout"
-              onClick={() => void logout()}
-            >
-              <span className="sidebar-link-icon">{LogoutIcon}</span>
-              <span className="sidebar-link-label">Logout</span>
-            </button>
-          </div>
-        </aside>
-      )}
+      {isMobile ? null : <DesktopNav badgeCounts={badgeCounts} />}
 
       <div className="app-content">
         <Outlet />
