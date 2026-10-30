@@ -112,6 +112,7 @@ describe("DesktopNav", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     restoreScrollSpies?.();
     restoreScrollSpies = null;
     if (originalScrollY) {
@@ -376,6 +377,27 @@ describe("DesktopNav", () => {
     expect(dialog.contains(document.activeElement)).toBe(true);
     fireEvent.keyDown(document, { key: "Escape" });
     expectMenuClosed(menu);
+  });
+
+  it("keeps the drawer mounted for 200ms after Escape, then removes it", async () => {
+    renderDesktopNav();
+    await screen.findByRole("link", { name: "Account settings, Test User" });
+
+    const { menu } = await openMenu();
+    vi.useFakeTimers();
+    act(() => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
+
+    expect(document.activeElement).toBe(menu);
+    expect(menu.getAttribute("aria-expanded")).toBe("false");
+    const scrim = screen.getByTestId("nav-drawer-scrim");
+    expect(scrim.getAttribute("data-state")).toBe("closing");
+
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(screen.queryByTestId("nav-drawer-scrim")).toBeNull();
   });
 
   it("closes when the scrim is clicked and returns focus to the menu button", async () => {

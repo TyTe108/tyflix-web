@@ -26,6 +26,9 @@ import { CloseIcon, MenuIcon, NAV_ITEMS } from "./navItems";
 // The bar turns opaque once the page has scrolled past this.
 const SCROLLED_AFTER_PX = 8;
 
+// Same 200ms as the exit keyframes in styles.css.
+const DRAWER_CLOSING_MS = 200;
+
 type DesktopNavProps = {
   badgeCounts: BadgeCounts | null;
 };
@@ -187,6 +190,7 @@ export function DesktopNav({ badgeCounts }: DesktopNavProps) {
         scrimClassName="nav-drawer-scrim"
         sheetClassName="nav-drawer"
         scrimTestId="nav-drawer-scrim"
+        closingMs={DRAWER_CLOSING_MS}
       >
         <button
           type="button"

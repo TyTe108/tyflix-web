@@ -25,6 +25,7 @@
   --drawer-w: 15rem;
   --scrim: rgba(0, 0, 0, 0.4);
   --ease-out: cubic-bezier(0, 0, 0.34, 1);
+  --ease-in: cubic-bezier(0.66, 0, 1, 1);
 
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   line-height: 1.5;
@@ -4611,6 +4612,20 @@ a {
   z-index: 1;
 }
 
+/* Scrim fades out and the panel slides away while data-state is closing. */
+.nav-drawer-scrim[data-state="closing"] {
+  pointer-events: none;
+  animation: nav-drawer-fade-out 200ms var(--ease-in) both;
+}
+
+.nav-drawer-scrim[data-state="closing"] .nav-drawer {
+  animation: nav-drawer-slide-out 200ms var(--ease-in) both;
+}
+
+.nav-drawer-scrim[data-state="closing"] .nav-drawer-close {
+  visibility: hidden;
+}
+
 .nav-drawer-scroll {
   position: absolute;
   inset: 0;
@@ -4744,6 +4759,19 @@ button.nav-drawer-link {
   }
 }
 
+@keyframes nav-drawer-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes nav-drawer-slide-out {
+  to {
+    opacity: 0;
+    transform: translateX(-25%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -4770,6 +4798,10 @@ button.nav-drawer-link {
   .nav-drawer,
   .nav-drawer-list {
     animation: none;
+  }
+
+  .nav-drawer-scrim[data-state="closing"] {
+    display: none;
   }
 }
 

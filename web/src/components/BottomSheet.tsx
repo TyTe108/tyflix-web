@@ -3,6 +3,11 @@
 // consumer; Library filters (and later Dropdown) reuse the same behaviour so
 // the three sheets cannot drift apart.
 //
+// closingMs, when above 0, keeps the scrim and panel mounted for that many
+// milliseconds after open becomes false. The closing sheet is aria-hidden and
+// inert, so it leaves the accessibility tree and stops taking input at once.
+// Callers that leave it off are unchanged, and the sheet unmounts immediately.
+//
 // Deliberately not included:
 // - A focus trap. Tab can leave the sheet; Escape + returning focus to the
 //   trigger is the accessibility bar this app has chosen for these overlays.
@@ -11,6 +16,7 @@
 import {
   useEffect,
   useRef,
+  useState,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -27,11 +33,20 @@ type BottomSheetProps = {
   sheetClassName?: string;
   /** Optional test id on the scrim (MobileNav's suite asserts on this). */
   scrimTestId?: string;
+  /**
+   * Milliseconds the sheet stays mounted after open becomes false, so a
+   * close animation can play. While that window runs the sheet is
+   * aria-hidden and inert. Omit it, or pass 0 or less, and the sheet
+   * unmounts immediately.
+   */
+  closingMs?: number;
 };
 
 /**
  * Renders nothing while closed. While open: a full-viewport scrim and a
- * dialog panel. Scrim click and Escape both call onClose.
+ * dialog panel. Scrim click and Escape both call onClose. When closingMs is
+ * above 0, the sheet stays mounted for that long after open becomes false,
+ * hidden from assistive tech and ignoring input, then unmounts.
  */
 export function BottomSheet({
   open,
@@ -42,9 +57,14 @@ export function BottomSheet({
   scrimClassName = "bottom-sheet-scrim",
   sheetClassName = "bottom-sheet",
   scrimTestId,
+  closingMs,
 }: BottomSheetProps) {
   const sheetRef = useRef<HTMLDivElement>(null);
   const wasOpenRef = useRef(false);
+  const stayMs = closingMs !== undefined && closingMs > 0 ? closingMs : 0;
+  const [phase, setPhase] = useState<"open" | "closing" | "closed">(
+    open ? "open" : "closed",
+  );
 
   useEffect(() => {
     if (!open) {
@@ -65,7 +85,8 @@ export function BottomSheet({
     };
   }, [open, onClose]);
 
-  // Return focus to the trigger after the sheet unmounts.
+  // Return focus to the trigger when open becomes false, including while a
+  // closing window is still mounted.
   useEffect(() => {
     if (wasOpenRef.current && !open) {
       returnFocusRef.current?.focus();
@@ -73,15 +94,44 @@ export function BottomSheet({
     wasOpenRef.current = open;
   }, [open, returnFocusRef]);
 
-  if (!open) {
+  useEffect(() => {
+    if (open) {
+      setPhase("open");
+      return;
+    }
+    if (stayMs === 0) {
+      setPhase("closed");
+      return;
+    }
+    setPhase((current) => (current === "closed" ? "closed" : "closing"));
+  }, [open, stayMs]);
+
+  useEffect(() => {
+    if (open || phase !== "closing" || stayMs === 0) {
+      return;
+    }
+    const id = window.setTimeout(() => {
+      setPhase("closed");
+    }, stayMs);
+    return () => {
+      window.clearTimeout(id);
+    };
+  }, [open, phase, stayMs]);
+
+  if (!open && (stayMs === 0 || phase === "closed")) {
     return null;
   }
+
+  const closing = !open;
 
   return (
     <div
       className={scrimClassName}
       data-testid={scrimTestId}
-      onClick={onClose}
+      data-state={closing ? "closing" : "open"}
+      aria-hidden={closing ? true : undefined}
+      inert={closing}
+      onClick={closing ? undefined : onClose}
     >
       <div
         ref={sheetRef}
