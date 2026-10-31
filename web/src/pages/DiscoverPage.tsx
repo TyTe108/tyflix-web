@@ -238,7 +238,7 @@ export function DiscoverPage() {
   }
 
   return (
-    <main className="page page-wide">
+    <main className="page page-wide page-full">
       <h1>Discover</h1>
 
       <label className="discover-search">

@@ -66,7 +66,7 @@ export function WatchlistPage() {
   }, [reloadKey]);
 
   return (
-    <main className="page page-wide">
+    <main className="page page-wide page-full">
       <h1>Watchlist</h1>
 
       <section aria-labelledby="watchlist-heading">

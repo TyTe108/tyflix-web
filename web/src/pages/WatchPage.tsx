@@ -1841,7 +1841,7 @@ export function WatchPage() {
   };
 
   return (
-    <main className="page page-wide">
+    <main className="page page-wide page-centered">
       {/* Header: back out to "/" (which redirects to the Library), plus the
           display strings the server already shaped. For an episode the title is
           the show and the subheading is "S1E1 · Pilot"; for a movie it's the

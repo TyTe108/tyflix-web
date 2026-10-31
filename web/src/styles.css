@@ -44,9 +44,32 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   color: var(--text);
+  background: var(--bg);
+  /* Stacking context so the fixed layer paints above this background. */
+  isolation: isolate;
+}
+
+/* Glow from below the bottom edge, the top radial, then a wash from a
+   lighter bottom up to --bg. Fixed so the layer stays put while the page
+   scrolls. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
   background:
+    radial-gradient(
+      ellipse 52% 71% at 49% 118%,
+      color-mix(in srgb, var(--text) 13%, transparent),
+      transparent
+    ),
     radial-gradient(ellipse 90% 55% at 50% -8%, var(--surface-2) 0%, transparent 60%),
-    var(--bg);
+    linear-gradient(
+      to top,
+      color-mix(in srgb, var(--surface-2) 30%, var(--bg)) 0%,
+      var(--bg) 95%
+    );
 }
 
 #root {
@@ -64,6 +87,30 @@ body {
 
 .page-wide {
   max-width: 72rem;
+}
+
+/* Desktop shell only, so phones keep the centred frame above. The max-width
+   includes the horizontal pad, so the content is 48rem, or 72rem on
+   page-wide. */
+.app-shell:not(.app-shell--mobile) .page {
+  --page-pad: var(--gutter);
+  margin: 0;
+  padding: 1.5rem var(--page-pad) 4rem;
+  max-width: calc(48rem + 2 * var(--page-pad));
+}
+
+.app-shell:not(.app-shell--mobile) .page-wide {
+  max-width: calc(72rem + 2 * var(--page-pad));
+}
+
+/* Content runs from gutter to gutter. */
+.app-shell:not(.app-shell--mobile) .page-full {
+  max-width: none;
+}
+
+/* Centres the column in the viewport. */
+.app-shell:not(.app-shell--mobile) .page-centered {
+  margin-inline: auto;
 }
 
 .settings-section {

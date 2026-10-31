@@ -95,7 +95,8 @@ export function CollectionPage() {
   }, [id, reloadKey]);
 
   return (
-    <main className="page page-wide">
+    // The page stays centred until its own layout lands. Phase 52.6 removes page-centered.
+    <main className="page page-wide page-centered">
       <header className="row">
         <Link to="/discover">← Back to Discover</Link>
       </header>

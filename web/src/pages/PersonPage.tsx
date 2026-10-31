@@ -124,7 +124,7 @@ export function PersonPage() {
   }, [id, reloadKey]);
 
   return (
-    <main className="page page-wide">
+    <main className="page page-wide page-full">
       <header className="row">
         <Link to="/discover">← Back to Discover</Link>
       </header>

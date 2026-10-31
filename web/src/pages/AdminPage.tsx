@@ -234,7 +234,7 @@ export function AdminPage() {
   );
 
   return (
-    <main className="page page-wide">
+    <main className="page page-wide page-full">
       <h1>Admin</h1>
 
       {/* Tab strip. Wired up as a real ARIA tablist so the ids here line up

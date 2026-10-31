@@ -485,7 +485,7 @@ export function LibraryPage() {
   // failure only replaces the grid.
   if (sectionsStatus === "loading") {
     return (
-      <main className="page page-wide">
+      <main className="page page-wide page-full">
         <h1>Library</h1>
         <p className="muted">Loading…</p>
       </main>
@@ -494,7 +494,7 @@ export function LibraryPage() {
 
   if (sectionsStatus === "error") {
     return (
-      <main className="page page-wide">
+      <main className="page page-wide page-full">
         <h1>Library</h1>
         <div className="stats-error">
           <p className="error">{sectionsError ?? "Failed to load library"}</p>
@@ -507,7 +507,7 @@ export function LibraryPage() {
   }
 
   return (
-    <main className="page page-wide">
+    <main className="page page-wide page-full">
       <h1>Library</h1>
 
       {/* Resume rail, above everything and independent of the section you're

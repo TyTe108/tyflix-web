@@ -73,7 +73,8 @@ export function HomePage() {
   }
 
   return (
-    <main className="page">
+    // The page stays centred until its own layout lands. Phase 52.13 removes page-centered.
+    <main className="page page-centered">
       <h1>Tyflix</h1>
 
       <p>

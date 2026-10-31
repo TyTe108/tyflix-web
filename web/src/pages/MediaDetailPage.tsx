@@ -203,7 +203,8 @@ export function MediaDetailPage() {
   }, [mediaType, id, reloadKey]);
 
   return (
-    <main className="page page-wide">
+    // The page stays centred until its own layout lands. Phase 52.5 removes page-centered.
+    <main className="page page-wide page-centered">
       <header className="row">{backControl}</header>
 
       {status === "loading" ? (
