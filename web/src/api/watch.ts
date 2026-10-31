@@ -248,6 +248,20 @@ export type Episode = {
   seasonNumber: number;
   episodeNumber: number;
   title: string;
+  /** Plex image path, or null when the episode has no thumb. */
+  thumb: string | null;
+  /** Summary text. Null when Plex omits it. */
+  summary: string | null;
+  /** Runtime in milliseconds. Null when Plex omits it. */
+  durationMs: number | null;
+  /** originallyAvailableAt as Plex sent it, for example "2024-02-22". Null when it isn't a string. */
+  airDate: string | null;
+  /** Content rating such as "TV-PG". Null when Plex omits it. */
+  contentRating: string | null;
+  /** Milliseconds into the episode for the signed-in account. Null when that account has no position, including when the session has no Plex token. */
+  viewOffset: number | null;
+  /** Finished plays for the signed-in account. Null when Plex omits it, including when the session has no Plex token. */
+  viewCount: number | null;
 };
 
 // What auto-advances after the current episode. `thumb` is a Plex image path,
@@ -273,9 +287,9 @@ export type EpisodesResponse = {
 /**
  * GET /api/watch/tv/:tmdbId/episodes. The flat episode list for a show.
  *
- * These rows carry no per-user watch state. The server lists with the server
- * token rather than the caller's, so don't read anything into a missing
- * viewOffset here.
+ * Each row carries the episode's thumb, summary, runtime, air date and content
+ * rating, plus the caller's own watch state. viewOffset and viewCount are null
+ * when the session has no Plex token.
  *
  * Defensive on the way out: a missing showRatingKey becomes "" and a missing
  * episodes array becomes [], so a half-formed response degrades to an empty

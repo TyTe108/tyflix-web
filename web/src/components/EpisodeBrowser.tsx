@@ -1,5 +1,8 @@
-// The Seasons block on a TV show's detail page: every episode Plex actually
-// holds, grouped by season, each with a Play link.
+// Episodes on a TV show's title page. A Season dropdown picks one season, and
+// the default is the lowest numbered season, or Specials when that is the only
+// season. Each episode is one tile, and the whole tile is the Play link.
+// Layout is CSS: a horizontal snap rail in the desktop shell, a full-width
+// stack on phones.
 //
 // MediaDetailPage renders this only for shows that resolved to something on the
 // server. It's keyed on TMDB id, and the backend does the TMDB-to-Plex join, so
@@ -11,7 +14,11 @@
 // detail page alone.
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
+import { formatRuntime } from "../api/discover";
+import { libraryImageUrl } from "../api/library";
 import { fetchEpisodes, type Episode } from "../api/watch";
+import { Dropdown } from "./Dropdown";
+import { WatchProgress } from "./WatchProgress";
 
 type LoadStatus = "loading" | "ready" | "error";
 
@@ -32,7 +39,59 @@ function groupBySeason(episodes: Episode[]): Array<[number, Episode[]]> {
 }
 
 /**
- * Season-by-season episode list for one show, fetched on mount.
+ * Seasons for the dropdown. Numbered seasons stay in ascending order and
+ * season 0, when present, is placed last so it can be labelled Specials.
+ */
+function orderedSeasons(episodes: Episode[]): Array<[number, Episode[]]> {
+  const grouped = groupBySeason(episodes);
+  return [
+    ...grouped.filter(([season]) => season !== 0),
+    ...grouped.filter(([season]) => season === 0),
+  ];
+}
+
+/**
+ * The tile's title line. An empty title becomes "Episode N" so the tile still
+ * names which episode it is.
+ */
+function episodeTitle(episode: Episode): string {
+  if (episode.title === "") {
+    return `Episode ${episode.episodeNumber}`;
+  }
+  return `${episode.episodeNumber}. ${episode.title}`;
+}
+
+/**
+ * The muted line under the title. Joins whichever of the content rating, a
+ * runtime of at least one minute, and a four-digit year are present. Returns
+ * null when none of them are, so the tile renders no meta line.
+ */
+function episodeMeta(episode: Episode): string | null {
+  const parts: string[] = [];
+  if (episode.contentRating) {
+    parts.push(episode.contentRating);
+  }
+  if (episode.durationMs !== null) {
+    const minutes = Math.round(episode.durationMs / 60_000);
+    if (minutes >= 1) {
+      parts.push(formatRuntime(minutes));
+    }
+  }
+  if (episode.airDate !== null && /^\d{4}/.test(episode.airDate)) {
+    parts.push(episode.airDate.slice(0, 4));
+  }
+  if (parts.length === 0) {
+    return null;
+  }
+  return parts.join(" · ");
+}
+
+/**
+ * Episode tiles for one show, one season at a time, fetched on mount.
+ *
+ * The dropdown defaults to the lowest numbered season, or Specials when season
+ * 0 is the only one. Choosing another season replaces the tiles. A new tmdbId
+ * goes back to that show's default.
  *
  * @param tmdbId The show's TMDB id. The backend maps it to a Plex show and
  * returns that show's episodes, so a TMDB id with nothing behind it on the
@@ -44,10 +103,17 @@ export function EpisodeBrowser({ tmdbId }: { tmdbId: number }) {
   const [error, setError] = useState<string | null>(null);
   // Bumping this re-runs the fetch effect. Retry has no other input to change.
   const [reloadKey, setReloadKey] = useState(0);
+  // Null means the show's default. A picked season lasts until the show
+  // changes, even when the next show has a season with the same number.
+  const [pickedSeason, setPickedSeason] = useState<number | null>(null);
 
   const retry = useCallback(() => {
     setReloadKey((n) => n + 1);
   }, []);
+
+  useEffect(() => {
+    setPickedSeason(null);
+  }, [tmdbId]);
 
   // Load the episode list. Fires on mount, on a switch to a different show, and
   // on Retry. The cancelled flag keeps a slow response from a previous show
@@ -81,14 +147,39 @@ export function EpisodeBrowser({ tmdbId }: { tmdbId: number }) {
     };
   }, [tmdbId, reloadKey]);
 
-  const seasons = groupBySeason(episodes);
+  const seasons = orderedSeasons(episodes);
+  const defaultSeason = seasons[0]?.[0] ?? null;
+  const selectedSeason =
+    pickedSeason !== null &&
+    seasons.some(([season]) => season === pickedSeason)
+      ? pickedSeason
+      : defaultSeason;
+  const visible =
+    selectedSeason === null
+      ? []
+      : (seasons.find(([season]) => season === selectedSeason)?.[1] ?? []);
 
   return (
     <section
       className="media-detail-seasons"
-      aria-labelledby="seasons-heading"
+      aria-labelledby="episodes-heading"
     >
-      <h2 id="seasons-heading">Seasons</h2>
+      <div className="episode-heading-row">
+        <h2 id="episodes-heading">Episodes</h2>
+        {status === "ready" && seasons.length > 0 && selectedSeason !== null ? (
+          <Dropdown
+            label="Season"
+            value={String(selectedSeason)}
+            options={seasons.map(([season]) => ({
+              value: String(season),
+              label: season === 0 ? "Specials" : `Season ${season}`,
+            }))}
+            onChange={(value) => {
+              setPickedSeason(Number(value));
+            }}
+          />
+        ) : null}
+      </div>
 
       {status === "loading" ? (
         <p className="muted">Loading episodes…</p>
@@ -105,36 +196,65 @@ export function EpisodeBrowser({ tmdbId }: { tmdbId: number }) {
 
       {/* Ready. An empty list means the show is on the server but no episode
           files are, which reads differently from a failed lookup. */}
-      {status === "ready" ? (
-        seasons.length === 0 ? (
-          <p className="muted">No episodes available.</p>
-        ) : (
-          <div className="episode-browser">
-            {seasons.map(([seasonNumber, seasonEpisodes]) => (
-              <div key={seasonNumber} className="episode-season">
-                <h3 className="episode-season-heading">
-                  Season {seasonNumber}
-                </h3>
-                <ul className="media-season-list episode-list">
-                  {seasonEpisodes.map((episode) => (
-                    <li key={episode.ratingKey} className="episode-row">
-                      <span className="episode-label">
-                        E{episode.episodeNumber} · {episode.title}
-                      </span>
-                      <Link
-                        className="btn"
-                        to={`/watch/episode/${episode.ratingKey}`}
-                        state={{ enterFullscreen: true }}
-                      >
-                        Play
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        )
+      {status === "ready" && seasons.length === 0 ? (
+        <p className="muted">No episodes available.</p>
+      ) : null}
+
+      {status === "ready" && visible.length > 0 ? (
+        <div className="episode-rail" key={`${tmdbId}-${selectedSeason}`}>
+          {visible.map((episode) => {
+            const title = episodeTitle(episode);
+            const meta = episodeMeta(episode);
+            return (
+              <Link
+                key={episode.ratingKey}
+                className="episode-tile"
+                to={`/watch/episode/${episode.ratingKey}`}
+                state={{ enterFullscreen: true }}
+              >
+                <div className="episode-thumb">
+                  {episode.thumb ? (
+                    <img
+                      src={libraryImageUrl(episode.thumb)}
+                      alt=""
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div
+                      className="media-poster-placeholder"
+                      aria-hidden="true"
+                    >
+                      No image
+                    </div>
+                  )}
+                  <div className="episode-thumb-shade" aria-hidden="true" />
+                  <svg
+                    className="episode-play"
+                    viewBox="0 0 24 24"
+                    width="24"
+                    height="24"
+                    aria-hidden="true"
+                  >
+                    <path d="M8 5v14l11-7z" fill="white" />
+                  </svg>
+                  <WatchProgress
+                    viewOffset={episode.viewOffset}
+                    viewCount={episode.viewCount}
+                    runtime={null}
+                    durationMs={episode.durationMs}
+                  />
+                </div>
+                <p className="episode-tile-title">{title}</p>
+                {meta !== null ? (
+                  <p className="episode-tile-meta">{meta}</p>
+                ) : null}
+                {episode.summary ? (
+                  <p className="episode-tile-summary">{episode.summary}</p>
+                ) : null}
+              </Link>
+            );
+          })}
+        </div>
       ) : null}
     </section>
   );
