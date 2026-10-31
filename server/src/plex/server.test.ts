@@ -25,6 +25,142 @@ function client() {
   return createPlexServerClient({ baseUrl: BASE_URL, token: TOKEN });
 }
 
+// Recorded from the Dell's Plex on 2026-10-31, show 608, trimmed, summaries
+// replaced. See S0 in the phase 52 spec.
+const s0AllLeaves = {
+  MediaContainer: {
+    size: 4,
+    Metadata: [
+      {
+        ratingKey: "610",
+        key: "/library/metadata/610",
+        parentRatingKey: "609",
+        grandparentRatingKey: "608",
+        type: "episode",
+        title: "Aang",
+        grandparentTitle: "Avatar: The Last Airbender (2024)",
+        parentTitle: "Season 1",
+        contentRating: "TV-PG",
+        summary: "S1E1 summary (placeholder; the recorded text is TMDB copy).",
+        index: 1,
+        parentIndex: 1,
+        audienceRating: 7.9,
+        viewCount: 1,
+        year: 2024,
+        thumb: "/library/metadata/610/thumb/1781094360",
+        parentThumb: "/library/metadata/609/thumb/1708854833",
+        grandparentThumb: "/library/metadata/608/thumb/1708854829",
+        duration: 3831083,
+        originallyAvailableAt: "2024-02-22",
+        addedAt: 1708854829,
+      },
+      {
+        ratingKey: "611",
+        key: "/library/metadata/611",
+        parentRatingKey: "609",
+        grandparentRatingKey: "608",
+        type: "episode",
+        title: "Warriors",
+        grandparentTitle: "Avatar: The Last Airbender (2024)",
+        parentTitle: "Season 1",
+        contentRating: "TV-PG",
+        summary: "S1E2 summary (placeholder; the recorded text is TMDB copy).",
+        index: 2,
+        parentIndex: 1,
+        audienceRating: 7.8,
+        viewCount: 1,
+        year: 2024,
+        thumb: "/library/metadata/611/thumb/1781094360",
+        parentThumb: "/library/metadata/609/thumb/1708854833",
+        grandparentThumb: "/library/metadata/608/thumb/1708854829",
+        duration: 2924291,
+        originallyAvailableAt: "2024-02-22",
+        addedAt: 1708854829,
+      },
+      {
+        ratingKey: "5830",
+        key: "/library/metadata/5830",
+        parentRatingKey: "5829",
+        grandparentRatingKey: "608",
+        type: "episode",
+        title: "Somewhere Safe",
+        grandparentTitle: "Avatar: The Last Airbender (2024)",
+        parentTitle: "Season 2",
+        contentRating: "TV-PG",
+        summary: "S2E1 summary (placeholder; the recorded text is TMDB copy).",
+        index: 1,
+        parentIndex: 2,
+        audienceRating: 7.1,
+        viewOffset: 2964032,
+        year: 2026,
+        thumb: "/library/metadata/5830/thumb/1782903810",
+        parentThumb: "/library/metadata/5829/thumb/1782561494",
+        grandparentThumb: "/library/metadata/608/thumb/1782398312",
+        duration: 4077504,
+        originallyAvailableAt: "2026-06-25",
+        addedAt: 1782398312,
+      },
+      {
+        ratingKey: "5831",
+        key: "/library/metadata/5831",
+        parentRatingKey: "5829",
+        grandparentRatingKey: "608",
+        type: "episode",
+        title: "A Fight, Once Begun",
+        grandparentTitle: "Avatar: The Last Airbender (2024)",
+        parentTitle: "Season 2",
+        contentRating: "TV-PG",
+        summary: "S2E2 summary (placeholder; the recorded text is TMDB copy).",
+        index: 2,
+        parentIndex: 2,
+        audienceRating: 7.5,
+        year: 2026,
+        thumb: "/library/metadata/5831/thumb/1782903810",
+        parentThumb: "/library/metadata/5829/thumb/1782561494",
+        grandparentThumb: "/library/metadata/608/thumb/1782398313",
+        duration: 4011249,
+        originallyAvailableAt: "2026-06-25",
+        addedAt: 1782398313,
+      },
+    ],
+  },
+};
+
+const s0EpisodeFields = [
+  {
+    summary: "S1E1 summary (placeholder; the recorded text is TMDB copy).",
+    durationMs: 3831083,
+    airDate: "2024-02-22",
+    contentRating: "TV-PG",
+  },
+  {
+    summary: "S1E2 summary (placeholder; the recorded text is TMDB copy).",
+    durationMs: 2924291,
+    airDate: "2024-02-22",
+    contentRating: "TV-PG",
+  },
+  {
+    summary: "S2E1 summary (placeholder; the recorded text is TMDB copy).",
+    durationMs: 4077504,
+    airDate: "2026-06-25",
+    contentRating: "TV-PG",
+  },
+  {
+    summary: "S2E2 summary (placeholder; the recorded text is TMDB copy).",
+    durationMs: 4011249,
+    airDate: "2026-06-25",
+    contentRating: "TV-PG",
+  },
+] as const;
+
+function requestUrl(input: Parameters<typeof fetch>[0]): string {
+  return typeof input === "string"
+    ? input
+    : input instanceof URL
+      ? input.toString()
+      : (input as Request).url;
+}
+
 describe("plexServer.episodes", () => {
   it("parses allLeaves into a sorted PlexEpisode[], skipping malformed leaves", async () => {
     let requestedUrl: string | null = null;
@@ -94,6 +230,12 @@ describe("plexServer.episodes", () => {
         episodeNumber: 1,
         title: "Pilot",
         thumb: "/library/metadata/201/thumb/1781154351",
+        summary: null,
+        durationMs: null,
+        airDate: null,
+        contentRating: null,
+        viewOffset: null,
+        viewCount: null,
       },
       {
         ratingKey: "202",
@@ -101,6 +243,12 @@ describe("plexServer.episodes", () => {
         episodeNumber: 2,
         title: "Second",
         thumb: null,
+        summary: null,
+        durationMs: null,
+        airDate: null,
+        contentRating: null,
+        viewOffset: null,
+        viewCount: null,
       },
       {
         ratingKey: "301",
@@ -108,6 +256,12 @@ describe("plexServer.episodes", () => {
         episodeNumber: 1,
         title: "Season Two Opener",
         thumb: "/library/metadata/301/thumb/99",
+        summary: null,
+        durationMs: null,
+        airDate: null,
+        contentRating: null,
+        viewOffset: null,
+        viewCount: null,
       },
     ]);
   });
@@ -129,6 +283,12 @@ describe("plexServer.episodes", () => {
         episodeNumber: 1,
         title: "",
         thumb: null,
+        summary: null,
+        durationMs: null,
+        airDate: null,
+        contentRating: null,
+        viewOffset: null,
+        viewCount: null,
       },
     ]);
   });
@@ -141,6 +301,370 @@ describe("plexServer.episodes", () => {
       assert.equal((err as { status?: number }).status, 503);
       return true;
     });
+  });
+
+  it("reads the S0 sample with the caller's token and watch state", async () => {
+    let requestedUrl: string | null = null;
+    let requestedToken: string | null = null;
+    globalThis.fetch = (async (
+      input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
+      requestedUrl = requestUrl(input);
+      requestedToken = new Headers(init?.headers).get("X-Plex-Token");
+      return jsonResponse(200, s0AllLeaves);
+    }) as typeof fetch;
+
+    const episodes = await client().episodes("608", "user-token");
+
+    assert.equal(requestedUrl, `${BASE_URL}/library/metadata/608/allLeaves`);
+    assert.equal(requestedToken, "user-token");
+    assert.equal(episodes.length, 4);
+    assert.deepEqual(
+      episodes.map((episode) => episode.ratingKey),
+      ["610", "611", "5830", "5831"],
+    );
+    assert.deepEqual(
+      episodes.map((episode) => ({
+        summary: episode.summary,
+        durationMs: episode.durationMs,
+        airDate: episode.airDate,
+        contentRating: episode.contentRating,
+      })),
+      [...s0EpisodeFields],
+    );
+    assert.deepEqual(
+      episodes.map((episode) => episode.viewCount),
+      [1, 1, null, null],
+    );
+    assert.deepEqual(
+      episodes.map((episode) => episode.viewOffset),
+      [null, null, 2964032, null],
+    );
+  });
+
+  it("nulls watch state when the list is read with the owner token", async () => {
+    let requestedToken: string | null = null;
+    globalThis.fetch = (async (
+      _input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
+      requestedToken = new Headers(init?.headers).get("X-Plex-Token");
+      return jsonResponse(200, s0AllLeaves);
+    }) as typeof fetch;
+
+    const episodes = await client().episodes("608");
+
+    assert.equal(requestedToken, TOKEN);
+    assert.deepEqual(
+      episodes.map((episode) => episode.viewOffset),
+      [null, null, null, null],
+    );
+    assert.deepEqual(
+      episodes.map((episode) => episode.viewCount),
+      [null, null, null, null],
+    );
+    assert.deepEqual(
+      episodes.map((episode) => ({
+        summary: episode.summary,
+        durationMs: episode.durationMs,
+        airDate: episode.airDate,
+        contentRating: episode.contentRating,
+      })),
+      [...s0EpisodeFields],
+    );
+  });
+
+  it("nulls a missing new field and still lists the row", async () => {
+    globalThis.fetch = (async () =>
+      jsonResponse(200, {
+        MediaContainer: {
+          Metadata: [
+            {
+              ratingKey: "1",
+              parentIndex: 1,
+              index: 1,
+              title: "No summary",
+              duration: 1000,
+              originallyAvailableAt: "2024-01-01",
+              contentRating: "TV-PG",
+              viewOffset: 10,
+              viewCount: 1,
+            },
+            {
+              ratingKey: "2",
+              parentIndex: 1,
+              index: 2,
+              title: "No duration",
+              summary: "text",
+              originallyAvailableAt: "2024-01-01",
+              contentRating: "TV-PG",
+              viewOffset: 10,
+              viewCount: 1,
+            },
+            {
+              ratingKey: "3",
+              parentIndex: 1,
+              index: 3,
+              title: "No air date",
+              summary: "text",
+              duration: 1000,
+              contentRating: "TV-PG",
+              viewOffset: 10,
+              viewCount: 1,
+            },
+            {
+              ratingKey: "4",
+              parentIndex: 1,
+              index: 4,
+              title: "No rating",
+              summary: "text",
+              duration: 1000,
+              originallyAvailableAt: "2024-01-01",
+              viewOffset: 10,
+              viewCount: 1,
+            },
+            {
+              ratingKey: "5",
+              parentIndex: 1,
+              index: 5,
+              title: "No offset",
+              summary: "text",
+              duration: 1000,
+              originallyAvailableAt: "2024-01-01",
+              contentRating: "TV-PG",
+              viewCount: 1,
+            },
+            {
+              ratingKey: "6",
+              parentIndex: 1,
+              index: 6,
+              title: "No count",
+              summary: "text",
+              duration: 1000,
+              originallyAvailableAt: "2024-01-01",
+              contentRating: "TV-PG",
+              viewOffset: 10,
+            },
+          ],
+        },
+      })) as typeof fetch;
+
+    const episodes = await client().episodes("608", "user-token");
+
+    assert.deepEqual(
+      episodes.map((episode) => ({
+        ratingKey: episode.ratingKey,
+        summary: episode.summary,
+        durationMs: episode.durationMs,
+        airDate: episode.airDate,
+        contentRating: episode.contentRating,
+        viewOffset: episode.viewOffset,
+        viewCount: episode.viewCount,
+      })),
+      [
+        {
+          ratingKey: "1",
+          summary: null,
+          durationMs: 1000,
+          airDate: "2024-01-01",
+          contentRating: "TV-PG",
+          viewOffset: 10,
+          viewCount: 1,
+        },
+        {
+          ratingKey: "2",
+          summary: "text",
+          durationMs: null,
+          airDate: "2024-01-01",
+          contentRating: "TV-PG",
+          viewOffset: 10,
+          viewCount: 1,
+        },
+        {
+          ratingKey: "3",
+          summary: "text",
+          durationMs: 1000,
+          airDate: null,
+          contentRating: "TV-PG",
+          viewOffset: 10,
+          viewCount: 1,
+        },
+        {
+          ratingKey: "4",
+          summary: "text",
+          durationMs: 1000,
+          airDate: "2024-01-01",
+          contentRating: null,
+          viewOffset: 10,
+          viewCount: 1,
+        },
+        {
+          ratingKey: "5",
+          summary: "text",
+          durationMs: 1000,
+          airDate: "2024-01-01",
+          contentRating: "TV-PG",
+          viewOffset: null,
+          viewCount: 1,
+        },
+        {
+          ratingKey: "6",
+          summary: "text",
+          durationMs: 1000,
+          airDate: "2024-01-01",
+          contentRating: "TV-PG",
+          viewOffset: 10,
+          viewCount: null,
+        },
+      ],
+    );
+  });
+
+  it("nulls a new field of the wrong type and still lists the row", async () => {
+    globalThis.fetch = (async () =>
+      jsonResponse(200, {
+        MediaContainer: {
+          Metadata: [
+            {
+              ratingKey: "1",
+              parentIndex: 1,
+              index: 1,
+              title: "Summary number",
+              summary: 12,
+              duration: 1000,
+              originallyAvailableAt: "2024-01-01",
+              contentRating: "TV-PG",
+              viewOffset: 10,
+              viewCount: 1,
+            },
+            {
+              ratingKey: "2",
+              parentIndex: 1,
+              index: 2,
+              title: "Duration string",
+              summary: "text",
+              duration: "3831083",
+              originallyAvailableAt: "2024-01-01",
+              contentRating: "TV-PG",
+              viewOffset: 10,
+              viewCount: 1,
+            },
+            {
+              ratingKey: "3",
+              parentIndex: 1,
+              index: 3,
+              title: "Air date number",
+              summary: "text",
+              duration: 1000,
+              originallyAvailableAt: 20240101,
+              contentRating: "TV-PG",
+              viewOffset: 10,
+              viewCount: 1,
+            },
+            {
+              ratingKey: "4",
+              parentIndex: 1,
+              index: 4,
+              title: "Rating number",
+              summary: "text",
+              duration: 1000,
+              originallyAvailableAt: "2024-01-01",
+              contentRating: 14,
+              viewOffset: 10,
+              viewCount: 1,
+            },
+            {
+              ratingKey: "5",
+              parentIndex: 1,
+              index: 5,
+              title: "Offset string",
+              summary: "text",
+              duration: 1000,
+              originallyAvailableAt: "2024-01-01",
+              contentRating: "TV-PG",
+              viewOffset: "2964032",
+              viewCount: 1,
+            },
+            {
+              ratingKey: "6",
+              parentIndex: 1,
+              index: 6,
+              title: "Count string",
+              summary: "text",
+              duration: 1000,
+              originallyAvailableAt: "2024-01-01",
+              contentRating: "TV-PG",
+              viewOffset: 10,
+              viewCount: "1",
+            },
+          ],
+        },
+      })) as typeof fetch;
+
+    const episodes = await client().episodes("608", "user-token");
+
+    assert.equal(episodes.length, 6);
+    assert.deepEqual(
+      episodes.map((episode) => ({
+        summary: episode.summary,
+        durationMs: episode.durationMs,
+        airDate: episode.airDate,
+        contentRating: episode.contentRating,
+        viewOffset: episode.viewOffset,
+        viewCount: episode.viewCount,
+      })),
+      [
+        {
+          summary: null,
+          durationMs: 1000,
+          airDate: "2024-01-01",
+          contentRating: "TV-PG",
+          viewOffset: 10,
+          viewCount: 1,
+        },
+        {
+          summary: "text",
+          durationMs: null,
+          airDate: "2024-01-01",
+          contentRating: "TV-PG",
+          viewOffset: 10,
+          viewCount: 1,
+        },
+        {
+          summary: "text",
+          durationMs: 1000,
+          airDate: null,
+          contentRating: "TV-PG",
+          viewOffset: 10,
+          viewCount: 1,
+        },
+        {
+          summary: "text",
+          durationMs: 1000,
+          airDate: "2024-01-01",
+          contentRating: null,
+          viewOffset: 10,
+          viewCount: 1,
+        },
+        {
+          summary: "text",
+          durationMs: 1000,
+          airDate: "2024-01-01",
+          contentRating: "TV-PG",
+          viewOffset: null,
+          viewCount: 1,
+        },
+        {
+          summary: "text",
+          durationMs: 1000,
+          airDate: "2024-01-01",
+          contentRating: "TV-PG",
+          viewOffset: 10,
+          viewCount: null,
+        },
+      ],
+    );
   });
 });
 
@@ -300,6 +824,33 @@ describe("plexServer.nextEpisode", () => {
       episodeNumber: 1,
       title: "Pilot",
       thumb: null,
+    });
+  });
+
+  it("returns the five list fields for the episode after 610 in the S0 sample", async () => {
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = requestUrl(input);
+      if (url === `${BASE_URL}/library/metadata/610`) {
+        return jsonResponse(200, {
+          MediaContainer: {
+            Metadata: [{ grandparentRatingKey: "608" }],
+          },
+        });
+      }
+      if (url === `${BASE_URL}/library/metadata/608/allLeaves`) {
+        return jsonResponse(200, s0AllLeaves);
+      }
+      return jsonResponse(404, {});
+    }) as typeof fetch;
+
+    const next = await client().nextEpisode("610");
+
+    assert.deepEqual(next, {
+      ratingKey: "611",
+      seasonNumber: 1,
+      episodeNumber: 2,
+      title: "Warriors",
+      thumb: "/library/metadata/611/thumb/1781094360",
     });
   });
 });
@@ -510,6 +1061,33 @@ describe("plexServer.previousEpisode", () => {
         "Plex server /library/metadata/9000/allLeaves failed (503)",
       );
       return true;
+    });
+  });
+
+  it("returns the five list fields for the episode before 5830 in the S0 sample", async () => {
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = requestUrl(input);
+      if (url === `${BASE_URL}/library/metadata/5830`) {
+        return jsonResponse(200, {
+          MediaContainer: {
+            Metadata: [{ grandparentRatingKey: "608" }],
+          },
+        });
+      }
+      if (url === `${BASE_URL}/library/metadata/608/allLeaves`) {
+        return jsonResponse(200, s0AllLeaves);
+      }
+      return jsonResponse(404, {});
+    }) as typeof fetch;
+
+    const previous = await client().previousEpisode("5830");
+
+    assert.deepEqual(previous, {
+      ratingKey: "611",
+      seasonNumber: 1,
+      episodeNumber: 2,
+      title: "Warriors",
+      thumb: "/library/metadata/611/thumb/1781094360",
     });
   });
 });

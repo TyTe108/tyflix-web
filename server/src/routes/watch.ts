@@ -3,7 +3,7 @@
 //
 //   GET /continue                     the Continue Watching rail
 //   GET /movie/:tmdbId                play descriptor for a movie, by TMDB id
-//   GET /tv/:tmdbId/episodes          episode list for a show
+//   GET /tv/:tmdbId/episodes          episode list, with the caller's watch state
 //   GET /episode/:ratingKey           play descriptor for an episode
 //   GET /episode/:ratingKey/next      what auto-advances after this one
 //   GET /episode/:ratingKey/previous  the episode before this one
@@ -331,15 +331,15 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
    * GET /api/watch/tv/:tmdbId/episodes
    *
    * Flat episode list for a show, as `{ tmdbId, showRatingKey, episodes }`.
-   * The browser holds onto those ratingKeys and plays them through
+   * Each row includes summary, durationMs, airDate, contentRating, and the
+   * caller's viewOffset and viewCount. Those two are null when the session
+   * has no stored Plex token, and null for any field Plex leaves out. The
+   * browser holds onto those ratingKeys and plays them through
    * /episode/:ratingKey, which is why episodes are keyed on ratingKey and not
    * on season and episode numbers.
    *
    * 400 for a non-numeric tmdbId, 404 when Seerr has no show-level ratingKey,
-   * 502 if Plex fails.
-   *
-   * This one doesn't read the session. It lists with the server token, so the
-   * episode rows carry no per-user watch state.
+   * 502 if Plex fails or the caller's token can't be resolved.
    */
   router.get("/tv/:tmdbId/episodes", async (req, res) => {
     const tmdbIdRaw = req.params.tmdbId;
@@ -384,7 +384,19 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
         return;
       }
 
-      const episodes = await plexServer.episodes(showRatingKey);
+      const session = res.locals.session as SessionPayload | undefined;
+      let listToken: string | undefined;
+      if (session) {
+        const stored = readPlexToken(session, sessionSecret);
+        if (stored !== null) {
+          listToken = await resolvePmsToken(session.plexId, stored);
+        }
+      }
+
+      const episodes =
+        listToken === undefined
+          ? await plexServer.episodes(showRatingKey)
+          : await plexServer.episodes(showRatingKey, listToken);
       res.json({ tmdbId, showRatingKey, episodes });
     } catch (err) {
       respondUpstreamError(res, err);

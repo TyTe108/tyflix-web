@@ -70,6 +70,8 @@ export type PlexItem = {
 };
 
 // One episode row for the player's episode list and for Up Next.
+// viewOffset and viewCount belong to whichever account listed the show, and
+// are null when it was listed without a user token.
 export type PlexEpisode = {
   ratingKey: string;
   seasonNumber: number;
@@ -78,7 +80,28 @@ export type PlexEpisode = {
   // Plex-relative image path like /library/metadata/201/thumb/1781154351, not a
   // full URL. That's exactly the shape GET /api/library/image accepts.
   thumb: string | null;
+  /** Plex's summary text. Null when the leaf omits it or sends another type. */
+  summary: string | null;
+  /** Plex's duration, in milliseconds. */
+  durationMs: number | null;
+  /** Plex's originallyAvailableAt, exactly as sent. Null when it isn't a string. */
+  airDate: string | null;
+  /** Plex's contentRating. Null when the leaf omits it or sends another type. */
+  contentRating: string | null;
+  /** Milliseconds into the episode for the account that listed the show. */
+  viewOffset: number | null;
+  /** Times the account that listed the show has finished the episode. */
+  viewCount: number | null;
 };
+
+/**
+ * The five fields /next and /previous send. List rows carry more, and these
+ * two routes keep the body they had before that.
+ */
+export type AdjacentEpisode = Pick<
+  PlexEpisode,
+  "ratingKey" | "seasonNumber" | "episodeNumber" | "title" | "thumb"
+>;
 
 // One audio track on the part being played. `id` is Plex's stream id, which is
 // what goes back as audioStreamID on a transcode URL.
@@ -498,6 +521,15 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
   /**
    * Every episode of a show, in season then episode order.
    *
+   * Pass userToken to list as that account, through getJsonWithToken.
+   * viewOffset and viewCount are then that account's. Without userToken the
+   * list uses the owner token and both watch fields are null on every row,
+   * whatever the response carries.
+   *
+   * summary, durationMs, airDate and contentRating are Plex's values when the
+   * leaf sends the expected type, and null otherwise. A missing or mistyped
+   * field does not throw and does not become 0 or "".
+   *
    * Season and episode numbers live in Plex's `parentIndex` and `index`, which
    * is the naming most people have to look up once. A leaf missing either one
    * gets dropped rather than guessed at, so it won't show up in the episode
@@ -505,10 +537,15 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
    *
    * @throws PlexServerUpstreamError when the allLeaves request fails.
    */
-  async function episodes(showRatingKey: string): Promise<PlexEpisode[]> {
-    const leavesBody = await getJson(
-      `/library/metadata/${showRatingKey}/allLeaves`,
-    );
+  async function episodes(
+    showRatingKey: string,
+    userToken?: string,
+  ): Promise<PlexEpisode[]> {
+    const path = `/library/metadata/${showRatingKey}/allLeaves`;
+    const leavesBody =
+      userToken !== undefined
+        ? await getJsonWithToken(path, userToken)
+        : await getJson(path);
     const leaves = asArray(mediaContainer(leavesBody)?.Metadata);
     const result: PlexEpisode[] = [];
 
@@ -521,6 +558,13 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
       const episode = (row as { index?: unknown }).index;
       const title = (row as { title?: unknown }).title;
       const thumb = (row as { thumb?: unknown }).thumb;
+      const summaryRaw = (row as { summary?: unknown }).summary;
+      const durationRaw = (row as { duration?: unknown }).duration;
+      const airDateRaw = (row as { originallyAvailableAt?: unknown })
+        .originallyAvailableAt;
+      const contentRatingRaw = (row as { contentRating?: unknown }).contentRating;
+      const viewOffsetRaw = (row as { viewOffset?: unknown }).viewOffset;
+      const viewCountRaw = (row as { viewCount?: unknown }).viewCount;
       if (
         rk === undefined ||
         rk === null ||
@@ -535,6 +579,23 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
         episodeNumber: episode,
         title: typeof title === "string" ? title : "",
         thumb: typeof thumb === "string" ? thumb : null,
+        summary: typeof summaryRaw === "string" ? summaryRaw : null,
+        durationMs: typeof durationRaw === "number" ? durationRaw : null,
+        airDate: typeof airDateRaw === "string" ? airDateRaw : null,
+        contentRating:
+          typeof contentRatingRaw === "string" ? contentRatingRaw : null,
+        viewOffset:
+          userToken === undefined
+            ? null
+            : typeof viewOffsetRaw === "number"
+              ? viewOffsetRaw
+              : null,
+        viewCount:
+          userToken === undefined
+            ? null
+            : typeof viewCountRaw === "number"
+              ? viewCountRaw
+              : null,
       });
     }
 
@@ -592,6 +653,10 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
   /**
    * The episode that follows this one, or null when there isn't one.
    *
+   * Returns only ratingKey, seasonNumber, episodeNumber, title and thumb.
+   * The list rows carry watch state and the other fields, and /next keeps
+   * the five-field body it had before those were added.
+   *
    * Because it walks the show's full flattened leaf list, rolling from a season
    * finale into the next season's premiere falls out for free. Null means either
    * the end of the show or an episode Plex doesn't file under a show.
@@ -602,17 +667,22 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
    */
   async function nextEpisode(
     episodeRatingKey: string,
-  ): Promise<PlexEpisode | null> {
+  ): Promise<AdjacentEpisode | null> {
     const found = await episodeInShow(episodeRatingKey);
     // Not found is already null from the helper. This guard is the last leaf.
     if (found === null || found.index >= found.list.length - 1) {
       return null;
     }
-    return found.list[found.index + 1] ?? null;
+    const next = found.list[found.index + 1];
+    return next === undefined ? null : episodeLink(next);
   }
 
   /**
    * The episode that precedes this one, or null when there isn't one.
+   *
+   * Returns only ratingKey, seasonNumber, episodeNumber, title and thumb.
+   * The list rows carry watch state and the other fields, and /previous keeps
+   * the five-field body it had before those were added.
    *
    * Walks the same flattened leaf list as nextEpisode, so a season premiere's
    * previous episode is the previous season's finale. Null means the start of
@@ -630,7 +700,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
    */
   async function previousEpisode(
     episodeRatingKey: string,
-  ): Promise<PlexEpisode | null> {
+  ): Promise<AdjacentEpisode | null> {
     const found = await episodeInShow(episodeRatingKey);
     if (found === null || found.index === 0) {
       return null;
@@ -640,7 +710,17 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     if (current.seasonNumber > 0 && previous.seasonNumber === 0) {
       return null;
     }
-    return previous;
+    return episodeLink(previous);
+  }
+
+  function episodeLink(episode: PlexEpisode): AdjacentEpisode {
+    return {
+      ratingKey: episode.ratingKey,
+      seasonNumber: episode.seasonNumber,
+      episodeNumber: episode.episodeNumber,
+      title: episode.title,
+      thumb: episode.thumb,
+    };
   }
 
   /**

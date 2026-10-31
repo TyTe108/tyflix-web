@@ -703,6 +703,12 @@ describe("GET /api/watch/tv/:tmdbId/episodes", () => {
         episodeNumber: 1,
         title: "Pilot",
         thumb: null,
+        summary: null,
+        durationMs: null,
+        airDate: null,
+        contentRating: null,
+        viewOffset: null,
+        viewCount: null,
       },
       {
         ratingKey: "202",
@@ -710,6 +716,12 @@ describe("GET /api/watch/tv/:tmdbId/episodes", () => {
         episodeNumber: 2,
         title: "Second",
         thumb: "/library/metadata/202/thumb/1",
+        summary: null,
+        durationMs: null,
+        airDate: null,
+        contentRating: null,
+        viewOffset: null,
+        viewCount: null,
       },
     ];
     let ratingKeyArgs: [string, number] | null = null;
@@ -771,6 +783,147 @@ describe("GET /api/watch/tv/:tmdbId/episodes", () => {
     );
 
     assert.equal(response.status, 502);
+  });
+
+  it("lists with the shared server token for a session that has one", async () => {
+    let episodesArgs: unknown[] | null = null;
+    let resolvedPlexId: number | null = null;
+    const deps = baseDeps();
+    deps.sharedServerAccess = {
+      async resolveAccessToken(plexId: number) {
+        resolvedPlexId = plexId;
+        return SHARED_TOKEN;
+      },
+    } as SharedServerAccessResolver;
+    deps.plexServer = {
+      async episodes(...args: unknown[]) {
+        episodesArgs = args;
+        return [];
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/tv/1399/episodes",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(episodesArgs, ["12345", SHARED_TOKEN]);
+    assert.equal(resolvedPlexId, 10);
+  });
+
+  it("lists with the session token when the account is not shared", async () => {
+    let episodesArgs: unknown[] | null = null;
+    const deps = baseDeps();
+    deps.plexServer = {
+      async episodes(...args: unknown[]) {
+        episodesArgs = args;
+        return [];
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/tv/1399/episodes",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(episodesArgs, ["12345", USER_TOKEN]);
+  });
+
+  it("lists with no user token when the session stores none", async () => {
+    let episodesArgs: unknown[] | null = null;
+    let resolverCalled = false;
+    const deps = baseDeps();
+    deps.sharedServerAccess = {
+      async resolveAccessToken() {
+        resolverCalled = true;
+        return SHARED_TOKEN;
+      },
+    } as SharedServerAccessResolver;
+    deps.plexServer = {
+      async episodes(...args: unknown[]) {
+        episodesArgs = args;
+        return [];
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/tv/1399/episodes",
+      sessionCookie(),
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(episodesArgs, ["12345"]);
+    assert.equal(episodesArgs?.[1], undefined);
+    assert.equal(resolverCalled, false);
+  });
+
+  it("returns 502 and does not list when token resolution throws", async () => {
+    let episodesCalled = false;
+    const deps = baseDeps();
+    deps.sharedServerAccess = {
+      async resolveAccessToken() {
+        throw new Error("token map down");
+      },
+    } as SharedServerAccessResolver;
+    deps.plexServer = {
+      async episodes() {
+        episodesCalled = true;
+        return [];
+      },
+    } as unknown as PlexServerClient;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/tv/1399/episodes",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 502);
+    assert.equal(episodesCalled, false);
+  });
+
+  it("does not resolve a token when the show ratingKey is missing", async () => {
+    let resolverCalled = false;
+    const deps = baseDeps();
+    deps.mediaStatus = {
+      async getStatusMap() {
+        return new Map();
+      },
+      async getMediaId() {
+        return null;
+      },
+      async getRatingKey() {
+        return null;
+      },
+      async getMediaRow() {
+        return null;
+      },
+    } as MediaStatusProvider;
+    deps.sharedServerAccess = {
+      async resolveAccessToken() {
+        resolverCalled = true;
+        return SHARED_TOKEN;
+      },
+    } as SharedServerAccessResolver;
+
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/tv/194916/episodes",
+      sessionCookie({ plexToken: USER_TOKEN }),
+    );
+
+    assert.equal(response.status, 404);
+    assert.equal(resolverCalled, false);
   });
 });
 
