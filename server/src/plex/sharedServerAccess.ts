@@ -90,10 +90,14 @@ export function createSharedServerAccessResolver(
   // Same /identity call connection.ts makes. Duplicated rather than shared, and
   // sharing.ts has a third copy.
   async function fetchMachineIdentifier(): Promise<string> {
-    const body = await getJson(`${baseUrl}/identity`, {
-      "X-Plex-Token": ownerToken,
-      Accept: "application/json",
-    });
+    const body = await getJson(
+      `${baseUrl}/identity`,
+      {
+        "X-Plex-Token": ownerToken,
+        Accept: "application/json",
+      },
+      "Plex /identity",
+    );
 
     // Unwrap MediaContainer a level at a time so a missing layer reads as
     // absent instead of throwing.
@@ -119,23 +123,30 @@ export function createSharedServerAccessResolver(
   async function fetchSharedServerAccess(
     machineIdentifier: string,
   ): Promise<Map<number, string>> {
-    // Token rides in the query string here. sharing.ts hits this same endpoint
-    // with an X-Plex-Token header instead, so the two files disagree on style.
-    const url =
-      `https://plex.tv/api/servers/${machineIdentifier}/shared_servers` +
-      `?X-Plex-Token=${encodeURIComponent(ownerToken)}`;
+    // Token rides in a header, as in sharing.ts. The URL ends up in error
+    // messages, which respondUpstreamError sends to the browser and to the log.
+    const url = `https://plex.tv/api/servers/${machineIdentifier}/shared_servers`;
 
-    const body = await getText(url, {
-      "X-Plex-Client-Identifier": clientId,
-    });
+    const body = await getText(
+      url,
+      {
+        "X-Plex-Token": ownerToken,
+        "X-Plex-Client-Identifier": clientId,
+      },
+      "plex.tv shared_servers",
+    );
 
     return parseSharedServerAccess(body);
   }
 
   // JSON reader for /identity. Wraps every failure as PlexSharedServerAccessError.
+  // The message names the call and the status and never carries the URL or a
+  // token, because respondUpstreamError sends it to the browser and to the log.
   async function getJson(
     url: string,
     headers: Record<string, string>,
+    /** Name of this call, used in the error instead of the request URL. */
+    call: string,
   ): Promise<unknown> {
     let res: Response;
     try {
@@ -149,19 +160,21 @@ export function createSharedServerAccessResolver(
     }
 
     if (!res.ok) {
-      throw new PlexSharedServerAccessError(
-        `Plex request ${url} failed (${res.status})`,
-      );
+      throw new PlexSharedServerAccessError(`${call} failed (${res.status})`);
     }
 
     return res.json();
   }
 
   // Same as getJson except it hands back the raw body. shared_servers only ever
-  // answers XML, so there's nothing to parse as JSON.
+  // answers XML, so there's nothing to parse as JSON. The message names the
+  // call and the status and never carries the URL or a token, because
+  // respondUpstreamError sends it to the browser and to the log.
   async function getText(
     url: string,
     headers: Record<string, string>,
+    /** Name of this call, used in the error instead of the request URL. */
+    call: string,
   ): Promise<string> {
     let res: Response;
     try {
@@ -175,9 +188,7 @@ export function createSharedServerAccessResolver(
     }
 
     if (!res.ok) {
-      throw new PlexSharedServerAccessError(
-        `Plex request ${url} failed (${res.status})`,
-      );
+      throw new PlexSharedServerAccessError(`${call} failed (${res.status})`);
     }
 
     return res.text();

@@ -53,14 +53,22 @@ type StubHandlers = {
 // Routes /identity and plex.tv shared_servers to canned responses and records
 // how many times each was hit (to prove caching).
 function stubFetch(handlers: StubHandlers = {}) {
-  const calls = { identity: 0, sharedServers: 0 };
-  globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+  const calls = {
+    identity: 0,
+    sharedServers: 0,
+    requests: [] as { url: string; headers: Headers }[],
+  };
+  globalThis.fetch = (async (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
     const url =
       typeof input === "string"
         ? input
         : input instanceof URL
           ? input.toString()
           : (input as Request).url;
+    calls.requests.push({ url, headers: new Headers(init?.headers) });
 
     if (url.includes("/identity")) {
       calls.identity += 1;
@@ -173,6 +181,61 @@ describe("createSharedServerAccessResolver", () => {
     await assert.rejects(
       () => resolver().resolveAccessToken(101),
       (err: unknown) => err instanceof PlexSharedServerAccessError,
+    );
+  });
+
+  // Guards the owner token: shared_servers must send it as a header, not in the URL.
+  it("requests shared_servers with the owner token in a header and no query string", async () => {
+    const calls = stubFetch();
+
+    await resolver().resolveAccessToken(101);
+
+    const shared = calls.requests.find((call) =>
+      call.url.includes("/shared_servers"),
+    );
+    assert.ok(shared);
+    assert.equal(
+      shared.url,
+      "https://plex.tv/api/servers/machine-abc/shared_servers",
+    );
+    assert.equal(shared.headers.get("X-Plex-Token"), OWNER_TOKEN);
+    assert.equal(shared.headers.get("X-Plex-Client-Identifier"), CLIENT_ID);
+  });
+
+  // Guards the owner token: a non-OK shared_servers answer names the call and the status, not the URL.
+  it("names the status when shared_servers answers non-OK, without the owner token", async () => {
+    for (const status of [503, 429, 401]) {
+      stubFetch({
+        sharedServers: () => textResponse(status, "no"),
+      });
+
+      await assert.rejects(
+        () => resolver().resolveAccessToken(101),
+        (err: unknown) => {
+          assert.ok(err instanceof PlexSharedServerAccessError);
+          assert.equal(err.message, `plex.tv shared_servers failed (${status})`);
+          assert.equal(err.message.includes(OWNER_TOKEN), false);
+          return true;
+        },
+      );
+    }
+  });
+
+  // Guards the PMS address: a non-OK /identity answer names the call and the status, not the URL.
+  it("names the status when /identity answers non-OK, without the base URL or token", async () => {
+    stubFetch({
+      identity: () => jsonResponse(500, {}),
+    });
+
+    await assert.rejects(
+      () => resolver().resolveAccessToken(101),
+      (err: unknown) => {
+        assert.ok(err instanceof PlexSharedServerAccessError);
+        assert.equal(err.message, "Plex /identity failed (500)");
+        assert.equal(err.message.includes(OWNER_TOKEN), false);
+        assert.equal(err.message.includes(BASE_URL), false);
+        return true;
+      },
     );
   });
 });

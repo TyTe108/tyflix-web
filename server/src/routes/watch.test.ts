@@ -9,7 +9,10 @@ import {
   type PlexEpisode,
   type PlexServerClient,
 } from "../plex/server";
-import type { SharedServerAccessResolver } from "../plex/sharedServerAccess";
+import {
+  createSharedServerAccessResolver,
+  type SharedServerAccessResolver,
+} from "../plex/sharedServerAccess";
 import type { TransientTokenMinter } from "../plex/transientToken";
 import type { MediaStatusProvider } from "../seerr/mediaStatusProvider";
 import type { SeerrMediaListItem } from "../seerr/client";
@@ -924,6 +927,74 @@ describe("GET /api/watch/tv/:tmdbId/episodes", () => {
 
     assert.equal(response.status, 404);
     assert.equal(resolverCalled, false);
+  });
+
+  // Guards the owner token: a plex.tv failure must not put it in the 502 body.
+  it("answers 502 without the owner token when plex.tv rejects shared_servers", async () => {
+    const ownerToken = "owner-token-must-not-leak";
+    const originalFetch = globalThis.fetch;
+    let episodesCalled = false;
+    const deps = baseDeps();
+    deps.sharedServerAccess = createSharedServerAccessResolver({
+      baseUrl: "http://10.0.0.10:32400",
+      ownerToken,
+      clientId: CLIENT_ID,
+    });
+    deps.plexServer = {
+      async episodes() {
+        episodesCalled = true;
+        return [];
+      },
+    } as unknown as PlexServerClient;
+
+    globalThis.fetch = (async (
+      input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      if (url.startsWith("http://127.0.0.1:")) {
+        return originalFetch(input, init);
+      }
+      if (url.includes("/identity")) {
+        return new Response(
+          JSON.stringify({
+            MediaContainer: { machineIdentifier: "machine-abc" },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+      if (url.startsWith("https://plex.tv/")) {
+        return new Response("no", { status: 503 });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    try {
+      const app = createApp(deps);
+      const response = await fetchLocal(
+        app,
+        "/api/watch/tv/1399/episodes",
+        sessionCookie({ plexToken: USER_TOKEN }),
+      );
+      const text = await response.text();
+
+      assert.equal(response.status, 502);
+      assert.deepEqual(JSON.parse(text), {
+        error: "plex.tv shared_servers failed (503)",
+      });
+      assert.equal(text.includes(ownerToken), false);
+      assert.equal(episodesCalled, false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
