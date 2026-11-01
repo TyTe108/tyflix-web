@@ -1,8 +1,11 @@
-// The title page: hero art, overview, cast and crew, availability, and one
-// primary button that's either Play or Request depending on what the server
-// already has. Rendered at /media/:type/:id by App.tsx, inside ProtectedRoute
-// and AppShell, where :type is "movie" or "tv" and :id is a TMDB id. Nearly
-// every poster in the app links here.
+// The title page. It opens with an edge-to-edge hero: an overlay at 48rem and
+// up, and a 16:9 band with the title block below it on phones. The hero holds
+// Back, the tag row, the title, the collection link, genres, runtime, Play and
+// Request, the overview and the crew line. Manage, Report an issue, episodes
+// or seasons, cast and more like this sit below the hero. Rendered at
+// /media/:type/:id by App.tsx, inside ProtectedRoute and AppShell, where :type
+// is "movie" or "tv" and :id is a TMDB id. Nearly every poster in the app
+// links here.
 //
 // Six endpoints across three API modules. api/discover.ts supplies the detail
 // (/api/discover/movie/:id or /tv/:id), the credits and the recommendations.
@@ -22,6 +25,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type ReactNode,
 } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { isLandingState } from "../lib/landing";
@@ -202,10 +206,13 @@ export function MediaDetailPage() {
     };
   }, [mediaType, id, reloadKey]);
 
+  const ready = status === "ready" && detail !== null;
+
   return (
-    // The page stays centred until its own layout lands. Phase 52.5 removes page-centered.
-    <main className="page page-wide page-centered">
-      <header className="row">{backControl}</header>
+    // page-hero starts the page under the top bar only once the hero renders,
+    // so loading and error keep the normal frame.
+    <main className={ready ? "page page-full page-hero" : "page page-full"}>
+      {ready ? null : <header className="row">{backControl}</header>}
 
       {status === "loading" ? (
         <p className="muted">Loading…</p>
@@ -226,19 +233,26 @@ export function MediaDetailPage() {
         </div>
       ) : null}
 
-      {status === "ready" && detail !== null ? (
-        <DetailBody detail={detail} />
+      {ready && detail !== null ? (
+        <DetailBody detail={detail} backControl={backControl} />
       ) : null}
     </main>
   );
 }
 
-// Everything below the fold once the detail has loaded. Split out from the
-// parent so credits and recommendations can load on their own clock without
-// the page sitting in a loading state waiting for them.
-function DetailBody({ detail }: { detail: MediaDetail }) {
-  // Wide backdrop for the hero, poster as the fallback, placeholder if TMDB
-  // has neither.
+// The loaded title. Credits and recommendations fetch on their own clock so
+// the page doesn't wait on them. One header serves both shells: on the
+// desktop shell the art is absolute behind the info block, and on phones the
+// same art is a 16:9 band with the info block under it. Back moves into the
+// hero so the pill sits on the art. Loading and error keep the header row.
+function DetailBody({
+  detail,
+  backControl,
+}: {
+  detail: MediaDetail;
+  backControl: ReactNode;
+}) {
+  // Backdrop, then poster, then no image. The art node stays either way.
   const heroUrl = detail.backdropUrl ?? detail.posterUrl;
   const yearLabel = detail.year !== null ? ` (${detail.year})` : "";
   const [recommendations, setRecommendations] = useState<MediaSummary[]>([]);
@@ -306,204 +320,205 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
 
   return (
     <article className="media-detail">
-      <div className="media-detail-hero">
-        {heroUrl ? (
-          <img src={heroUrl} alt="" className="media-detail-hero-img" />
-        ) : (
-          <div className="media-detail-hero-placeholder" aria-hidden="true">
-            No image
-          </div>
-        )}
-      </div>
-
-      {/* Tag row. Three separate things that read as one line: media type,
-          TMDB's production status ("Released", "Returning Series"), and
-          Seerr's availability. The last one is the only one that means
-          anything about this server. */}
-      <div className="media-detail-meta">
-        <p className="media-detail-tag-row">
-          <span className="stats-tag">
-            {detail.mediaType === "tv" ? "TV" : "Movie"}
-          </span>
-          {detail.status ? (
-            <span className="muted media-detail-status">{detail.status}</span>
+      <header className="media-hero">
+        <div className="media-hero-art" aria-hidden="true">
+          {heroUrl ? (
+            <img className="media-hero-img" alt="" src={heroUrl} />
           ) : null}
-          {detail.mediaStatus !== null ? (
-            <span className={mediaStatusBadgeClass(detail.mediaStatus)}>
-              {mediaStatusLabel(detail.mediaStatus)}
+          <div className="media-hero-protect" />
+        </div>
+        {backControl}
+        <div className="media-hero-info">
+          {/* Tag row. Three separate things that read as one line: media type,
+              TMDB's production status ("Released", "Returning Series"), and
+              Seerr's availability. The last one is the only one that means
+              anything about this server. */}
+          <p className="media-detail-tag-row">
+            <span className="stats-tag">
+              {detail.mediaType === "tv" ? "TV" : "Movie"}
             </span>
+            {detail.status ? (
+              <span className="muted media-detail-status">{detail.status}</span>
+            ) : null}
+            {detail.mediaStatus !== null ? (
+              <span className={mediaStatusBadgeClass(detail.mediaStatus)}>
+                {mediaStatusLabel(detail.mediaStatus)}
+              </span>
+            ) : null}
+          </p>
+
+          <h1>
+            {detail.title}
+            <span className="media-detail-year">{yearLabel}</span>
+          </h1>
+
+          {detail.mediaType === "movie" && detail.collection !== null ? (
+            <p className="media-detail-collection">
+              <Link to={`/collection/${detail.collection.id}`}>
+                Part of the {detail.collection.name}
+              </Link>
+            </p>
           ) : null}
-        </p>
 
-        <h1>
-          {detail.title}
-          <span className="media-detail-year">{yearLabel}</span>
-        </h1>
+          {detail.genres.length > 0 ? (
+            <p className="media-detail-genres muted">
+              {detail.genres.join(" · ")}
+            </p>
+          ) : null}
 
-        {currentCredits !== null && currentCredits.crew.length > 0 ? (
-          <CrewSummary crew={currentCredits.crew} />
-        ) : null}
+          {detail.mediaType === "movie" && detail.runtime !== null ? (
+            <p className="media-detail-runtime muted">
+              {formatRuntime(detail.runtime)}
+            </p>
+          ) : null}
 
-        {detail.mediaType === "movie" && detail.collection !== null ? (
-          <p className="media-detail-collection">
-            <Link to={`/collection/${detail.collection.id}`}>
-              Part of the {detail.collection.name}
-            </Link>
-          </p>
-        ) : null}
+          {/* The primary button, movie case. Play appears only once Seerr says
+              the file is there, and the link is keyed by TMDB id because
+              WatchPage does the TMDB-to-Plex resolution itself. Shows get the
+              equivalent through EpisodeBrowser further down, since there's no
+              single thing to play. */}
+          <div className="media-hero-actions">
+            {detail.mediaType === "movie" &&
+            (detail.mediaStatus === "available" ||
+              detail.mediaStatus === "partially_available") ? (
+              <Link
+                className="btn"
+                to={`/watch/movie/${detail.tmdbId}`}
+                state={{ enterFullscreen: true }}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+                Play
+              </Link>
+            ) : null}
+            {/* RequestControls decides for itself whether to render a button
+                or just a status badge. This is the local component further
+                down this file, not the filter bar of the same name in
+                components/. */}
+            <RequestControls detail={detail} />
+          </div>
 
-        {detail.genres.length > 0 ? (
-          <p className="media-detail-genres muted">
-            {detail.genres.join(" · ")}
-          </p>
-        ) : null}
+          {detail.overview ? (
+            <p className="media-detail-overview">{detail.overview}</p>
+          ) : (
+            <p className="media-detail-overview">No overview available.</p>
+          )}
 
-        {detail.mediaType === "movie" && detail.runtime !== null ? (
-          <p className="media-detail-runtime muted">
-            {formatRuntime(detail.runtime)}
-          </p>
-        ) : null}
+          {currentCredits !== null && currentCredits.crew.length > 0 ? (
+            <CrewSummary crew={currentCredits.crew} />
+          ) : null}
+        </div>
+      </header>
 
-        {detail.overview ? (
-          <p className="media-detail-overview">{detail.overview}</p>
-        ) : (
-          <p className="muted">No overview available.</p>
-        )}
+      {/* Admin-only Manage entry. Calls useAuth itself, same shape as
+          ReportIssueControls further down. */}
+      <ManageMediaControls detail={detail} />
 
-        {/* The primary button, movie case. Play appears only once Seerr says
-            the file is there, and the link is keyed by TMDB id because
-            WatchPage does the TMDB-to-Plex resolution itself. Shows get the
-            equivalent through EpisodeBrowser further down, since there's no
-            single thing to play. */}
-        {detail.mediaType === "movie" &&
-        (detail.mediaStatus === "available" ||
-          detail.mediaStatus === "partially_available") ? (
-          <p className="media-detail-play">
-            <Link
-              className="btn"
-              to={`/watch/movie/${detail.tmdbId}`}
-              state={{ enterFullscreen: true }}
-            >
-              ▶ Play
-            </Link>
-          </p>
-        ) : null}
+      {/* A null mediaStatus means Seerr has no record of this title, and an
+          issue has to attach to a Seerr media row, so the reporter is
+          hidden rather than offered and then rejected. */}
+      {detail.mediaStatus !== null ? (
+        <ReportIssueControls detail={detail} />
+      ) : null}
 
-        {/* Admin-only Manage entry. Calls useAuth itself, same shape as
-            ReportIssueControls further down. */}
-        <ManageMediaControls detail={detail} />
+      {/* Two mutually exclusive season blocks, and the split is the whole
+          TMDB-versus-Plex distinction in one place. A show that's on the
+          server gets EpisodeBrowser, which lists the episodes Plex actually
+          holds with real Play links. A show that isn't gets TMDB's season
+          summary, which is just names and counts with nothing to click. */}
+      {detail.mediaType === "tv" &&
+      (detail.mediaStatus === "available" ||
+        detail.mediaStatus === "partially_available") ? (
+        <EpisodeBrowser tmdbId={detail.tmdbId} />
+      ) : null}
 
-        {/* The other half of the primary action. RequestControls decides for
-            itself whether to render a button or just a status badge. Note
-            this is the local component further down this file, not the
-            filter bar of the same name in components/. */}
-        <RequestControls detail={detail} />
-
-        {/* A null mediaStatus means Seerr has no record of this title, and an
-            issue has to attach to a Seerr media row, so the reporter is
-            hidden rather than offered and then rejected. */}
-        {detail.mediaStatus !== null ? (
-          <ReportIssueControls detail={detail} />
-        ) : null}
-
-        {/* Cast strip. Each card links to /person/:id, and a missing headshot
-            falls back to the actor's initial. */}
-        {currentCredits !== null && currentCredits.cast.length > 0 ? (
-          <section
-            className="media-detail-cast"
-            aria-labelledby="cast-heading"
-          >
-            <h2 id="cast-heading">Cast</h2>
-            <ul className="media-cast-list">
-              {currentCredits.cast.map((person) => (
-                <li key={person.id}>
-                  <Link
-                    className="media-cast-card"
-                    to={`/person/${person.id}`}
-                  >
-                    {person.profileUrl !== null ? (
-                      <img
-                        className="media-cast-photo"
-                        src={person.profileUrl}
-                        alt=""
-                      />
-                    ) : (
-                      <div
-                        className="media-cast-photo media-cast-placeholder"
-                        aria-hidden="true"
-                      >
-                        {person.name.slice(0, 1)}
-                      </div>
-                    )}
-                    <span className="media-cast-name">{person.name}</span>
-                    {person.character ? (
-                      <span className="media-cast-character muted">
-                        {person.character}
-                      </span>
-                    ) : null}
-                  </Link>
+      {detail.mediaType === "tv" &&
+      detail.mediaStatus !== "available" &&
+      detail.mediaStatus !== "partially_available" ? (
+        <section
+          className="media-detail-seasons"
+          aria-labelledby="seasons-heading"
+        >
+          <h2 id="seasons-heading">Seasons</h2>
+          {detail.seasons.length === 0 ? (
+            <p className="muted">No seasons listed.</p>
+          ) : (
+            <ul className="media-season-list">
+              {detail.seasons.map((season) => (
+                <li key={season.seasonNumber}>
+                  <span className="media-season-name">{season.name}</span>
+                  <span className="muted">
+                    {season.episodeCount} episode
+                    {season.episodeCount === 1 ? "" : "s"}
+                  </span>
                 </li>
               ))}
             </ul>
-          </section>
-        ) : null}
+          )}
+        </section>
+      ) : null}
 
-        {/* Two mutually exclusive season blocks, and the split is the whole
-            TMDB-versus-Plex distinction in one place. A show that's on the
-            server gets EpisodeBrowser, which lists the episodes Plex actually
-            holds with real Play links. A show that isn't gets TMDB's season
-            summary, which is just names and counts with nothing to click. */}
-        {detail.mediaType === "tv" &&
-        (detail.mediaStatus === "available" ||
-          detail.mediaStatus === "partially_available") ? (
-          <EpisodeBrowser tmdbId={detail.tmdbId} />
-        ) : null}
-
-        {detail.mediaType === "tv" &&
-        detail.mediaStatus !== "available" &&
-        detail.mediaStatus !== "partially_available" ? (
-          <section
-            className="media-detail-seasons"
-            aria-labelledby="seasons-heading"
-          >
-            <h2 id="seasons-heading">Seasons</h2>
-            {detail.seasons.length === 0 ? (
-              <p className="muted">No seasons listed.</p>
-            ) : (
-              <ul className="media-season-list">
-                {detail.seasons.map((season) => (
-                  <li key={season.seasonNumber}>
-                    <span className="media-season-name">{season.name}</span>
-                    <span className="muted">
-                      {season.episodeCount} episode
-                      {season.episodeCount === 1 ? "" : "s"}
+      {/* Cast strip. Each card links to /person/:id, and a missing headshot
+          falls back to the actor's initial. */}
+      {currentCredits !== null && currentCredits.cast.length > 0 ? (
+        <section
+          className="media-detail-cast"
+          aria-labelledby="cast-heading"
+        >
+          <h2 id="cast-heading">Cast</h2>
+          <ul className="media-cast-list">
+            {currentCredits.cast.map((person) => (
+              <li key={person.id}>
+                <Link
+                  className="media-cast-card"
+                  to={`/person/${person.id}`}
+                >
+                  {person.profileUrl !== null ? (
+                    <img
+                      className="media-cast-photo"
+                      src={person.profileUrl}
+                      alt=""
+                    />
+                  ) : (
+                    <div
+                      className="media-cast-photo media-cast-placeholder"
+                      aria-hidden="true"
+                    >
+                      {person.name.slice(0, 1)}
+                    </div>
+                  )}
+                  <span className="media-cast-name">{person.name}</span>
+                  {person.character ? (
+                    <span className="media-cast-character muted">
+                      {person.character}
                     </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        ) : null}
+                  ) : null}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
-        {/* "More like this". These carry their own availability from Seerr,
-            so the status corners here are as accurate as the ones on
-            Discover. */}
-        {recommendations.length > 0 ? (
-          <section
-            className="media-detail-recommendations"
-            aria-labelledby="recommendations-heading"
-          >
-            <h2 id="recommendations-heading">More like this</h2>
-            <ul className="media-grid">
-              {recommendations.map((item) => (
-                <li key={`${item.mediaType}:${item.tmdbId}`}>
-                  <MediaCard item={item} />
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-      </div>
+      {/* "More like this". These carry their own availability from Seerr,
+          so the status corners here are as accurate as the ones on
+          Discover. */}
+      {recommendations.length > 0 ? (
+        <section
+          className="media-detail-recommendations"
+          aria-labelledby="recommendations-heading"
+        >
+          <h2 id="recommendations-heading">More like this</h2>
+          <ul className="media-grid">
+            {recommendations.map((item) => (
+              <li key={`${item.mediaType}:${item.tmdbId}`}>
+                <MediaCard item={item} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </article>
   );
 }

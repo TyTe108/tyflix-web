@@ -14,7 +14,14 @@ import {
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchMe } from "../api/auth";
-import { fetchMovie, fetchTv, type MovieDetail, type TvDetail } from "../api/discover";
+import {
+  fetchCredits,
+  fetchMovie,
+  fetchRecommendations,
+  fetchTv,
+  type MovieDetail,
+  type TvDetail,
+} from "../api/discover";
 import { AuthProvider } from "../auth/AuthContext";
 import { MediaDetailPage } from "./MediaDetailPage";
 
@@ -308,5 +315,259 @@ describe("MediaDetailPage Back control", () => {
       expect(back.getAttribute("href")).toBe("/");
     }
     expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+  });
+});
+
+function pageMain() {
+  return screen.getByRole("main");
+}
+
+describe("MediaDetailPage hero", () => {
+  afterEach(() => {
+    cleanup();
+    vi.mocked(fetchCredits).mockResolvedValue({ cast: [], crew: [] });
+    vi.mocked(fetchRecommendations).mockResolvedValue([]);
+  });
+
+  // Guards the frame: the hero class is only there once the title has loaded.
+  it("uses page-hero when ready, and the plain full page while loading", async () => {
+    vi.mocked(fetchMe).mockResolvedValue(meUser(false));
+    vi.mocked(fetchTv).mockReturnValue(new Promise<TvDetail>(() => {}));
+
+    const pending = renderDetail();
+    expect(pageMain().className).toBe("page page-full");
+    expect(screen.getByRole("link", { name: "Back" })).toBeTruthy();
+    expect(document.querySelector(".media-hero")).toBeNull();
+
+    pending.unmount();
+    vi.mocked(fetchTv).mockResolvedValue(tvDetail);
+    renderDetail();
+    expect(await screen.findByRole("heading", { name: /Breaking Bad/ })).toBeTruthy();
+    expect(pageMain().className).toBe("page page-full page-hero");
+  });
+
+  // Guards Back on a direct load: one link home, inside the hero, and no header row.
+  it("puts a single home link inside the hero on a direct load", async () => {
+    vi.mocked(fetchMe).mockResolvedValue(meUser(false));
+    vi.mocked(fetchTv).mockResolvedValue(tvDetail);
+    renderDetail();
+
+    expect(await screen.findByRole("heading", { name: /Breaking Bad/ })).toBeTruthy();
+    const hero = document.querySelector(".media-hero");
+    expect(hero).toBeTruthy();
+    const back = screen.getByRole("link", { name: "Back" });
+    expect(back.getAttribute("href")).toBe("/");
+    expect(hero!.contains(back)).toBe(true);
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    expect(document.querySelector("header.row")).toBeNull();
+  });
+
+  // Guards Back after in-app navigation: one button, inside the hero, and no header row.
+  it("puts a single Back button inside the hero after in-app navigation", async () => {
+    vi.mocked(fetchMe).mockResolvedValue(meUser(false));
+    vi.mocked(fetchTv).mockResolvedValue(tvDetail);
+    render(
+      <MemoryRouter initialEntries={["/library", "/media/tv/1396"]} initialIndex={1}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/media/:type/:id" element={<MediaDetailPage />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: /Breaking Bad/ })).toBeTruthy();
+    const hero = document.querySelector(".media-hero");
+    expect(hero).toBeTruthy();
+    const back = screen.getByRole("button", { name: "Back" });
+    expect(hero!.contains(back)).toBe(true);
+    expect(screen.queryByRole("link", { name: "Back" })).toBeNull();
+    expect(document.querySelector("header.row")).toBeNull();
+  });
+
+  // Guards the image chain's first choice: the backdrop is the hero image.
+  it("uses the backdrop as the hero image when both urls are set", async () => {
+    vi.mocked(fetchMe).mockResolvedValue(meUser(false));
+    vi.mocked(fetchMovie).mockResolvedValue({
+      ...movieDetail,
+      backdropUrl: "https://image.tmdb.org/t/p/w1280/br-bg.jpg",
+      posterUrl: "https://image.tmdb.org/t/p/w500/br.jpg",
+    });
+    render(
+      <MemoryRouter initialEntries={["/media/movie/550"]}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/media/:type/:id" element={<MediaDetailPage />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole("heading", { name: /Fight Club/ })).toBeTruthy();
+    expect(document.querySelector(".media-hero img")?.getAttribute("src")).toBe(
+      "https://image.tmdb.org/t/p/w1280/br-bg.jpg",
+    );
+  });
+
+  // Guards the image chain's second choice: the poster when there is no backdrop.
+  it("uses the poster as the hero image when only posterUrl is set", async () => {
+    vi.mocked(fetchMe).mockResolvedValue(meUser(false));
+    vi.mocked(fetchMovie).mockResolvedValue({
+      ...movieDetail,
+      backdropUrl: null,
+      posterUrl: "https://image.tmdb.org/t/p/w500/br.jpg",
+    });
+    render(
+      <MemoryRouter initialEntries={["/media/movie/550"]}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/media/:type/:id" element={<MediaDetailPage />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole("heading", { name: /Fight Club/ })).toBeTruthy();
+    expect(document.querySelector(".media-hero img")?.getAttribute("src")).toBe(
+      "https://image.tmdb.org/t/p/w500/br.jpg",
+    );
+  });
+
+  // Guards the image chain's last choice: no image and no placeholder text.
+  it("renders the hero art with no image when both urls are missing", async () => {
+    vi.mocked(fetchMe).mockResolvedValue(meUser(false));
+    vi.mocked(fetchMovie).mockResolvedValue({
+      ...movieDetail,
+      backdropUrl: null,
+      posterUrl: null,
+    });
+    render(
+      <MemoryRouter initialEntries={["/media/movie/550"]}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/media/:type/:id" element={<MediaDetailPage />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole("heading", { name: /Fight Club/ })).toBeTruthy();
+    const hero = document.querySelector(".media-hero");
+    expect(hero).toBeTruthy();
+    expect(hero!.querySelector("img")).toBeNull();
+    expect(hero!.textContent).not.toContain("No image");
+  });
+
+  // Guards the hero's reading order for a movie that can be played.
+  it("lays the movie title block out in the hero, with Play named Play", async () => {
+    vi.mocked(fetchMe).mockResolvedValue(meUser(false));
+    vi.mocked(fetchCredits).mockResolvedValue({
+      cast: [],
+      crew: [
+        {
+          id: 7,
+          name: "Ada Quinn",
+          job: "Director",
+          profileUrl: null,
+        },
+      ],
+    });
+    vi.mocked(fetchMovie).mockResolvedValue({
+      ...movieDetail,
+      title: "Bright River",
+      overview: "A long story.",
+      genres: ["Drama", "Thriller"],
+      runtime: 45,
+      collection: { id: 9, name: "River Set" },
+      mediaStatus: "available",
+    });
+    render(
+      <MemoryRouter initialEntries={["/media/movie/550"]}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/media/:type/:id" element={<MediaDetailPage />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    const info = (await screen.findByRole("heading", { name: /Bright River/ }))
+      .closest(".media-hero-info") as HTMLElement;
+    expect(info).toBeTruthy();
+    const tag = info.querySelector(".media-detail-tag-row")!;
+    const title = within(info).getByRole("heading", { level: 1 });
+    const collection = within(info).getByRole("link", { name: "Part of the River Set" });
+    const genres = within(info).getByText("Drama · Thriller");
+    const runtime = within(info).getByText("45m");
+    const actions = info.querySelector(".media-hero-actions")!;
+    const overview = within(info).getByText("A long story.");
+    const crew = await within(info).findByText("Directed by Ada Quinn");
+    const play = within(actions as HTMLElement).getByRole("link", { name: "Play" });
+    const request = actions.querySelector("section.request-controls")!;
+
+    const order = [tag, title, collection, genres, runtime, actions, overview, crew];
+    for (let i = 0; i < order.length - 1; i += 1) {
+      expect(
+        order[i]!.compareDocumentPosition(order[i + 1]!) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+    expect(
+      play.compareDocumentPosition(request) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  // Guards the sections under the hero: Manage, Report, Episodes, Cast, More like this.
+  it("places Manage, Report, Episodes, Cast and More like this after the hero", async () => {
+    vi.mocked(fetchMe).mockResolvedValue(meUser(true));
+    vi.mocked(fetchCredits).mockResolvedValue({
+      cast: [
+        {
+          id: 3,
+          name: "Actor One",
+          character: "Lead",
+          profileUrl: null,
+        },
+      ],
+      crew: [],
+    });
+    vi.mocked(fetchRecommendations).mockResolvedValue([
+      {
+        tmdbId: 2,
+        mediaType: "tv",
+        title: "Other Show",
+        year: 2001,
+        posterUrl: null,
+        overview: "Another.",
+        mediaStatus: null,
+      },
+    ]);
+    vi.mocked(fetchTv).mockResolvedValue({
+      ...tvDetail,
+      title: "North Line",
+      mediaStatus: "available",
+    });
+    renderDetail();
+
+    const hero = (await screen.findByRole("heading", { name: /North Line/ })).closest(
+      ".media-hero",
+    );
+    expect(hero).toBeTruthy();
+    const manage = await screen.findByRole("button", { name: "Manage" });
+    const report = await screen.findByRole("heading", { name: "Report an issue" });
+    const episodes = await screen.findByRole("heading", { name: "Episodes" });
+    const cast = await screen.findByRole("heading", { name: "Cast" });
+    const more = await screen.findByRole("heading", { name: "More like this" });
+
+    for (const node of [manage, report, episodes, cast, more]) {
+      expect(hero!.contains(node)).toBe(false);
+      expect(
+        hero!.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+    const below = [manage, report, episodes, cast, more];
+    for (let i = 0; i < below.length - 1; i += 1) {
+      expect(
+        below[i]!.compareDocumentPosition(below[i + 1]!) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
   });
 });

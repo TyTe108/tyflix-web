@@ -19,6 +19,22 @@
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.35);
   --shadow-2: 0 6px 20px rgba(0, 0, 0, 0.5);
   --hero-max-height: 26rem;
+  /* Side, diagonal, vignette and top scrims painted over the desktop hero. */
+  --hero-protect:
+    linear-gradient(to right, rgba(0, 0, 0, 0.45) 3%, rgba(0, 0, 0, 0.32) 20%, rgba(0, 0, 0, 0) 52%),
+    linear-gradient(115deg, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0.32) 30%, rgba(0, 0, 0, 0.1) 50%, rgba(0, 0, 0, 0) 70%),
+    radial-gradient(ellipse 90% 66% at 50% 37%, rgba(0, 0, 0, 0) 50%, rgba(0, 0, 0, 0.6) 100%),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0) 50%);
+  /* Vignette painted over the phone hero band. */
+  --hero-protect-phone: radial-gradient(ellipse 90% 66% at 50% 37%, rgba(0, 0, 0, 0) 50%, rgba(0, 0, 0, 0.5) 100%);
+  /* Mask for the desktop hero art. Opaque from 35% up, gone at the bottom edge. */
+  --hero-fade: linear-gradient(to top, transparent 0%, rgba(0, 0, 0, 0.4) 14%, black 35%);
+  /* Mask for the phone hero band. Opaque from 40% up. */
+  --hero-fade-phone: linear-gradient(to top, transparent 0%, black 40%);
+  /* Solid shade under the desktop title column. 0.70 by itself keeps 80%
+     white text at AA over a pure white image. 0.60 failed one with a long
+     overview. */
+  --hero-shade: rgba(0, 0, 0, 0.7);
   --transition: 150ms ease;
   --topbar-h: 4rem;
   --gutter: clamp(1rem, 4.2vw, 3.75rem);
@@ -3004,33 +3020,274 @@ a {
   margin-top: 1.25rem;
 }
 
-/* Keep the banner proportionate on wide desktop viewports. */
-.media-detail-hero {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  max-height: var(--hero-max-height);
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: var(--surface-2);
-  box-shadow: var(--shadow-1);
-  margin-bottom: 1.25rem;
+/*
+ * Title-page hero. The art fades out with a mask so the ambient layer shows
+ * through at the bottom edge. A fade painted in --bg would step: the live
+ * title page at 1470x900 reads rgb(14, 16, 19) at y=100, rgb(16, 19, 22) at
+ * y=522 and rgb(18, 20, 25) at y=800. The desktop hero uses min-height so a
+ * long overview or the season checklist can grow it. The bleed uses the same
+ * margin-inline trick as .watch-player-frame, never 100vw. The gradients live
+ * on :root as --hero-protect, --hero-protect-phone, --hero-fade and
+ * --hero-fade-phone. Phone rules are the base. The desktop shell overrides
+ * them below.
+ */
+.page.page-hero {
+  padding-top: 0;
 }
 
-.media-detail-hero-img {
-  display: block;
+.page-hero .media-detail {
+  margin-top: 0;
+}
+
+.media-hero {
+  position: relative;
+  margin-inline: calc(-1 * var(--page-pad));
+}
+
+.media-hero-art {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  mask-image: var(--hero-fade-phone);
+  -webkit-mask-image: var(--hero-fade-phone);
+}
+
+.media-hero-img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: 50% 20%;
 }
 
-.media-detail-hero-placeholder {
-  width: 100%;
-  height: 100%;
+.media-hero-protect {
+  position: absolute;
+  inset: 0;
+  background: var(--hero-protect-phone);
+  pointer-events: none;
+}
+
+.media-hero .back-link {
+  position: absolute;
+  z-index: 1;
+  top: 0.75rem;
+  left: var(--page-pad);
+  background: color-mix(in srgb, var(--bg) 45%, transparent);
+  border-color: color-mix(in srgb, var(--text) 18%, transparent);
+  color: var(--text);
+  font-size: 0.8125rem;
+}
+
+/* 70% because the phone band has no top or side layers, and 45% failed over
+   27 of the 78 backdrops. */
+.app-shell--mobile .media-hero .back-link {
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+.media-hero-info {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 0.25rem var(--page-pad) 0;
+}
+
+.page-hero .media-hero-info > * {
+  margin: 0;
+}
+
+.media-hero-info h1 {
+  color: var(--text);
+  font-size: 1.875rem;
+  line-height: 1.08;
+}
+
+.media-hero-info .media-detail-status,
+.media-hero-info .media-detail-genres,
+.media-hero-info .media-detail-runtime,
+.media-hero-info .media-detail-crew {
+  font-size: 0.84375rem;
+}
+
+.media-hero-info .media-detail-status,
+.media-hero-info .media-detail-genres,
+.media-hero-info .media-detail-runtime {
+  color: color-mix(in srgb, var(--text) 80%, transparent);
+}
+
+.media-hero-info .media-detail-overview {
+  max-width: none;
+  color: color-mix(in srgb, var(--text) 85%, transparent);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.media-hero-info .media-detail-crew {
   color: var(--text-muted);
-  font-size: 0.9rem;
+}
+
+.media-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.625rem;
+}
+
+/* The section is listed on its own. `> *` ties `.request-controls`, and the
+   later rule would keep its top margin. */
+.media-hero-actions > *,
+.media-hero-actions > .request-controls {
+  margin: 0;
+}
+
+.media-hero-info .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  padding: 0.75rem 1.125rem;
+  min-height: 44px;
+}
+
+.media-hero-info .btn svg {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  fill: currentColor;
+}
+
+.app-shell:not(.app-shell--mobile) .page.page-hero {
+  margin-top: calc(-1 * var(--topbar-h));
+  padding-top: 0;
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: clamp(22rem, 58vh, 36rem);
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero-art {
+  position: absolute;
+  inset: 0;
+  aspect-ratio: auto;
+  mask-image: var(--hero-fade);
+  -webkit-mask-image: var(--hero-fade);
+}
+
+/* The shade covers the text column. Its stops use --page-pad, which is set on
+   .page and not on :root, so the geometry stays in this rule. */
+.app-shell:not(.app-shell--mobile) .media-hero-protect {
+  background:
+    linear-gradient(
+      to right,
+      var(--hero-shade) calc(var(--page-pad) + 40.625rem),
+      transparent calc(var(--page-pad) + 56.625rem)
+    ),
+    var(--hero-protect);
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero .back-link {
+  top: calc(var(--topbar-h) + 0.75rem);
+  font-size: 0.875rem;
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero-info {
+  position: relative;
+  box-sizing: content-box;
+  max-width: 40.625rem;
+  gap: 0.75rem;
+  padding: calc(var(--topbar-h) + 4.5rem) var(--page-pad) 2.25rem;
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero-info h1 {
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero-info .media-detail-status,
+.app-shell:not(.app-shell--mobile) .media-hero-info .media-detail-genres,
+.app-shell:not(.app-shell--mobile) .media-hero-info .media-detail-runtime {
+  font-size: 0.875rem;
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero-info .media-detail-overview {
+  max-width: 37.5rem;
+  font-size: 1.0625rem;
+  line-height: 1.5;
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero-info .media-detail-crew {
+  font-size: 0.84375rem;
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero-actions {
+  gap: 0.75rem;
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero-info .btn {
+  gap: 0.625rem;
+  font-size: 1.0625rem;
+  padding: 0.8125rem 1.5rem;
+  min-height: auto;
+}
+
+/* Text over the image is white-based. Colour sits only on opaque surfaces,
+   because a tinted or translucent colour picks up the image behind it. */
+.app-shell:not(.app-shell--mobile) .media-hero-info .media-detail-year {
+  color: color-mix(in srgb, var(--text) 70%, transparent);
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero-info .media-detail-crew,
+.app-shell:not(.app-shell--mobile) .media-hero-info .request-controls .muted {
+  color: color-mix(in srgb, var(--text) 80%, transparent);
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero-info .request-controls-status {
+  color: var(--text);
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero-info .media-detail-collection a {
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 0.2em;
+}
+
+@media (hover: hover) {
+  .app-shell:not(.app-shell--mobile) .media-hero-info .media-detail-collection a:hover {
+    color: var(--text);
+    text-decoration-color: var(--accent-hover);
+  }
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero .request-status-pending {
+  background: color-mix(in srgb, var(--warn) 15%, var(--bg));
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero .request-status-approved {
+  background: color-mix(in srgb, var(--ok) 15%, var(--bg));
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero .request-status-processing {
+  background: color-mix(in srgb, var(--info) 15%, var(--bg));
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero .request-status-declined {
+  background: color-mix(in srgb, var(--text-muted) 15%, var(--bg));
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero .request-status-failed {
+  background: color-mix(in srgb, var(--danger) 15%, var(--bg));
+}
+
+.app-shell:not(.app-shell--mobile) .media-hero-info p.request-controls-error {
+  background: color-mix(in srgb, var(--danger) 15%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.65rem;
+  color: var(--danger);
 }
 
 .media-detail-tag-row {
@@ -3520,10 +3777,6 @@ a {
 
 .media-detail-manage {
   margin: 1rem 0 0;
-}
-
-.media-detail-play + .media-detail-manage {
-  margin-top: 0.75rem;
 }
 
 /* Centred modal shell (Modal.tsx). No focus trap by design; see that file. */
