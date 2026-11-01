@@ -214,8 +214,15 @@ export function EpisodeBrowser({ tmdbId }: { tmdbId: number }) {
               >
                 <div className="episode-thumb">
                   {episode.thumb ? (
+                    // Two sizes from the image route. 640x360 covers the widest desktop tile
+                    // (19.7rem in styles.css's clamp) at up to 2x. 1280x720 is for the phone
+                    // stack: below 48rem (MOBILE_MEDIA_QUERY) tiles take the page's full width,
+                    // so a phone at 2x or 3x usually needs more than 640 pixels across. sizes
+                    // copies that layout, so a change to either needs sizes changed too.
                     <img
-                      src={libraryImageUrl(episode.thumb)}
+                      src={libraryImageUrl(episode.thumb, "640x360")}
+                      srcSet={`${libraryImageUrl(episode.thumb, "640x360")} 640w, ${libraryImageUrl(episode.thumb, "1280x720")} 1280w`}
+                      sizes="(max-width: 48rem) 100vw, 19.7rem"
                       alt=""
                       loading="lazy"
                     />

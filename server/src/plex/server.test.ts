@@ -2164,4 +2164,87 @@ describe("plexServer.fetchImage", () => {
       },
     );
   });
+
+  // Guards the owner token: a sized fetch asks the photo transcoder, and the
+  // token stays in the header.
+  it("asks the photo transcoder for a sized image and keeps the token in the header", async () => {
+    let requestedUrl: string | null = null;
+    let requestedToken: string | null = null;
+    globalThis.fetch = (async (
+      input: Parameters<typeof fetch>[0],
+      init?: RequestInit,
+    ) => {
+      requestedUrl =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      const headers = init?.headers;
+      if (headers instanceof Headers) {
+        requestedToken = headers.get("X-Plex-Token");
+      } else if (Array.isArray(headers)) {
+        const entry = headers.find(([key]) => key === "X-Plex-Token");
+        requestedToken = entry ? entry[1] : null;
+      } else if (headers && typeof headers === "object") {
+        requestedToken = (headers as Record<string, string>)["X-Plex-Token"];
+      }
+      return imageResponse(200, IMAGE_BYTES, "image/jpeg");
+    }) as typeof fetch;
+
+    const result = await client().fetchImage(IMAGE_PATH, {
+      width: 640,
+      height: 360,
+    });
+
+    assert.ok(requestedUrl);
+    const parsed = new URL(requestedUrl);
+    assert.equal(
+      `${parsed.origin}${parsed.pathname}`,
+      `${BASE_URL}/photo/:/transcode`,
+    );
+    assert.deepEqual([...parsed.searchParams.keys()].sort(), [
+      "height",
+      "minSize",
+      "upscale",
+      "url",
+      "width",
+    ]);
+    assert.equal(parsed.searchParams.get("width"), "640");
+    assert.equal(parsed.searchParams.get("height"), "360");
+    assert.equal(parsed.searchParams.get("minSize"), "1");
+    assert.equal(parsed.searchParams.get("upscale"), "0");
+    assert.equal(parsed.searchParams.get("url"), IMAGE_PATH);
+    assert.equal(requestedToken, TOKEN);
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 200);
+    assert.equal(result.contentType, "image/jpeg");
+    assert.deepEqual(result.body, Buffer.from(IMAGE_BYTES));
+  });
+
+  // Guards a transcoder failure: a 404 from the transcoder stays a failed
+  // image instead of falling through to the original still.
+  it("returns ok false when the photo transcoder answers 404", async () => {
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      if (url.includes("/photo/:/transcode")) {
+        return imageResponse(404, new Uint8Array([1, 2, 3]), "text/html");
+      }
+      return imageResponse(200, IMAGE_BYTES);
+    }) as typeof fetch;
+
+    const result = await client().fetchImage(IMAGE_PATH, {
+      width: 640,
+      height: 360,
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 404);
+    assert.equal(result.body.length, 0);
+  });
 });

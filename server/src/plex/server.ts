@@ -1226,21 +1226,40 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
    * token or a route to the server. routes/library.ts re-serves the result from
    * our own origin behind /api/library/image.
    *
+   * With a size, asks Plex's photo transcoder for a JPEG that covers width by
+   * height (minSize=1) and is never enlarged (upscale=0). The caller validates
+   * the path and the size, and the token stays in the header.
+   *
    * The odd one out in this file: a non-OK upstream comes back as `ok: false`
    * with an empty body instead of throwing, so a single missing poster doesn't
    * turn into a 502. Only a network-level failure throws.
    *
    * @param path a Plex-relative image path. The caller validates its shape;
    * nothing here stops it being pointed at another endpoint.
+   * @param size pixel box for the transcoder. Omitted, the original path is
+   * fetched. The caller decides which sizes are allowed.
    * @throws PlexServerUpstreamError when the request never completes.
    */
-  async function fetchImage(path: string): Promise<{
+  async function fetchImage(
+    path: string,
+    size?: { width: number; height: number },
+  ): Promise<{
     ok: boolean;
     status: number;
     contentType: string | null;
     body: Buffer;
   }> {
-    const url = `${baseUrl}${path}`;
+    let url = `${baseUrl}${path}`;
+    if (size) {
+      const params = new URLSearchParams({
+        width: String(size.width),
+        height: String(size.height),
+        minSize: "1",
+        upscale: "0",
+        url: path,
+      });
+      url = `${baseUrl}/photo/:/transcode?${params.toString()}`;
+    }
 
     let res: Response;
     try {

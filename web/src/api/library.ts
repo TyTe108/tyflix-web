@@ -179,6 +179,9 @@ export async function fetchSectionFirstCharacters(
   return body.characters;
 }
 
+/** One of the two sizes the image route will resize. Any other value is a 400. */
+export type LibraryImageSize = "640x360" | "1280x720";
+
 /**
  * Turns a Plex thumb path into a URL the browser can put in an `<img>`.
  *
@@ -186,9 +189,19 @@ export async function fetchSectionFirstCharacters(
  * Plex address or hold its token. The server only accepts paths matching
  * /library/metadata/<id>/(thumb|art)/<id>, since anything looser would make it
  * an open proxy for the whole PMS API.
+ *
+ * `size` asks for a resized copy. The only values are "640x360" and "1280x720".
+ * The server answers any other value with a 400.
  */
-export function libraryImageUrl(thumbPath: string): string {
-  return `/api/library/image?path=${encodeURIComponent(thumbPath)}`;
+export function libraryImageUrl(
+  thumbPath: string,
+  size?: LibraryImageSize,
+): string {
+  const url = `/api/library/image?path=${encodeURIComponent(thumbPath)}`;
+  if (size === undefined) {
+    return url;
+  }
+  return `${url}&size=${size}`;
 }
 
 /**

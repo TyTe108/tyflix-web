@@ -343,13 +343,36 @@ describe("EpisodeBrowser", () => {
       name: /1\. Harbor Light/,
     });
     const img = harborTile.querySelector("img");
-    expect(img?.getAttribute("src")).toBe(libraryImageUrl(HARBOR_THUMB));
+    expect(img?.getAttribute("src")).toBe(
+      libraryImageUrl(HARBOR_THUMB, "640x360"),
+    );
     expect(img?.getAttribute("alt")).toBe("");
     expect(img?.getAttribute("loading")).toBe("lazy");
 
     const missingTile = screen.getByRole("link", { name: /2\. Missing Still/ });
     expect(missingTile.querySelector("img")).toBeNull();
     expect(within(missingTile).getByText("No image")).toBeTruthy();
+  });
+
+  // Guards the resized still: the tile asks for 640x360 and offers 1280x720
+  // to a dense screen, using the same widths as the tile layout.
+  it("requests a 640x360 still and a 1280x720 one for dense screens", async () => {
+    fetchEpisodesMock.mockResolvedValue(respond(threeSeasons));
+    renderBrowser(7);
+
+    const harborTile = await screen.findByRole("link", {
+      name: /1\. Harbor Light/,
+    });
+    const img = harborTile.querySelector("img");
+    const small =
+      "/api/library/image?path=%2Flibrary%2Fmetadata%2F501%2Fthumb%2F11&size=640x360";
+    const large =
+      "/api/library/image?path=%2Flibrary%2Fmetadata%2F501%2Fthumb%2F11&size=1280x720";
+    expect(img?.getAttribute("src")).toBe(small);
+    expect(img?.getAttribute("srcset")).toBe(`${small} 640w, ${large} 1280w`);
+    expect(img?.getAttribute("sizes")).toBe("(max-width: 48rem) 100vw, 19.7rem");
+    expect(img?.getAttribute("alt")).toBe("");
+    expect(img?.getAttribute("loading")).toBe("lazy");
   });
 
   it("shows a progress bar, a watched tick, or neither", async () => {

@@ -741,6 +741,147 @@ describe("library routes", () => {
     assert.deepEqual(await response.json(), { error: "image fetch failed" });
   });
 
+  // Guards a request with no size: the route still fetches the original path.
+  it("GET /image fetches the original when size is omitted", async () => {
+    const thumbPath = "/library/metadata/3613/thumb/1780131692";
+    let fetched: { path: string; size: unknown } | null = null;
+    const app = createApp(baseDeps({
+      async fetchImage(path: string, size?: { width: number; height: number }) {
+        fetched = { path, size };
+        return {
+          ok: true,
+          status: 200,
+          contentType: "image/jpeg",
+          body: Buffer.from([0xff, 0xd8]),
+        };
+      },
+    } as unknown as PlexServerClient));
+
+    const response = await fetchLocal(
+      app,
+      `/api/library/image?path=${encodeURIComponent(thumbPath)}`,
+      sessionCookie(),
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "image/jpeg");
+    assert.equal(
+      response.headers.get("cache-control"),
+      "public, max-age=86400",
+    );
+    assert.deepEqual(fetched, { path: thumbPath, size: undefined });
+  });
+
+  // Guards the two allowed sizes: the route passes width and height through.
+  it("GET /image passes 640x360 and 1280x720 through to fetchImage", async () => {
+    const thumbPath = "/library/metadata/3613/thumb/1780131692";
+    const seen: Array<{ path: string; size: unknown }> = [];
+    const app = createApp(baseDeps({
+      async fetchImage(path: string, size?: { width: number; height: number }) {
+        seen.push({ path, size });
+        return {
+          ok: true,
+          status: 200,
+          contentType: "image/jpeg",
+          body: Buffer.from([0xff, 0xd8]),
+        };
+      },
+    } as unknown as PlexServerClient));
+    const cookie = sessionCookie();
+
+    const cases = [
+      ["640x360", { width: 640, height: 360 }],
+      ["1280x720", { width: 1280, height: 720 }],
+    ] as const;
+    for (const [size, expected] of cases) {
+      const response = await fetchLocal(
+        app,
+        `/api/library/image?path=${encodeURIComponent(thumbPath)}&size=${encodeURIComponent(size)}`,
+        cookie,
+      );
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-type"), "image/jpeg");
+      assert.equal(
+        response.headers.get("cache-control"),
+        "public, max-age=86400",
+      );
+      assert.deepEqual(seen.at(-1), { path: thumbPath, size: expected });
+    }
+  });
+
+  // Guards the size allowlist: any other size is a 400 and does not fetch.
+  it("GET /image rejects a size outside the two allowed values", async () => {
+    let fetchCalls = 0;
+    const app = createApp(baseDeps({
+      async fetchImage() {
+        fetchCalls += 1;
+        return {
+          ok: true,
+          status: 200,
+          contentType: "image/jpeg",
+          body: Buffer.alloc(0),
+        };
+      },
+    } as unknown as PlexServerClient));
+    const thumbPath = "/library/metadata/3613/thumb/1780131692";
+    const cookie = sessionCookie();
+    const badSizes = [
+      "",
+      "640",
+      "640x",
+      "x360",
+      "641x360",
+      "360x640",
+      "640x720",
+      "640X360",
+      " 640x360",
+      "640x360 ",
+      "constructor",
+      "__proto__",
+      "toString",
+    ];
+
+    for (const size of badSizes) {
+      const response = await fetchLocal(
+        app,
+        `/api/library/image?path=${encodeURIComponent(thumbPath)}&size=${encodeURIComponent(size)}`,
+        cookie,
+      );
+      assert.equal(response.status, 400, `expected 400 for ${JSON.stringify(size)}`);
+      assert.deepEqual(await response.json(), { error: "invalid image size" });
+    }
+
+    const repeated = await fetchLocal(
+      app,
+      `/api/library/image?path=${encodeURIComponent(thumbPath)}&size=${encodeURIComponent("640x360")}&size=${encodeURIComponent("640x360")}`,
+      cookie,
+    );
+    assert.equal(repeated.status, 400);
+    assert.deepEqual(await repeated.json(), { error: "invalid image size" });
+    assert.equal(fetchCalls, 0);
+  });
+
+  // Guards check order: a bad path is refused before the size is considered.
+  it("GET /image rejects a bad path before it looks at size", async () => {
+    let fetchCalls = 0;
+    const app = createApp(baseDeps({
+      async fetchImage() {
+        fetchCalls += 1;
+        throw new Error("fetchImage should not be called");
+      },
+    } as unknown as PlexServerClient));
+
+    const response = await fetchLocal(
+      app,
+      `/api/library/image?path=${encodeURIComponent("/library/sections/1/all")}&size=${encodeURIComponent("640x360")}`,
+      sessionCookie(),
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: "invalid image path" });
+    assert.equal(fetchCalls, 0);
+  });
+
   it("GET /sections/:key/items passes the shared per-server token when resolveAccessToken finds one", async () => {
     let sectionItemsToken: string | undefined;
     const app = createApp({

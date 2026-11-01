@@ -1,7 +1,8 @@
 // Browsing what's actually on the Plex server, as opposed to discovery, which
 // browses TMDB. Mounted at /api/library behind requireAuth. Five endpoints:
 //
-//   GET /image?path=...                   artwork proxy
+//   GET /image?path=...                   artwork proxy. Optional size is
+//                                         640x360 or 1280x720.
 //   GET /sections                         the Movies / TV Shows sections
 //   GET /sections/:key/items              the paged, filtered, sorted grid
 //   GET /sections/:key/genres             genre filter options
@@ -38,8 +39,19 @@ const LIBRARY_SORT_KEYS = new Set<LibrarySortKey>([
 // The only shape /image will fetch. This is an allowlist, not a sanity check:
 // the path goes straight to Plex with the server token attached, so a looser
 // pattern would turn this route into an open proxy for the whole PMS API.
+// With a size, the path becomes the transcoder's url parameter, so the same
+// allowlist is what keeps that pointed at library artwork.
 const LIBRARY_IMAGE_PATH_RE =
   /^\/library\/metadata\/\d+\/(thumb|art)\/\d+$/;
+
+// The only sizes /image will ask Plex to make. Each size is a separate file
+// that Plex makes and keeps on disk, so open width and height values would let
+// any signed-in user make the server resize to any size, and a 400 instead of
+// a fallback keeps a bad size visible.
+const LIBRARY_IMAGE_SIZES = new Map<string, { width: number; height: number }>([
+  ["640x360", { width: 640, height: 360 }],
+  ["1280x720", { width: 1280, height: 720 }],
+]);
 
 export type LibraryRouterDeps = {
   plexServer: PlexServerClient;
@@ -54,13 +66,17 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
   /**
    * GET /api/library/image?path=/library/metadata/<id>/(thumb|art)/<id>
    *
+   * Optional `size` is `640x360` or `1280x720`. With one, the bytes are a
+   * resized copy from Plex's photo transcoder. Without one, the original.
+   *
    * Streams Plex artwork back through this origin, so posters load without the
    * browser ever seeing the Plex token or the server's address. Responds with
    * the image bytes, Plex's content type (defaulting to image/jpeg) and a
    * one-day Cache-Control.
    *
-   * 400 when `path` is missing or doesn't match the allowlist, 502 when Plex
-   * refuses the fetch or throws.
+   * 400 when `path` is missing or doesn't match the allowlist, 400 when `size`
+   * is present and isn't one of the two values, 502 when Plex refuses the
+   * fetch or throws.
    */
   router.get("/image", async (req, res) => {
     const path = req.query.path;
@@ -73,8 +89,25 @@ export function createLibraryRouter(deps: LibraryRouterDeps): Router {
       return;
     }
 
+    const sizeQuery = req.query.size;
+    let size: { width: number; height: number } | undefined;
+    if (sizeQuery !== undefined) {
+      // A repeated key arrives as an array. That is not one of the two sizes.
+      const matched =
+        typeof sizeQuery === "string"
+          ? LIBRARY_IMAGE_SIZES.get(sizeQuery)
+          : undefined;
+      if (matched === undefined) {
+        res.status(400).json({ error: "invalid image size" });
+        return;
+      }
+      size = matched;
+    }
+
     try {
-      const result = await plexServer.fetchImage(path);
+      const result = size
+        ? await plexServer.fetchImage(path, size)
+        : await plexServer.fetchImage(path);
       if (!result.ok) {
         res.status(502).json({ error: "image fetch failed" });
         return;
