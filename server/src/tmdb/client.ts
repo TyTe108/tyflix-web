@@ -14,12 +14,17 @@
 // single-type call passes a defaultMediaType into mapMediaSummary to fill the
 // gap.
 //
-// Poster and profile paths are expanded to absolute w500 URLs here, so the
-// frontend never has to know the CDN layout. That origin is also allowlisted in
-// the CSP in index.ts, which is worth remembering if the size ever changes.
+// Poster and profile paths are expanded to absolute w500 URLs here, and
+// backdrop paths to w1280, so the frontend never has to know the CDN layout.
+// That origin is allowlisted in the CSP in index.ts, so a size change needs
+// nothing there.
 
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500";
+// Backdrops fill the title and collection heroes, 1152px wide at 1470 today
+// and the full page width after 52.5. w1280 is TMDB's largest backdrop size
+// short of original, which runs to 3840px and over 1 MB. Spec D10.
+const TMDB_BACKDROP_BASE = "https://image.tmdb.org/t/p/w1280";
 
 // The card shape. Every browse surface in the app renders one of these, which
 // is why so many of the endpoints below funnel into the same mapper.
@@ -787,7 +792,7 @@ export function createTmdbClient(options: TmdbClientOptions) {
       name: row.name,
       overview: typeof row.overview === "string" ? row.overview : "",
       posterUrl: imageUrl(row.poster_path),
-      backdropUrl: imageUrl(row.backdrop_path),
+      backdropUrl: backdropImageUrl(row.backdrop_path),
       parts,
     };
   }
@@ -858,7 +863,7 @@ export function createTmdbClient(options: TmdbClientOptions) {
       year: yearFromDate(typeof row.release_date === "string" ? row.release_date : null),
       overview: typeof row.overview === "string" ? row.overview : "",
       posterUrl: imageUrl(row.poster_path),
-      backdropUrl: imageUrl(row.backdrop_path),
+      backdropUrl: backdropImageUrl(row.backdrop_path),
       runtime: typeof row.runtime === "number" ? row.runtime : null,
       genres: mapGenreNames(row.genres),
       status: typeof row.status === "string" ? row.status : "",
@@ -927,7 +932,7 @@ export function createTmdbClient(options: TmdbClientOptions) {
       ),
       overview: typeof row.overview === "string" ? row.overview : "",
       posterUrl: imageUrl(row.poster_path),
-      backdropUrl: imageUrl(row.backdrop_path),
+      backdropUrl: backdropImageUrl(row.backdrop_path),
       genres: mapGenreNames(row.genres),
       status: typeof row.status === "string" ? row.status : "",
       tvdbId,
@@ -953,14 +958,23 @@ export function createTmdbClient(options: TmdbClientOptions) {
 
 export type TmdbClient = ReturnType<typeof createTmdbClient>;
 
-// Turns a TMDB image path like "/matrix.jpg" into a full w500 URL. Takes
-// `unknown` because it's called straight on unvalidated fields; anything that
-// isn't a non-empty string becomes null and the UI shows a placeholder.
+// Turns a TMDB poster or profile path like "/matrix.jpg" into a full w500 URL.
+// Backdrops use backdropImageUrl. Takes `unknown` because it's called straight
+// on unvalidated fields; anything that isn't a non-empty string becomes null
+// and the UI shows a placeholder.
 function imageUrl(path: unknown): string | null {
   if (typeof path !== "string" || path === "") {
     return null;
   }
   return `${TMDB_IMAGE_BASE}${path}`;
+}
+
+// Same null rule as imageUrl, pointed at the backdrop size.
+function backdropImageUrl(path: unknown): string | null {
+  if (typeof path !== "string" || path === "") {
+    return null;
+  }
+  return `${TMDB_BACKDROP_BASE}${path}`;
 }
 
 // Pulls the year off a TMDB date string ("1999-03-31"). TMDB sends an empty

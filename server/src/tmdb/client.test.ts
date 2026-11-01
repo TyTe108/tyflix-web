@@ -610,7 +610,7 @@ describe("createTmdbClient().collection", () => {
     );
     assert.equal(
       result.backdropUrl,
-      "https://image.tmdb.org/t/p/w500/collection-bg.jpg",
+      "https://image.tmdb.org/t/p/w1280/collection-bg.jpg",
     );
     assert.deepEqual(
       result.parts.map((part) => part.tmdbId),
@@ -653,6 +653,48 @@ describe("createTmdbClient().movieDetail", () => {
       name: "Blade Runner Collection",
     });
     assert.equal(standalone.collection, null);
+  });
+
+  // Guards the movie hero: the backdrop is w1280 and the poster stays w500.
+  it("maps a movie backdrop at w1280 and its poster at w500", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse(200, {
+        id: 42,
+        title: "Bright River",
+        poster_path: "/br.jpg",
+        backdrop_path: "/br-bg.jpg",
+      });
+
+    const detail = await createTmdbClient({ apiKey: "k" }).movieDetail(42);
+
+    assert.equal(
+      detail.backdropUrl,
+      "https://image.tmdb.org/t/p/w1280/br-bg.jpg",
+    );
+    assert.equal(
+      detail.posterUrl,
+      "https://image.tmdb.org/t/p/w500/br.jpg",
+    );
+  });
+
+  // Guards the null rule: a backdrop path that isn't a usable string stays null.
+  it("returns a null backdrop when backdrop_path is empty, mistyped, null, or absent", async () => {
+    const bodies: Record<number, Record<string, unknown>> = {
+      1: { id: 1, title: "Empty path", backdrop_path: "" },
+      2: { id: 2, title: "Mistyped path", backdrop_path: 42 },
+      3: { id: 3, title: "Null path", backdrop_path: null },
+      4: { id: 4, title: "Absent path" },
+    };
+    globalThis.fetch = async (input) => {
+      const id = Number(new URL(String(input)).pathname.split("/").pop());
+      return jsonResponse(200, bodies[id]);
+    };
+
+    const tmdb = createTmdbClient({ apiKey: "k" });
+    for (const id of [1, 2, 3, 4]) {
+      const detail = await tmdb.movieDetail(id);
+      assert.equal(detail.backdropUrl, null);
+    }
   });
 });
 
@@ -706,7 +748,7 @@ describe("createTmdbClient().tvDetail", () => {
       year: 2008,
       overview: "Chemistry teacher goes dark.",
       posterUrl: "https://image.tmdb.org/t/p/w500/bb.jpg",
-      backdropUrl: "https://image.tmdb.org/t/p/w500/bb-bg.jpg",
+      backdropUrl: "https://image.tmdb.org/t/p/w1280/bb-bg.jpg",
       genres: ["Drama"],
       status: "Ended",
       tvdbId: 81189,
