@@ -48,6 +48,7 @@ import {
   createIssue,
   type IssueType,
 } from "../api/issues";
+import { BackIcon } from "../components/BackIcon";
 import { Dropdown } from "../components/Dropdown";
 import { ManageMediaModal } from "../components/ManageMediaModal";
 import {
@@ -103,22 +104,6 @@ function parseId(raw: string | undefined): number | null {
   return Number(raw);
 }
 
-// Defined once at module scope since it never changes and both back controls
-// below use it.
-const backIcon = (
-  <svg
-    aria-hidden="true"
-    viewBox="0 0 16 16"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M10 3 5 8l5 5" />
-  </svg>
-);
-
 /**
  * Detail page for one TMDB title.
  *
@@ -145,12 +130,12 @@ export function MediaDetailPage() {
       className="back-link"
       onClick={() => navigate(-1)}
     >
-      {backIcon}
+      <BackIcon />
       Back
     </button>
   ) : (
     <Link className="back-link" to="/">
-      {backIcon}
+      <BackIcon />
       Back
     </Link>
   );
