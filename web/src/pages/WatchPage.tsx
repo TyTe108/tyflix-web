@@ -30,7 +30,7 @@
 
 import Hls from "hls.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import {
   fetchEpisodeWatch,
   fetchItemWatch,
@@ -48,6 +48,7 @@ import {
   type WatchDescriptor,
   type WatchTuning,
 } from "../api/watch";
+import { BackControl } from "../components/BackControl";
 import { CastStatusOverlay } from "../components/CastStatusOverlay";
 import { EpisodeNav } from "../components/EpisodeNav";
 import {
@@ -1879,14 +1880,13 @@ export function WatchPage() {
 
   return (
     <main className="page page-wide page-centered">
-      {/* Header: back out to "/" (which redirects to the Library), plus the
+      {/* Header: Back pops to the page before the player, or replaces this
+          entry with the Library when the player opened the visit, plus the
           display strings the server already shaped. For an episode the title is
           the show and the subheading is "S1E1 · Pilot"; for a movie it's the
           title and the year. */}
       <header className="watch-header">
-        <Link to="/" className="watch-back-link">
-          ← Back
-        </Link>
+        <BackControl className="watch-back-link">← Back</BackControl>
         {status === "ready" && descriptor !== null && descriptor.title ? (
           <div className="watch-header-titles">
             <h1 className="watch-title">{descriptor.title}</h1>
@@ -1910,9 +1910,7 @@ export function WatchPage() {
           <p className="error watch-playback-diag">
             {error ?? "Failed to load stream"}
           </p>
-          <Link to="/" className="btn secondary">
-            Back
-          </Link>
+          <BackControl className="btn secondary">Back</BackControl>
         </div>
       ) : null}
 

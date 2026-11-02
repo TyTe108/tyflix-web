@@ -738,6 +738,26 @@ a {
   text-decoration: none;
 }
 
+/* BackControl renders a button when it can pop, and the global a colour
+   doesn't reach a button, so this rule gives it the link's look. */
+button.watch-back-link {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--accent);
+  transition: color var(--transition);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  button.watch-back-link:hover {
+    color: var(--accent-hover);
+  }
+}
+
 .watch-player-frame {
   width: 100%;
   max-width: 64rem;
