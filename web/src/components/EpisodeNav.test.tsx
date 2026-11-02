@@ -1,9 +1,16 @@
 // Previous and Next links under the player. Rendered on its own because
 // WatchPage needs hls.js, the router, and a descriptor fetch.
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
 import type { NextEpisode, PreviousEpisode } from "../api/watch";
+import { isLandingState } from "../lib/landing";
 import { EpisodeNav } from "./EpisodeNav";
 
 const previousEpisode: PreviousEpisode = {
@@ -38,6 +45,45 @@ function LocationProbe() {
   );
 }
 
+function HistoryProbe() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <>
+      <span data-testid="pathname">{location.pathname}</span>
+      <button type="button" onClick={() => navigate(-1)}>
+        Pop history
+      </button>
+    </>
+  );
+}
+
+function renderHistoryNav(props: {
+  previous: PreviousEpisode | null;
+  next: NextEpisode | null;
+}) {
+  return render(
+    <MemoryRouter
+      initialEntries={["/media/tv/1", "/watch/episode/202"]}
+      initialIndex={1}
+    >
+      <HistoryProbe />
+      <Routes>
+        <Route
+          path="/watch/episode/:rk"
+          element={
+            <EpisodeNav
+              previous={props.previous}
+              next={props.next}
+              linkState={null}
+            />
+          }
+        />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 function renderNav(props: {
   previous: PreviousEpisode | null;
   next: NextEpisode | null;
@@ -49,7 +95,11 @@ function renderNav(props: {
           path="/watch/episode/:rk"
           element={
             <>
-              <EpisodeNav previous={props.previous} next={props.next} />
+              <EpisodeNav
+                previous={props.previous}
+                next={props.next}
+                linkState={null}
+              />
               <LocationProbe />
             </>
           }
@@ -135,4 +185,67 @@ describe("EpisodeNav", () => {
     const stateLabel = screen.getByTestId("location-state").textContent;
     expect(stateLabel === "null" || stateLabel === "undefined").toBe(true);
   });
+
+  it("replaces the current entry when Next is clicked, so Back returns to the page before the player", () => {
+    renderHistoryNav({ previous: previousEpisode, next: nextEpisode });
+
+    fireEvent.click(screen.getByRole("link", { name: /Next episode/ }));
+
+    expect(screen.getByTestId("pathname").textContent).toBe(
+      "/watch/episode/203",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Pop history" }));
+
+    expect(screen.getByTestId("pathname").textContent).toBe("/media/tv/1");
+  });
+
+  it("replaces the current entry when Previous is clicked, so Back returns to the page before the player", () => {
+    renderHistoryNav({ previous: previousEpisode, next: nextEpisode });
+
+    fireEvent.click(screen.getByRole("link", { name: /Previous episode/ }));
+
+    expect(screen.getByTestId("pathname").textContent).toBe(
+      "/watch/episode/201",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Pop history" }));
+
+    expect(screen.getByTestId("pathname").textContent).toBe("/media/tv/1");
+  });
+
+  it("carries linkState onto the next episode", () => {
+    render(
+      <MemoryRouter initialEntries={["/watch/episode/202"]}>
+        <Routes>
+          <Route
+            path="/watch/episode/:rk"
+            element={
+              <>
+                <EpisodeNav
+                  previous={null}
+                  next={nextEpisode}
+                  linkState={{ landing: true }}
+                />
+                <RawStateProbe />
+              </>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: /Next episode/ }));
+
+    const raw = screen.getByTestId("raw-state").textContent;
+    const state: unknown = raw === null ? null : JSON.parse(raw);
+    expect(isLandingState(state)).toBe(true);
+  });
 });
+
+function RawStateProbe() {
+  const location = useLocation();
+  return (
+    <span data-testid="raw-state">{JSON.stringify(location.state)}</span>
+  );
+}

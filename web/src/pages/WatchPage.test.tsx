@@ -7,8 +7,10 @@
 // Play-navigation latches enterFullscreen, and the account preference gates
 // whether that becomes enterFullscreenOnMount for PlayerControls.
 import { describe, expect, it } from "vitest";
+import { isLandingState } from "../lib/landing";
 import {
   buildHlsPlaybackFailureReport,
+  episodeSwitchState,
   shouldEnterFullscreenOnMount,
   wantsFullscreenFromNavState,
 } from "./WatchPage";
@@ -95,5 +97,61 @@ describe("shouldEnterFullscreenOnMount", () => {
   it("is false with no nav state even when the preference is on", () => {
     expect(shouldEnterFullscreenOnMount(null, true)).toBe(false);
     expect(shouldEnterFullscreenOnMount(undefined, true)).toBe(false);
+  });
+});
+
+describe("episodeSwitchState", () => {
+  it("is null when the entry is not a landing location and fullscreen is not requested", () => {
+    expect(episodeSwitchState({ key: "abc", state: null }, false)).toBe(null);
+    expect(
+      episodeSwitchState(
+        { key: "abc", state: { enterFullscreen: true } },
+        false,
+      ),
+    ).toBe(null);
+  });
+
+  it("requests fullscreen without a landing marker when the entry is not a landing location", () => {
+    const state = episodeSwitchState({ key: "abc", state: null }, true);
+    expect(wantsFullscreenFromNavState(state)).toBe(true);
+    expect(isLandingState(state)).toBe(false);
+  });
+
+  it("carries a landing marker without fullscreen when the entry opened the visit", () => {
+    const fromDefaultKey = episodeSwitchState(
+      { key: "default", state: { enterFullscreen: true } },
+      false,
+    );
+    expect(isLandingState(fromDefaultKey)).toBe(true);
+    expect(wantsFullscreenFromNavState(fromDefaultKey)).toBe(false);
+
+    const fromMarker = episodeSwitchState(
+      { key: "abc", state: { landing: true } },
+      false,
+    );
+    expect(isLandingState(fromMarker)).toBe(true);
+    expect(wantsFullscreenFromNavState(fromMarker)).toBe(false);
+  });
+
+  it("carries a landing marker and fullscreen when the entry opened the visit and fullscreen is requested", () => {
+    const fromDefaultKey = episodeSwitchState(
+      { key: "default", state: null },
+      true,
+    );
+    expect(isLandingState(fromDefaultKey)).toBe(true);
+    expect(wantsFullscreenFromNavState(fromDefaultKey)).toBe(true);
+
+    const fromMarker = episodeSwitchState(
+      { key: "abc", state: { landing: true } },
+      true,
+    );
+    expect(isLandingState(fromMarker)).toBe(true);
+    expect(wantsFullscreenFromNavState(fromMarker)).toBe(true);
+  });
+
+  it('is null for { landing: "yes" } on a key other than "default"', () => {
+    expect(
+      episodeSwitchState({ key: "abc", state: { landing: "yes" } }, false),
+    ).toBe(null);
   });
 });

@@ -35,3 +35,17 @@ export function isLandingState(state: unknown): boolean {
   }
   return state.landing === true;
 }
+
+/**
+ * Whether this history entry opened the visit.
+ *
+ * True when `key` is "default", whatever the state is, and true when the
+ * state passes `isLandingState`. MediaDetailPage's Back applies the same
+ * rule inline.
+ */
+export function isLandingLocation(location: {
+  key: string;
+  state: unknown;
+}): boolean {
+  return location.key === "default" || isLandingState(location.state);
+}

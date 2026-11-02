@@ -62,6 +62,7 @@ import { subscribeSessionReady } from "../cast/subscribeSessionReady";
 import { useCastPlayer } from "../cast/useCastPlayer";
 import { useCastState } from "../cast/useCastState";
 import { useAuth } from "../auth/AuthContext";
+import { isLandingLocation, landingState } from "../lib/landing";
 
 // Auto-advance is a per-browser preference, so it lives in localStorage.
 const AUTO_PLAY_STORAGE_KEY = "tyflix.autoPlay";
@@ -469,6 +470,36 @@ export function shouldEnterFullscreenOnMount(
   fullscreenOnPlay: boolean,
 ): boolean {
   return wantsFullscreenFromNavState(navState) && fullscreenOnPlay;
+}
+
+/**
+ * Router state for one switch from episode to episode inside the player.
+ *
+ * The switch replaces the current history entry, so Back from the player
+ * returns to the page before it. When the current entry opened the visit,
+ * the landing marker rides along, because a replace mints a fresh key, as
+ * lib/landing.ts explains. A Play click's fullscreen request does not carry
+ * over.
+ */
+export function episodeSwitchState(
+  current: { key: string; state: unknown },
+  enterFullscreen: boolean,
+):
+  | { landing: true }
+  | { enterFullscreen: true }
+  | { landing: true; enterFullscreen: true }
+  | null {
+  const landing = isLandingLocation(current);
+  if (!landing && !enterFullscreen) {
+    return null;
+  }
+  if (landing && enterFullscreen) {
+    return { landing: true, enterFullscreen: true };
+  }
+  if (landing) {
+    return landingState;
+  }
+  return { enterFullscreen: true };
 }
 
 // Route params are whatever's in the URL bar. Anything that isn't a positive
@@ -1249,14 +1280,18 @@ export function WatchPage() {
       if (next === null) {
         return;
       }
-      navigate(`/watch/episode/${next.ratingKey}`);
+      // State comes from episodeSwitchState.
+      navigate(`/watch/episode/${next.ratingKey}`, {
+        replace: true,
+        state: episodeSwitchState(location, false),
+      });
     };
 
     video.addEventListener("ended", onEnded);
     return () => {
       video.removeEventListener("ended", onEnded);
     };
-  }, [descriptor, navigate]);
+  }, [descriptor, navigate, location]);
 
   // Latch the receiver's playback position while casting so disconnect can
   // hand off to local resume (pendingResumeRef) instead of restarting at 0.
@@ -1690,8 +1725,10 @@ export function WatchPage() {
             : null
         }
         onPlayNow={() => {
+          // State comes from episodeSwitchState.
           navigate(`/watch/episode/${nextEpisode.ratingKey}`, {
-            state: { enterFullscreen: true },
+            replace: true,
+            state: episodeSwitchState(location, true),
           });
         }}
         onDismiss={() => {
@@ -1907,8 +1944,13 @@ export function WatchPage() {
           </PlayerControls>
         </div>
       ) : null}
+      {/* State comes from episodeSwitchState. */}
       {isEpisode && status === "ready" && descriptor !== null ? (
-        <EpisodeNav previous={previousEpisode} next={nextEpisode} />
+        <EpisodeNav
+          previous={previousEpisode}
+          next={nextEpisode}
+          linkState={episodeSwitchState(location, false)}
+        />
       ) : null}
     </main>
   );

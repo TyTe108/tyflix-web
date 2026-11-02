@@ -2,7 +2,9 @@
 //
 // WatchPage renders this for episodes, under the player. It is presentational,
 // with no fetching and no state, because WatchPage can't be rendered in the
-// test suite (it needs hls.js, the router, and the descriptor fetch).
+// test suite (it needs hls.js, the router, and the descriptor fetch). The
+// links replace the current history entry so the player stays one history
+// entry, and they carry the state WatchPage hands them.
 import { Link } from "react-router";
 import type { NextEpisode, PreviousEpisode } from "../api/watch";
 
@@ -22,14 +24,18 @@ function episodeLabel(episode: {
  * Previous and Next links for one episode.
  *
  * Renders nothing when both neighbors are null. A previous link comes first,
- * then a next link. Neither link passes navigation state.
+ * then a next link. Both links replace the current history entry so the
+ * player stays one history entry, and they carry the state WatchPage hands
+ * them.
  */
 export function EpisodeNav({
   previous,
   next,
+  linkState,
 }: {
   previous: PreviousEpisode | null;
   next: NextEpisode | null;
+  linkState: unknown;
 }) {
   if (previous === null && next === null) {
     return null;
@@ -41,6 +47,8 @@ export function EpisodeNav({
         <Link
           className="watch-episode-nav-link watch-episode-nav-link--previous"
           to={`/watch/episode/${previous.ratingKey}`}
+          replace
+          state={linkState}
         >
           <span className="watch-episode-nav-direction">← Previous episode</span>
           <span className="watch-episode-nav-title">
@@ -52,6 +60,8 @@ export function EpisodeNav({
         <Link
           className="watch-episode-nav-link watch-episode-nav-link--next"
           to={`/watch/episode/${next.ratingKey}`}
+          replace
+          state={linkState}
         >
           <span className="watch-episode-nav-direction">Next episode →</span>
           <span className="watch-episode-nav-title">{episodeLabel(next)}</span>
