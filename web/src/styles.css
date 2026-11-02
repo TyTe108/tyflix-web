@@ -3080,6 +3080,16 @@ a {
   background: color-mix(in srgb, var(--bg) 70%, transparent);
 }
 
+/* The hero skin has the same specificity as .back-link:hover and comes later,
+   so without this rule the title page's pill doesn't react to hover. The fill
+   is the shared hover's, and it's opaque, so the text's contrast doesn't
+   depend on the backdrop. */
+@media (hover: hover) {
+  .media-hero .back-link:hover {
+    background: color-mix(in srgb, var(--surface-2) 80%, var(--text));
+  }
+}
+
 .media-hero-info {
   display: flex;
   flex-direction: column;
