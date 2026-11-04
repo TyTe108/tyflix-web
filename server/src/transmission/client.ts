@@ -1,10 +1,11 @@
 // Thin RPC client for Transmission 4.1.2 (rpc-version 19). Talks to
-// TRANSMISSION_URL + "/transmission/rpc" over plain HTTP with no credentials,
-// using the legacy request form the deployed daemon still answers:
-// POST {"method":"...","arguments":{...}}.
+// TRANSMISSION_URL + "/transmission/rpc" over plain HTTP, using the legacy
+// request form the deployed daemon still answers:
+// POST {"method":"...","arguments":{...}}. When auth is set, every request
+// sends those credentials as HTTP Basic. A rejected login is a 401, thrown
+// as TransmissionUpstreamError like any other non-2xx.
 //
-// Nothing constructs this client yet. It is ready to be injected the same way
-// the other upstream clients are once a caller exists.
+// index.ts builds this client when TRANSMISSION_URL is set.
 //
 // Two non-obvious upstream behaviours live entirely in this file. First, a
 // request with no valid X-Transmission-Session-Id is answered HTTP 409 with
@@ -43,6 +44,11 @@ export class TransmissionUpstreamError extends Error {
 /** Options for createTransmissionClient. */
 export type TransmissionClientOptions = {
   baseUrl: string; // TRANSMISSION_URL, trailing slash already stripped by config
+  /**
+   * HTTP Basic credentials. When set, every request includes Authorization.
+   * When absent, that header is not sent.
+   */
+  auth?: { username: string; password: string };
 };
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -58,6 +64,17 @@ function isNonNullObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function basicAuthorization(auth: {
+  username: string;
+  password: string;
+}): string {
+  const token = Buffer.from(
+    `${auth.username}:${auth.password}`,
+    "utf8",
+  ).toString("base64");
+  return `Basic ${token}`;
+}
+
 /**
  * Builds the Transmission RPC client. Exposes torrent reads plus single-torrent
  * start and stop. Remove and session-set are later increments.
@@ -68,7 +85,7 @@ function isNonNullObject(value: unknown): value is Record<string, unknown> {
  * or the 10 second timeout.
  */
 export function createTransmissionClient(options: TransmissionClientOptions) {
-  const { baseUrl } = options;
+  const { baseUrl, auth } = options;
   // Cached from the most recent 409. Reused on later calls so a second RPC
   // after a successful first one is a single HTTP request, not another
   // handshake.
@@ -102,6 +119,9 @@ export function createTransmissionClient(options: TransmissionClientOptions) {
           Accept: "application/json",
           "Content-Type": "application/json",
           ...(sessionId !== undefined ? { [SESSION_HEADER]: sessionId } : {}),
+          ...(auth !== undefined
+            ? { Authorization: basicAuthorization(auth) }
+            : {}),
         },
         body: JSON.stringify(payload),
         signal: controller.signal,

@@ -344,3 +344,85 @@ describe("createTransmissionClient RPC result", () => {
     );
   });
 });
+
+describe("createTransmissionClient HTTP Basic auth", () => {
+  const username = "tyflix";
+  const password = "pa:ss wörd";
+  // UTF-8 user-pass "tyflix:pa:ss wörd", pinned so the encoding is not recomputed.
+  const authorization = "Basic dHlmbGl4OnBhOnNzIHfDtnJk";
+
+  function installHandshake() {
+    const sessionId = "csrf-token-auth";
+    const authorizations: Array<string | null> = [];
+    const sessions: Array<string | null> = [];
+
+    globalThis.fetch = async (_input, init) => {
+      const headers = new Headers(init?.headers);
+      authorizations.push(headers.get("Authorization"));
+      const session = headers.get(SESSION_HEADER);
+      sessions.push(session);
+      if (session !== sessionId) {
+        return conflictResponse(sessionId);
+      }
+      return successResponse({ torrents: [] });
+    };
+
+    return { authorizations, sessions };
+  }
+
+  it("sends Basic auth on the first request, the 409 replay, and a cached call", async () => {
+    const { authorizations, sessions } = installHandshake();
+    const client = createTransmissionClient({
+      baseUrl: "http://transmission:9091",
+      auth: { username, password },
+    });
+
+    await client.listTorrents(["id"]);
+    await client.listTorrents(["id"]);
+
+    assert.equal(
+      Buffer.from(authorization.slice("Basic ".length), "base64").toString(
+        "utf8",
+      ),
+      `${username}:${password}`,
+    );
+    assert.deepEqual(authorizations, [
+      authorization,
+      authorization,
+      authorization,
+    ]);
+    assert.deepEqual(sessions, [null, "csrf-token-auth", "csrf-token-auth"]);
+  });
+
+  it("sends no Authorization header when auth is omitted", async () => {
+    const { authorizations } = installHandshake();
+    const client = createTransmissionClient({
+      baseUrl: "http://transmission:9091",
+    });
+
+    await client.listTorrents(["id"]);
+    await client.listTorrents(["id"]);
+
+    assert.deepEqual(authorizations, [null, null, null]);
+  });
+
+  it("throws TransmissionUpstreamError with status 401 after one request", async () => {
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return new Response("", { status: 401 });
+    };
+
+    const client = createTransmissionClient({
+      baseUrl: "http://transmission:9091",
+      auth: { username, password },
+    });
+
+    await assert.rejects(
+      () => client.getSessionStats(),
+      (err: unknown) =>
+        err instanceof TransmissionUpstreamError && err.status === 401,
+    );
+    assert.equal(calls, 1);
+  });
+});

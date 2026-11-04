@@ -7,8 +7,9 @@
 // clean value or throws with the variable's name in the message, so the log
 // line at boot tells you exactly which one to fix. Two variables have
 // defaults (PORT, NODE_ENV), USER_PREFERENCES_FILE defaults next to the
-// session-revocation file when unset, and ACCESS_REQUESTS_FILE and
-// TRANSMISSION_URL are genuinely optional. Everything else is required, because
+// session-revocation file when unset, and ACCESS_REQUESTS_FILE,
+// TRANSMISSION_URL, TRANSMISSION_USERNAME, and TRANSMISSION_PASSWORD are
+// genuinely optional. Everything else is required, because
 // every one of them is a credential, an upstream address, or core auth
 // infrastructure the app can't work without.
 //
@@ -50,10 +51,17 @@ export type AppConfig = {
   /** Absolute path to the user-preferences JSON file. Always present. */
   userPreferencesFile: string;
   /**
-   * Transmission RPC base URL, no trailing slash. Absent = feature off;
-   * nothing constructs the client yet.
+   * Transmission RPC base URL, no trailing slash. Absent = feature off.
+   * index.ts builds the client when this is set.
    */
   transmissionUrl?: string;
+  /**
+   * HTTP Basic credentials for the Transmission RPC, from
+   * TRANSMISSION_USERNAME and TRANSMISSION_PASSWORD. Absent means the client
+   * sends no Authorization header, which only works while the daemon does not
+   * require a login.
+   */
+  transmissionAuth?: { username: string; password: string };
 };
 
 /**
@@ -204,6 +212,47 @@ function parseTransmissionUrl(raw: string | undefined): string | undefined {
   return stripped;
 }
 
+function isPresent(value: string | undefined): value is string {
+  return value !== undefined && value.trim() !== "";
+}
+
+/**
+ * Optional HTTP Basic credentials for the Transmission RPC.
+ *
+ * Whitespace-only counts as unset. A value that is set is kept as given,
+ * including spaces. Both unset returns undefined. Throws, naming the
+ * variables and never their values, when only one of TRANSMISSION_USERNAME
+ * and TRANSMISSION_PASSWORD is set, when both are set without
+ * TRANSMISSION_URL, or when the username contains a colon.
+ */
+function parseTransmissionAuth(
+  username: string | undefined,
+  password: string | undefined,
+  transmissionUrl: string | undefined,
+): { username: string; password: string } | undefined {
+  const usernameSet = isPresent(username);
+  const passwordSet = isPresent(password);
+  if (!usernameSet && !passwordSet) {
+    return undefined;
+  }
+  if (!usernameSet || !passwordSet) {
+    throw new Error(
+      "Invalid TRANSMISSION_USERNAME: set both TRANSMISSION_USERNAME and TRANSMISSION_PASSWORD, or neither",
+    );
+  }
+  if (transmissionUrl === undefined) {
+    throw new Error(
+      "Invalid TRANSMISSION_URL: required when TRANSMISSION_USERNAME and TRANSMISSION_PASSWORD are set",
+    );
+  }
+  if (username.includes(":")) {
+    throw new Error(
+      "Invalid TRANSMISSION_USERNAME: must not contain a colon",
+    );
+  }
+  return { username, password };
+}
+
 /**
  * Truly optional: unset/whitespace → feature off (undefined). When set, must
  * be a non-empty absolute path — a relative path means the Docker volume mount
@@ -258,6 +307,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   // off the object entirely instead of setting it to undefined.
   const accessRequestsFile = parseAccessRequestsFile(env.ACCESS_REQUESTS_FILE);
   const transmissionUrl = parseTransmissionUrl(env.TRANSMISSION_URL);
+  const transmissionAuth = parseTransmissionAuth(
+    env.TRANSMISSION_USERNAME,
+    env.TRANSMISSION_PASSWORD,
+    transmissionUrl,
+  );
   const sessionRevocationFile = parseSessionRevocationFile(
     env.SESSION_REVOCATION_FILE,
   );
@@ -286,5 +340,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     userPreferencesFile,
     ...(accessRequestsFile !== undefined ? { accessRequestsFile } : {}),
     ...(transmissionUrl !== undefined ? { transmissionUrl } : {}),
+    ...(transmissionAuth !== undefined ? { transmissionAuth } : {}),
   };
 }

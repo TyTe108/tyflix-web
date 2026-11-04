@@ -169,10 +169,15 @@ async function start(): Promise<void> {
   });
 
   // Unset TRANSMISSION_URL leaves this undefined and the admin torrents route
-  // unmounted.
+  // unmounted. auth is passed only when transmissionAuth is present.
   const transmission =
     config.transmissionUrl !== undefined
-      ? createTransmissionClient({ baseUrl: config.transmissionUrl })
+      ? createTransmissionClient({
+          baseUrl: config.transmissionUrl,
+          ...(config.transmissionAuth !== undefined
+            ? { auth: config.transmissionAuth }
+            : {}),
+        })
       : undefined;
 
   // TMDB supplies discovery metadata and poster art. mediaEnrichment is the

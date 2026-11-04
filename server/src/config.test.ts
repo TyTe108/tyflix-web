@@ -343,4 +343,157 @@ describe("loadConfig", () => {
     );
   });
 
+  it("leaves transmissionAuth off when both credentials are unset or whitespace-only", () => {
+    const unset = loadConfig(validEnv);
+    assert.equal("transmissionAuth" in unset, false);
+
+    const empty = loadConfig({
+      ...validEnv,
+      TRANSMISSION_URL: "http://transmission:9091",
+      TRANSMISSION_USERNAME: "",
+      TRANSMISSION_PASSWORD: "",
+    });
+    assert.equal("transmissionAuth" in empty, false);
+
+    const whitespace = loadConfig({
+      ...validEnv,
+      TRANSMISSION_URL: "http://transmission:9091",
+      TRANSMISSION_USERNAME: "   ",
+      TRANSMISSION_PASSWORD: " \t ",
+    });
+    assert.equal("transmissionAuth" in whitespace, false);
+  });
+
+  it("keeps transmissionAuth exactly as given when both credentials and the URL are set", () => {
+    const username = "rpcuser";
+    const password = "  secret:keep";
+    const config = loadConfig({
+      ...validEnv,
+      TRANSMISSION_URL: "http://transmission:9091",
+      TRANSMISSION_USERNAME: username,
+      TRANSMISSION_PASSWORD: password,
+    });
+    assert.deepEqual(config.transmissionAuth, { username, password });
+  });
+
+  it("throws naming both variables when only one Transmission credential is set", () => {
+    const username = "only-user-value";
+    const password = "only-pass-value";
+    const url = { TRANSMISSION_URL: "http://transmission:9091" };
+
+    assert.throws(
+      () =>
+        loadConfig({
+          ...validEnv,
+          ...url,
+          TRANSMISSION_USERNAME: username,
+        }),
+      (err: unknown) =>
+        err instanceof Error &&
+        err.message.includes("TRANSMISSION_USERNAME") &&
+        err.message.includes("TRANSMISSION_PASSWORD") &&
+        !err.message.includes(username),
+    );
+    assert.throws(
+      () =>
+        loadConfig({
+          ...validEnv,
+          ...url,
+          TRANSMISSION_PASSWORD: password,
+        }),
+      (err: unknown) =>
+        err instanceof Error &&
+        err.message.includes("TRANSMISSION_USERNAME") &&
+        err.message.includes("TRANSMISSION_PASSWORD") &&
+        !err.message.includes(password),
+    );
+    assert.throws(
+      () =>
+        loadConfig({
+          ...validEnv,
+          ...url,
+          TRANSMISSION_USERNAME: username,
+          TRANSMISSION_PASSWORD: "   ",
+        }),
+      (err: unknown) =>
+        err instanceof Error &&
+        err.message.includes("TRANSMISSION_USERNAME") &&
+        err.message.includes("TRANSMISSION_PASSWORD") &&
+        !err.message.includes(username),
+    );
+    assert.throws(
+      () =>
+        loadConfig({
+          ...validEnv,
+          ...url,
+          TRANSMISSION_USERNAME: " \t ",
+          TRANSMISSION_PASSWORD: password,
+        }),
+      (err: unknown) =>
+        err instanceof Error &&
+        err.message.includes("TRANSMISSION_USERNAME") &&
+        err.message.includes("TRANSMISSION_PASSWORD") &&
+        !err.message.includes(password),
+    );
+  });
+
+  it("throws naming TRANSMISSION_URL when credentials are set without it", () => {
+    const username = "both-user-value";
+    const password = "both-pass-value";
+    const namesUrlAndOmitsSecrets = (err: unknown) =>
+      err instanceof Error &&
+      err.message.includes("TRANSMISSION_URL") &&
+      !err.message.includes(username) &&
+      !err.message.includes(password);
+
+    assert.throws(
+      () =>
+        loadConfig({
+          ...validEnv,
+          TRANSMISSION_USERNAME: username,
+          TRANSMISSION_PASSWORD: password,
+        }),
+      namesUrlAndOmitsSecrets,
+    );
+    assert.throws(
+      () =>
+        loadConfig({
+          ...validEnv,
+          TRANSMISSION_URL: "",
+          TRANSMISSION_USERNAME: username,
+          TRANSMISSION_PASSWORD: password,
+        }),
+      namesUrlAndOmitsSecrets,
+    );
+    assert.throws(
+      () =>
+        loadConfig({
+          ...validEnv,
+          TRANSMISSION_URL: "  ",
+          TRANSMISSION_USERNAME: username,
+          TRANSMISSION_PASSWORD: password,
+        }),
+      namesUrlAndOmitsSecrets,
+    );
+  });
+
+  it("throws naming TRANSMISSION_USERNAME when the username contains a colon", () => {
+    const username = "user:name";
+    const password = "hidden-password";
+    assert.throws(
+      () =>
+        loadConfig({
+          ...validEnv,
+          TRANSMISSION_URL: "http://transmission:9091",
+          TRANSMISSION_USERNAME: username,
+          TRANSMISSION_PASSWORD: password,
+        }),
+      (err: unknown) =>
+        err instanceof Error &&
+        err.message.includes("TRANSMISSION_USERNAME") &&
+        !err.message.includes(username) &&
+        !err.message.includes(password),
+    );
+  });
+
 });
