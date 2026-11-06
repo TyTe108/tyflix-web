@@ -1211,6 +1211,7 @@ describe("plexServer.playbackMeta", () => {
         channels: 2,
         title: "Stereo",
         default: true,
+        selected: false,
       },
     ]);
     assert.deepEqual(meta.subtitle, [
@@ -1233,6 +1234,142 @@ describe("plexServer.playbackMeta", () => {
         textBased: false,
       },
     ]);
+  });
+
+  // Recorded live on 2026-11-04, S01E03 part 15133. Portuguese is the
+  // container default. Korean is the stream that account had selected.
+  it("parses the recorded S01E03 audio streams", async () => {
+    globalThis.fetch = (async () =>
+      jsonResponse(200, {
+        MediaContainer: {
+          Metadata: [
+            {
+              Media: [
+                {
+                  Part: [
+                    {
+                      id: 15133,
+                      Stream: [
+                        {
+                          audioChannelLayout: "stereo",
+                          bitrate: 128,
+                          channels: 2,
+                          codec: "aac",
+                          default: true,
+                          displayTitle: "Português (HE-AAC Stereo)",
+                          extendedDisplayTitle:
+                            "Portuguese (Brazil) (Português HE-AAC Stereo)",
+                          id: 74294,
+                          index: 1,
+                          language: "Português",
+                          languageCode: "por",
+                          languageTag: "pt-BR",
+                          profile: "he-aac",
+                          samplingRate: 48000,
+                          streamType: 2,
+                          title: "Portuguese (Brazil)",
+                        },
+                        {
+                          audioChannelLayout: "stereo",
+                          bitrate: 128,
+                          channels: 2,
+                          codec: "aac",
+                          displayTitle: "한국어 (HE-AAC Stereo)",
+                          extendedDisplayTitle:
+                            "Korean (한국어 HE-AAC Stereo)",
+                          id: 74295,
+                          index: 2,
+                          language: "한국어",
+                          languageCode: "kor",
+                          languageTag: "ko",
+                          profile: "he-aac",
+                          samplingRate: 48000,
+                          selected: true,
+                          streamType: 2,
+                          title: "Korean",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      })) as typeof fetch;
+
+    const meta = await client().playbackMeta("9304");
+
+    assert.deepEqual(meta.audio, [
+      {
+        id: "74294",
+        language: "Português",
+        codec: "aac",
+        channels: 2,
+        title: "Portuguese (Brazil)",
+        default: true,
+        selected: false,
+      },
+      {
+        id: "74295",
+        language: "한국어",
+        codec: "aac",
+        channels: 2,
+        title: "Korean",
+        default: false,
+        selected: true,
+      },
+    ]);
+  });
+
+  it("maps a stream selected flag through plexBool", async () => {
+    const cases: Array<{ selected?: unknown; expected: boolean }> = [
+      { selected: true, expected: true },
+      { selected: 1, expected: true },
+      { selected: "1", expected: true },
+      { expected: false },
+      { selected: false, expected: false },
+      { selected: 0, expected: false },
+    ];
+    const actual: boolean[] = [];
+
+    for (const row of cases) {
+      globalThis.fetch = (async () =>
+        jsonResponse(200, {
+          MediaContainer: {
+            Metadata: [
+              {
+                Media: [
+                  {
+                    Part: [
+                      {
+                        id: 1,
+                        Stream: [
+                          {
+                            id: 10,
+                            streamType: 2,
+                            ...(row.selected !== undefined
+                              ? { selected: row.selected }
+                              : {}),
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        })) as typeof fetch;
+
+      const meta = await client().playbackMeta("12345");
+      actual.push(meta.audio[0].selected);
+    }
+
+    assert.deepEqual(
+      actual,
+      cases.map((row) => row.expected),
+    );
   });
 
   it("uses the passed user token for the metadata GET", async () => {
@@ -1503,6 +1640,76 @@ describe("plexServer.selectSubtitle", () => {
         assert.ok(err instanceof PlexServerUpstreamError);
         assert.equal(err.status, 500);
         assert.match(err.message, /\/library\/parts\/55501/);
+        return true;
+      },
+    );
+  });
+});
+
+describe("plexServer.selectAudio", () => {
+  it("PUTs the part-selection URL with the user token", async () => {
+    let requestedUrl: string | null = null;
+    let requestedMethod: string | null = null;
+    let requestedToken: string | null = null;
+    let requestedAccept: string | null = null;
+    let requestedBody: unknown = "unset";
+    globalThis.fetch = (async (
+      input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
+      requestedUrl =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      requestedMethod = init?.method ?? "GET";
+      const headers = new Headers(init?.headers);
+      requestedToken = headers.get("X-Plex-Token");
+      requestedAccept = headers.get("Accept");
+      requestedBody = init?.body;
+      return jsonResponse(200, {});
+    }) as typeof fetch;
+
+    await client().selectAudio("15133", "74295", "user-token-abc");
+
+    assert.equal(
+      requestedUrl,
+      `${BASE_URL}/library/parts/15133?audioStreamID=74295`,
+    );
+    assert.equal(requestedMethod, "PUT");
+    assert.equal(requestedToken, "user-token-abc");
+    assert.equal(requestedAccept, "application/json");
+    assert.equal(requestedBody, undefined);
+  });
+
+  it("throws PlexServerUpstreamError on a non-OK response", async () => {
+    globalThis.fetch = (async () =>
+      jsonResponse(500, { error: "boom" })) as typeof fetch;
+
+    await assert.rejects(
+      client().selectAudio("15133", "74295", "user-token-abc"),
+      (err: unknown) => {
+        assert.ok(err instanceof PlexServerUpstreamError);
+        assert.equal(err.status, 500);
+        assert.match(err.message, /\/library\/parts\/15133/);
+        assert.equal(err.message.includes("user-token-abc"), false);
+        return true;
+      },
+    );
+  });
+
+  it("throws PlexServerUpstreamError when fetch rejects", async () => {
+    globalThis.fetch = (async () => {
+      throw new Error("connect ECONNREFUSED");
+    }) as typeof fetch;
+
+    await assert.rejects(
+      client().selectAudio("15133", "74295", "user-token-abc"),
+      (err: unknown) => {
+        assert.ok(err instanceof PlexServerUpstreamError);
+        assert.equal(err.status, 502);
+        assert.equal(err.message.includes("user-token-abc"), false);
         return true;
       },
     );

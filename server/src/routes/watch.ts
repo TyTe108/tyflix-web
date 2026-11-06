@@ -1,5 +1,5 @@
 // Playback. This is the entrypoint for every "press play" in the app, mounted
-// at /api/watch behind requireAuth. Nine endpoints:
+// at /api/watch behind requireAuth. Ten endpoints:
 //
 //   GET /continue                     the Continue Watching rail
 //   GET /movie/:tmdbId                play descriptor for a movie, by TMDB id
@@ -9,6 +9,7 @@
 //   GET /episode/:ratingKey/previous  the episode before this one
 //   GET /item/:ratingKey              play descriptor for any Plex item
 //   PUT /subtitle/:ratingKey          pick or clear the burned-in subtitle
+//   PUT /audio/:ratingKey             pick the audio track Plex plays
 //   POST /timeline                    report progress back to Plex
 //
 // The important thing here is what a play descriptor is. Video does not go
@@ -95,7 +96,10 @@ type PlayTuning = {
   maxVideoBitrate?: number; // kbps
   videoResolution?: string; // "WxH", e.g. "1280x720"
   offset?: number; // seconds to start at
-  audioStreamID?: string; // Plex stream id, from streams.audio
+  // Plex ignored audioStreamID on this server's HLS path when checked on
+  // 2026-11-04 (DASH wasn't checked). A track is selected through
+  // PUT /audio/:ratingKey instead.
+  audioStreamID?: string;
 };
 
 export function createWatchRouter(deps: WatchRouterDeps): Router {
@@ -588,6 +592,86 @@ export function createWatchRouter(deps: WatchRouterDeps): Router {
   });
 
   /**
+   * PUT /api/watch/audio/:ratingKey
+   *
+   * Stores which audio stream Plex plays for the current user on a media item.
+   * The browser already has the ratingKey from a play descriptor. The part id
+   * is resolved server-side.
+   *
+   * Body: `audioStreamID`, a string of digits with no leading zero. The id
+   * has to be one of this item's audio stream ids. Returns `{ ok: true }`.
+   *
+   * 400 when the ratingKey is not numeric, when audioStreamID is missing or
+   * not a positive numeric string, or when the id is not an audio stream of
+   * this item. 401 without a session. 404 when the item has no part id. 409
+   * when the session has no Plex token. 502 if Plex fails.
+   *
+   * Plex ignored audioStreamID on this server's HLS transcode URL when checked
+   * on 2026-11-04 (DASH wasn't checked). The call that stores the choice is
+   * this PUT against the part.
+   */
+  router.put("/audio/:ratingKey", async (req, res) => {
+    const ratingKey = req.params.ratingKey;
+    if (!/^\d+$/.test(ratingKey)) {
+      res.status(400).json({ error: "ratingKey must be numeric" });
+      return;
+    }
+
+    const audioStreamID = readAudioStreamID(req.body);
+    if (audioStreamID === null) {
+      res.status(400).json({
+        error: "audioStreamID must be a positive number",
+      });
+      return;
+    }
+
+    const session = res.locals.session as SessionPayload | undefined;
+    if (!session) {
+      res.status(401).json({ error: "not authenticated" });
+      return;
+    }
+
+    let userToken: string | null;
+    try {
+      // readPlexToken throws on a tampered/corrupt blob; surface that as 502.
+      userToken = readPlexToken(session, sessionSecret);
+    } catch (err) {
+      respondUpstreamError(res, err);
+      return;
+    }
+    if (userToken === null) {
+      res.status(409).json({ error: "re-login required" });
+      return;
+    }
+
+    try {
+      const pmsToken = await resolvePmsToken(session.plexId, userToken);
+
+      // Read with the server token, not the user's. The part id and the audio
+      // stream list belong to the file, so they are the same for everyone.
+      // The selection below is what gets applied per user.
+      const meta = await plexServer.playbackMeta(ratingKey);
+      if (meta.partId === null) {
+        res.status(404).json({ error: "not playable" });
+        return;
+      }
+
+      const listed = meta.audio.some((stream) => stream.id === audioStreamID);
+      if (!listed) {
+        res.status(400).json({
+          error: "audioStreamID is not an audio stream of this item",
+        });
+        return;
+      }
+
+      await plexServer.selectAudio(meta.partId, audioStreamID, pmsToken);
+      res.json({ ok: true });
+    } catch (err) {
+      respondUpstreamError(res, err);
+    }
+  });
+
+  /**
    * GET /api/watch/episode/:ratingKey
    *
    * Play descriptor for one episode, returned as
@@ -778,6 +862,19 @@ function readSubtitleStreamID(body: unknown): string | null {
   }
   const raw = (body as { subtitleStreamID?: unknown }).subtitleStreamID;
   if (typeof raw !== "string" || !/^\d+$/.test(raw)) {
+    return null;
+  }
+  return raw;
+}
+
+// A positive numeric string with no leading zero. "0" is not accepted.
+// Non-string values return null.
+function readAudioStreamID(body: unknown): string | null {
+  if (typeof body !== "object" || body === null) {
+    return null;
+  }
+  const raw = (body as { audioStreamID?: unknown }).audioStreamID;
+  if (typeof raw !== "string" || !/^[1-9]\d*$/.test(raw)) {
     return null;
   }
   return raw;

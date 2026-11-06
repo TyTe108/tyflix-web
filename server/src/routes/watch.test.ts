@@ -1679,6 +1679,342 @@ describe("PUT /api/watch/subtitle/:ratingKey", () => {
   });
 });
 
+const ITEM_AUDIO = [
+  {
+    id: "74294",
+    language: "Português",
+    codec: "aac",
+    channels: 2,
+    title: "Portuguese (Brazil)",
+    default: true,
+    selected: false,
+  },
+  {
+    id: "74295",
+    language: "한국어",
+    codec: "aac",
+    channels: 2,
+    title: "Korean",
+    default: false,
+    selected: true,
+  },
+];
+
+function audioMeta(partId: string | null = "15133") {
+  return {
+    durationMs: null,
+    creditsOffsetMs: null,
+    partId,
+    audio: ITEM_AUDIO,
+    subtitle: [],
+    title: null,
+    subheading: null,
+    viewOffsetMs: null,
+  };
+}
+
+describe("PUT /api/watch/audio/:ratingKey", () => {
+  it("rejects a non-numeric ratingKey with 400", async () => {
+    const deps = baseDeps();
+    deps.plexServer = {
+      async playbackMeta() {
+        throw new Error("playbackMeta should not be called");
+      },
+      async selectAudio() {
+        throw new Error("selectAudio should not be called");
+      },
+    } as unknown as PlexServerClient;
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/audio/abc",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      { method: "PUT", body: { audioStreamID: "74295" } },
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      error: "ratingKey must be numeric",
+    });
+  });
+
+  it("rejects a bad audioStreamID with 400", async () => {
+    const deps = baseDeps();
+    deps.plexServer = {
+      async playbackMeta() {
+        throw new Error("playbackMeta should not be called");
+      },
+      async selectAudio() {
+        throw new Error("selectAudio should not be called");
+      },
+    } as unknown as PlexServerClient;
+    const app = createApp(deps);
+    const cookie = sessionCookie({ plexToken: USER_TOKEN });
+    const bodies: unknown[] = [
+      {},
+      { audioStreamID: "" },
+      { audioStreamID: "abc" },
+      { audioStreamID: "0" },
+      { audioStreamID: "007" },
+      { audioStreamID: 74295 },
+    ];
+    const results: Array<{ status: number; body: unknown }> = [];
+
+    for (const body of bodies) {
+      const response = await fetchLocal(app, "/api/watch/audio/12345", cookie, {
+        method: "PUT",
+        body,
+      });
+      results.push({ status: response.status, body: await response.json() });
+    }
+
+    assert.deepEqual(
+      results,
+      bodies.map(() => ({
+        status: 400,
+        body: { error: "audioStreamID must be a positive number" },
+      })),
+    );
+  });
+
+  it("returns 401 when no session cookie is present", async () => {
+    const deps = baseDeps();
+    deps.plexServer = {
+      async playbackMeta() {
+        throw new Error("playbackMeta should not be called");
+      },
+      async selectAudio() {
+        throw new Error("selectAudio should not be called");
+      },
+    } as unknown as PlexServerClient;
+    const app = createApp(deps);
+    const response = await fetchLocal(app, "/api/watch/audio/12345", "", {
+      method: "PUT",
+      body: { audioStreamID: "74295" },
+    });
+
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), { error: "not authenticated" });
+  });
+
+  it("returns 409 when the session carries no Plex token", async () => {
+    const deps = baseDeps();
+    deps.plexServer = {
+      async playbackMeta() {
+        throw new Error("playbackMeta should not be called");
+      },
+      async selectAudio() {
+        throw new Error("selectAudio should not be called");
+      },
+    } as unknown as PlexServerClient;
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/audio/12345",
+      sessionCookie(),
+      { method: "PUT", body: { audioStreamID: "74295" } },
+    );
+
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), { error: "re-login required" });
+  });
+
+  it("returns 404 when playbackMeta has no partId", async () => {
+    const deps = baseDeps();
+    deps.plexServer = {
+      async playbackMeta() {
+        return audioMeta(null);
+      },
+      async selectAudio() {
+        throw new Error("selectAudio should not be called");
+      },
+    } as unknown as PlexServerClient;
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/audio/12345",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      { method: "PUT", body: { audioStreamID: "74295" } },
+    );
+
+    assert.equal(response.status, 404);
+    assert.deepEqual(await response.json(), { error: "not playable" });
+  });
+
+  it("rejects an audioStreamID that is not on the item with 400", async () => {
+    const deps = baseDeps();
+    deps.plexServer = {
+      async playbackMeta() {
+        return audioMeta();
+      },
+      async selectAudio() {
+        throw new Error("selectAudio should not be called");
+      },
+    } as unknown as PlexServerClient;
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/audio/12345",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      { method: "PUT", body: { audioStreamID: "74296" } },
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      error: "audioStreamID is not an audio stream of this item",
+    });
+  });
+
+  it("selects the audio via the user token on the happy path", async () => {
+    const playbackMetaCalls: unknown[][] = [];
+    const selectCalls: Array<[string, string, string]> = [];
+    const deps = baseDeps();
+    deps.plexServer = {
+      async playbackMeta(...args: unknown[]) {
+        playbackMetaCalls.push(args);
+        return audioMeta();
+      },
+      async selectAudio(
+        partId: string,
+        audioStreamID: string,
+        userToken: string,
+      ) {
+        selectCalls.push([partId, audioStreamID, userToken]);
+      },
+    } as unknown as PlexServerClient;
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/audio/12345",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      { method: "PUT", body: { audioStreamID: "74295" } },
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.deepEqual(playbackMetaCalls, [["12345"]]);
+    assert.deepEqual(selectCalls, [["15133", "74295", USER_TOKEN]]);
+  });
+
+  it("selects the audio with the shared per-server token when resolveAccessToken finds one", async () => {
+    const playbackMetaCalls: unknown[][] = [];
+    const selectCalls: Array<[string, string, string]> = [];
+    const deps = baseDeps();
+    deps.sharedServerAccess = {
+      async resolveAccessToken() {
+        return SHARED_TOKEN;
+      },
+    } as SharedServerAccessResolver;
+    deps.plexServer = {
+      async playbackMeta(...args: unknown[]) {
+        playbackMetaCalls.push(args);
+        return audioMeta();
+      },
+      async selectAudio(
+        partId: string,
+        audioStreamID: string,
+        userToken: string,
+      ) {
+        selectCalls.push([partId, audioStreamID, userToken]);
+      },
+    } as unknown as PlexServerClient;
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/audio/12345",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      { method: "PUT", body: { audioStreamID: "74295" } },
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.deepEqual(playbackMetaCalls, [["12345"]]);
+    assert.deepEqual(selectCalls, [["15133", "74295", SHARED_TOKEN]]);
+  });
+
+  it("returns 502 when playbackMeta fails upstream", async () => {
+    const deps = baseDeps();
+    deps.plexServer = {
+      async playbackMeta() {
+        throw new Error("Plex playback metadata missing for 12345");
+      },
+      async selectAudio() {
+        throw new Error("selectAudio should not be called");
+      },
+    } as unknown as PlexServerClient;
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/audio/12345",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      { method: "PUT", body: { audioStreamID: "74295" } },
+    );
+
+    const body: unknown = await response.json();
+    assert.equal(response.status, 502);
+    assert.deepEqual(body, {
+      error: "Plex playback metadata missing for 12345",
+    });
+    assert.equal(JSON.stringify(body).includes(USER_TOKEN), false);
+  });
+
+  it("returns 502 when selectAudio fails upstream", async () => {
+    const deps = baseDeps();
+    deps.plexServer = {
+      async playbackMeta() {
+        return audioMeta();
+      },
+      async selectAudio() {
+        throw new PlexServerUpstreamError(
+          "Plex server /library/parts/15133 failed (500)",
+          500,
+        );
+      },
+    } as unknown as PlexServerClient;
+    const app = createApp(deps);
+    const response = await fetchLocal(
+      app,
+      "/api/watch/audio/12345",
+      sessionCookie({ plexToken: USER_TOKEN }),
+      { method: "PUT", body: { audioStreamID: "74295" } },
+    );
+
+    const body: unknown = await response.json();
+    assert.equal(response.status, 502);
+    assert.deepEqual(body, {
+      error: "Plex server /library/parts/15133 failed (500)",
+    });
+    assert.equal(JSON.stringify(body).includes(USER_TOKEN), false);
+  });
+});
+
+describe("play descriptor streams.audio", () => {
+  it("returns each stream's selected flag on the movie, episode, and item routes", async () => {
+    const deps = baseDeps();
+    deps.plexServer = {
+      async playbackMeta() {
+        return audioMeta();
+      },
+    } as unknown as PlexServerClient;
+    const app = createApp(deps);
+    const cookie = sessionCookie({ plexToken: USER_TOKEN });
+    const paths = [
+      "/api/watch/movie/603",
+      "/api/watch/episode/12345",
+      "/api/watch/item/12345",
+    ];
+
+    for (const path of paths) {
+      const response = await fetchLocal(app, path, cookie);
+      assert.equal(response.status, 200, path);
+      const body = (await response.json()) as {
+        streams: { audio: unknown };
+      };
+      assert.deepEqual(body.streams.audio, ITEM_AUDIO, path);
+    }
+  });
+});
+
 describe("POST /api/watch/timeline", () => {
   const validBody = {
     ratingKey: "12345",

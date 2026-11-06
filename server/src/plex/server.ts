@@ -14,9 +14,10 @@
 // through plexBool. Second, the owner token is the wrong token for a shared
 // user. Anything whose answer depends on who's asking takes an explicit
 // userToken. The per-user reads (playbackMeta, sectionItems, onDeck) go out
-// through getJsonWithToken instead of getJson; the two per-user writes
-// (selectSubtitle, reportTimeline) build their own request and carry the same
-// token themselves. Getting that wrong is what broke every shared account once.
+// through getJsonWithToken instead of getJson; the three per-user writes
+// (selectSubtitle, selectAudio, reportTimeline) build their own request and
+// carry the same token themselves. Getting that wrong is what broke every
+// shared account once.
 
 /**
  * Thrown for every failure talking to the PMS, with the upstream HTTP status
@@ -103,8 +104,12 @@ export type AdjacentEpisode = Pick<
   "ratingKey" | "seasonNumber" | "episodeNumber" | "title" | "thumb"
 >;
 
-// One audio track on the part being played. `id` is Plex's stream id, which is
-// what goes back as audioStreamID on a transcode URL.
+// One audio track on the part being played. `id` is Plex's stream id, which
+// selectAudio takes. Plex ignored it as a transcode URL param when checked
+// on 2026-11-04: HLS on Plex 1.43.3.10896, DASH not checked. `default` is the
+// container's flag and Plex does not use it to choose. `selected` is per user
+// and marks the stream Plex will play. Plex leaves the key out when it is
+// false.
 export type AudioStream = {
   id: string;
   language: string | null;
@@ -112,6 +117,7 @@ export type AudioStream = {
   channels: number | null;
   title: string | null;
   default: boolean;
+  selected: boolean;
 };
 
 // One subtitle track on the part being played. `id` is the stream id used both
@@ -137,8 +143,8 @@ export type PlaybackMeta = {
   // Start of the credits, in ms from the top. Drives the Up Next card. Null
   // whenever the item has no usable credits marker.
   creditsOffsetMs: number | null;
-  // Media part id. Needed before subtitles can be selected, since selection is a
-  // PUT against the part and not against the item.
+  // Media part id. The part id is needed to select an audio or subtitle track.
+  // Selection is a PUT against the part and not against the item.
   partId: string | null;
   audio: AudioStream[];
   subtitle: SubtitleStream[];
@@ -804,6 +810,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
         channels?: unknown;
         title?: unknown;
         default?: unknown;
+        selected?: unknown;
         forced?: unknown;
         key?: unknown;
       };
@@ -816,8 +823,9 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
       const codec = typeof row.codec === "string" ? row.codec : null;
       const title = typeof row.title === "string" ? row.title : null;
 
-      // `default` and `forced` arrive as 0/1 rather than booleans, so both go
-      // through plexBool.
+      // `default`, `selected`, and `forced` arrive as 0/1 rather than booleans,
+      // so each goes through plexBool. Plex leaves `selected` out when it is
+      // false.
       if (row.streamType === 2) {
         audio.push({
           id,
@@ -826,6 +834,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
           channels: typeof row.channels === "number" ? row.channels : null,
           title,
           default: plexBool(row.default),
+          selected: plexBool(row.selected),
         });
       } else if (row.streamType === 3) {
         subtitle.push({
@@ -1339,6 +1348,48 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     }
   }
 
+  // Selects the audio track Plex will play for the calling user on a media
+  // part. Uses the user's token.
+  //
+  // The choice is the audioStreamID query param on a PUT, and the request has
+  // no body. It targets the part id from playbackMeta, not the ratingKey.
+  // Plex stores the choice on the account, and it applies to a transcode
+  // session started afterwards.
+  //
+  // Throws PlexServerUpstreamError. A non-2xx response keeps that status, and
+  // the message names the part path. A fetch rejection is status 502.
+  async function selectAudio(
+    partId: string,
+    audioStreamID: string,
+    userToken: string,
+  ): Promise<void> {
+    const path = `/library/parts/${partId}`;
+    const url = new URL(`${baseUrl}${path}`);
+    url.searchParams.set("audioStreamID", audioStreamID);
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "PUT",
+        headers: {
+          "X-Plex-Token": userToken,
+          Accept: "application/json",
+        },
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Plex server request failed";
+      throw new PlexServerUpstreamError(message, 502);
+    }
+
+    if (!res.ok) {
+      throw new PlexServerUpstreamError(
+        `Plex server ${path} failed (${res.status})`,
+        res.status,
+      );
+    }
+  }
+
   // Reports one playback timeline event for the calling user so Plex can
   // update resume position / watched state. Param set is UNVERIFIED against
   // a live PMS — keep the query construction easy to adjust. Uses the USER's
@@ -1406,6 +1457,7 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
     sectionFirstCharacters,
     fetchImage,
     selectSubtitle,
+    selectAudio,
     reportTimeline,
   };
 }
