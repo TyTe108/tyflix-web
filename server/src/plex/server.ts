@@ -823,9 +823,8 @@ export function createPlexServerClient(options: PlexServerClientOptions) {
       const codec = typeof row.codec === "string" ? row.codec : null;
       const title = typeof row.title === "string" ? row.title : null;
 
-      // `default`, `selected`, and `forced` arrive as 0/1 rather than booleans,
-      // so each goes through plexBool. Plex leaves `selected` out when it is
-      // false.
+      // `default`, `selected`, and `forced` can arrive as true, 1 or "1" (see plexBool), so each goes
+      // through plexBool. Plex leaves `selected` out when it is false.
       if (row.streamType === 2) {
         audio.push({
           id,
