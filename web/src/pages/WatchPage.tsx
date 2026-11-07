@@ -682,6 +682,14 @@ export function WatchPage() {
   const pendingResumeRef = useRef<PendingResume | null>(null);
   // Last good Cast receiver position; survives disconnect so local HLS can resume.
   const lastRemotePositionRef = useRef<number | null>(null);
+  // Last real position of the local <video>, in seconds. The local timeline
+  // reporter writes it whenever the element reads above 0 (timeupdate, playing,
+  // pause, seeked), and the Cast handoff sets it to the receiver's last
+  // position when it parks that position for the local stream. The reporter
+  // falls back to it when the element reads 0 after hls.js tears the stream
+  // down. The load effect resets it to null for each item. A position of 0
+  // never counts as real, so null means nothing real has been seen yet.
+  const lastGoodPositionRef = useRef<number | null>(null);
   // Previous value of castUi.connected, so the true-to-false edge is detectable.
   const wasCastConnectedRef = useRef(false);
   // Last subtitleStreamId successfully applied via PUT. Avoids redundant
@@ -826,6 +834,7 @@ export function WatchPage() {
     setResumeDialog(null);
     pendingResumeRef.current = null;
     lastRemotePositionRef.current = null;
+    lastGoodPositionRef.current = null;
     appliedSubtitleIdRef.current = null;
 
     void load()
@@ -985,15 +994,22 @@ export function WatchPage() {
 
   // Report playback timeline to Plex (resume position / watched state). Bound to
   // ratingKey only so quality/audio switches don't restart the heartbeat.
-  // While casting, this local <video> reporter is inert — the torn-down element
+  // While casting, this local <video> reporter is inert. The torn-down element
   // reads currentTime 0 and must not overwrite a good resume point.
   //
-  // Owns four media listeners, pagehide and visibilitychange, and one interval,
+  // Owns six media listeners, pagehide and visibilitychange, and one interval,
   // and drops all of them on cleanup. Player events map onto the three states
   // POST /api/watch/timeline accepts: playing on play and on a throttled seek,
   // paused on pause and when the tab goes hidden, stopped on ended and on the
   // way out. This is what makes the Continue Watching rail and the resume
   // dialog agree with the TV.
+  //
+  // Every report carries a real position or nothing. The position is the live
+  // element time when it is above 0, else lastGoodPositionRef, and a report is
+  // skipped when neither is above 0. A skipped paused or stopped report logs
+  // one console.warn. emptied stops the heartbeat, because hls.js resets the
+  // element on teardown (media.load() puts the position at 0) without firing
+  // a pause event, and the next playing starts it again.
   useEffect(() => {
     const ratingKey = descriptor?.ratingKey;
     if (ratingKey === undefined || ratingKey === "") {
@@ -1022,19 +1038,45 @@ export function WatchPage() {
     const resolveDurationMs = (): number =>
       resolveTimelineDurationMs(video.duration, timelineDurationMsRef.current);
 
-    const resolveTimeMs = (): number =>
-      Math.max(0, Math.round(video.currentTime * 1000));
+    // Remembers the element's position while it is a real one. 0 is what the
+    // element reads after a teardown, so it is never stored.
+    const noteGoodPosition = (): void => {
+      const live = video.currentTime;
+      if (Number.isFinite(live) && live > 0) {
+        lastGoodPositionRef.current = live;
+      }
+    };
 
-    const buildPayload = (state: TimelineState): TimelinePayload | null =>
-      buildTimelinePayload(
-        ratingKey,
-        state,
-        resolveTimeMs(),
-        resolveDurationMs(),
-      );
+    // The live position when above 0, else the last real one, else 0.
+    const resolveTimeMs = (): number => {
+      const live = video.currentTime;
+      if (Number.isFinite(live) && live > 0) {
+        return Math.round(live * 1000);
+      }
+      const kept = lastGoodPositionRef.current;
+      if (kept !== null && Number.isFinite(kept) && kept > 0) {
+        return Math.round(kept * 1000);
+      }
+      return 0;
+    };
 
+    // Nothing goes out at position 0. A paused or stopped report skipped for
+    // that reason is logged once, with the state and no identifiers. Playing
+    // reports and heartbeat ticks skip silently.
     const sendTimeline = (state: TimelineState, useBeacon = false): void => {
-      sendTimelinePayload(buildPayload(state), useBeacon);
+      const timeMs = resolveTimeMs();
+      if (timeMs <= 0) {
+        if (state !== "playing") {
+          console.warn(
+            `Timeline ${state} report skipped: no playback position was known.`,
+          );
+        }
+        return;
+      }
+      sendTimelinePayload(
+        buildTimelinePayload(ratingKey, state, timeMs, resolveDurationMs()),
+        useBeacon,
+      );
     };
 
     // Latched: pagehide and the effect cleanup can both fire on the way out,
@@ -1056,20 +1098,30 @@ export function WatchPage() {
     };
 
     const onPlaying = () => {
+      noteGoodPosition();
       sendTimeline("playing");
       startHeartbeat();
     };
 
     const onPause = () => {
+      noteGoodPosition();
       clearHeartbeat();
       sendTimeline("paused");
     };
 
     // Report the new position after a scrub, throttled, since dragging the
-    // scrubber lands a lot of these.
+    // scrubber lands a lot of these. A seek that lands on 0 sends nothing when
+    // no real position is known yet, and that return leaves the throttle
+    // window open. After something has played, a seek to 0 sends "playing"
+    // with the last real position, so Plex keeps the previous place until the
+    // next report.
     const onSeeked = () => {
+      noteGoodPosition();
       const now = Date.now();
       if (now - lastSeekReportAt < TIMELINE_SEEK_THROTTLE_MS) {
+        return;
+      }
+      if (resolveTimeMs() <= 0) {
         return;
       }
       lastSeekReportAt = now;
@@ -1079,6 +1131,13 @@ export function WatchPage() {
     const onEnded = () => {
       clearHeartbeat();
       sendTimeline("stopped");
+    };
+
+    // hls.js teardown resets the element with media.load(), which fires
+    // emptied and no pause. Without this the heartbeat would keep ticking
+    // after the player is gone.
+    const onEmptied = () => {
+      clearHeartbeat();
     };
 
     const onPageHide = () => {
@@ -1097,6 +1156,8 @@ export function WatchPage() {
     video.addEventListener("pause", onPause);
     video.addEventListener("seeked", onSeeked);
     video.addEventListener("ended", onEnded);
+    video.addEventListener("timeupdate", noteGoodPosition);
+    video.addEventListener("emptied", onEmptied);
     window.addEventListener("pagehide", onPageHide);
     document.addEventListener("visibilitychange", onVisibilityChange);
 
@@ -1105,6 +1166,8 @@ export function WatchPage() {
       video.removeEventListener("pause", onPause);
       video.removeEventListener("seeked", onSeeked);
       video.removeEventListener("ended", onEnded);
+      video.removeEventListener("timeupdate", noteGoodPosition);
+      video.removeEventListener("emptied", onEmptied);
       window.removeEventListener("pagehide", onPageHide);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       // Handing off to the cast reporter — do not beacon the torn-down video's 0.
@@ -1339,6 +1402,10 @@ export function WatchPage() {
         }
         if (Number.isFinite(position) && position > 0) {
           pendingResumeRef.current = { position, wasPlaying: true };
+          // The local stream has not played yet and the element reads 0, so
+          // the local reporter needs this position to report a real one if the
+          // page is left before the stream starts.
+          lastGoodPositionRef.current = position;
         }
       }
     }

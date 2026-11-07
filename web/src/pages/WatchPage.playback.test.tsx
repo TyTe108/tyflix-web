@@ -204,6 +204,132 @@ function setCastConnected(connected: boolean): void {
   });
 }
 
+// Phase 56.1 helpers. They are used by the timeline tests at the end of the
+// describe block below.
+
+// Every payload sent through reportTimeline so far, in order.
+function timelineCalls() {
+  return vi.mocked(reportTimeline).mock.calls.map((call) => call[0]);
+}
+
+// Every payload sent through reportTimelineBeacon so far, in order.
+function beaconCalls() {
+  return vi.mocked(reportTimelineBeacon).mock.calls.map((call) => call[0]);
+}
+
+// Fakes only the interval timers, so the heartbeat is under test control while
+// promises, waitFor and the page's own timeouts keep running on real time.
+// Call it before the stream plays, because the heartbeat is created at that
+// moment. The afterEach hook of the describe block restores real timers.
+function useHeartbeatClock(): void {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+}
+
+function advanceClock(ms: number): void {
+  act(() => {
+    vi.advanceTimersByTime(ms);
+  });
+}
+
+// The manifest parses, then the viewer is at this position and the element
+// reports it: a timeupdate, then playing, the way a browser orders them.
+function startPlayingAt(
+  hls: FakeHls,
+  video: HTMLVideoElement,
+  seconds: number,
+): void {
+  act(() => {
+    emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+  });
+  setMediaCurrentTime(video, seconds);
+  act(() => {
+    fireMediaEvent(video, "timeupdate");
+    fireMediaEvent(video, "playing");
+  });
+}
+
+// The ErrorData hls.js builds for a fragment that fails on a dead session
+// (src/loader/fragment-loader.ts 113-127, copied into dist/hls.mjs 5817-5828).
+// The fields WatchPage reads are here. The rest (frag, networkDetails, stats,
+// errorAction) are left out because WatchPage does not read them.
+function fragLoadError(
+  url: string,
+  code: number,
+  text: string,
+  fatal: boolean,
+) {
+  return {
+    type: FakeHls.ErrorTypes.NETWORK_ERROR,
+    details: FakeHls.ErrorDetails.FRAG_LOAD_ERROR,
+    fatal,
+    response: { url, data: undefined, code, text },
+    error: new Error(`HTTP Error ${code} ${text}`),
+  };
+}
+
+// Six retried failures that hls.js reports as not fatal, then the seventh as
+// fatal (spec E3). In a browser they arrive over about 31 s (1, 2, 4, 8, 8
+// and 8 s apart). These tests emit them together because only their order
+// matters here.
+function failFragments(
+  hls: FakeHls,
+  descriptor: WatchDescriptor,
+  code: number,
+  text: string,
+): void {
+  const segmentUrl = `${new URL(descriptor.hls.remote).origin}/video/:/transcode/universal/session/${descriptor.sessionId}/base/00042.ts?X-Plex-Token=${descriptor.transient}`;
+  act(() => {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      emit(hls, FakeHls.Events.ERROR, fragLoadError(segmentUrl, code, text, false));
+    }
+    emit(hls, FakeHls.Events.ERROR, fragLoadError(segmentUrl, code, text, true));
+  });
+}
+
+// The off-LAN viewer of spec E4: no local URL, so the stream is on the remote
+// connection. It plays to 397.6 s with the heartbeat running, then a fatal
+// fragLoadError arrives. Returns once the page shows the error state.
+async function failRemoteStream(
+  code: number,
+  text: string,
+): Promise<{
+  descriptor: WatchDescriptor;
+  video: HTMLVideoElement;
+  unmount: () => void;
+  reportsBeforeFailure: number;
+}> {
+  const descriptor = buildWatchDescriptor({ local: null });
+  const { video, hls, unmount } = await startPlayback({ descriptor });
+  useHeartbeatClock();
+  startPlayingAt(hls, video, 397.6);
+  advanceClock(10_000);
+  // The heartbeat was running and reporting the real position.
+  expect(timelineCalls().map((call) => call.time)).toEqual([397_600, 397_600]);
+  const reportsBeforeFailure = timelineCalls().length;
+
+  failFragments(hls, descriptor, code, text);
+
+  expect(hls.destroyed).toBe(true);
+  expect(video.currentTime).toBe(0);
+  expect(video.isConnected).toBe(false);
+  expect(document.querySelector(".watch-playback-diag")).not.toBeNull();
+  return { descriptor, video, unmount, reportsBeforeFailure };
+}
+
+// document.visibilityState is read at event time, so a test sets it for the
+// length of one callback and then removes the override.
+function withHiddenDocument(run: () => void): void {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => "hidden",
+  });
+  try {
+    run();
+  } finally {
+    Reflect.deleteProperty(document, "visibilityState");
+  }
+}
+
 describe("WatchPage playback", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -534,5 +660,235 @@ describe("WatchPage playback", () => {
     expect(() => {
       emit(hls, FakeHls.Events.ERROR, { fatal: true });
     }).toThrow(/destroyed Hls instance/);
+  });
+
+  // Phase 56.1: every local timeline report carries a real position or nothing.
+
+  it("sends no report for 60 s after a fatal fragLoadError with code 0 on the remote URL", async () => {
+    const { reportsBeforeFailure } = await failRemoteStream(0, "");
+
+    advanceClock(60_000);
+
+    expect(timelineCalls().slice(reportsBeforeFailure)).toEqual([]);
+    expect(beaconCalls()).toEqual([]);
+  });
+
+  it("sends no report for 60 s after a fatal fragLoadError with code 404 on the remote URL", async () => {
+    const { reportsBeforeFailure } = await failRemoteStream(404, "Not Found");
+
+    advanceClock(60_000);
+
+    expect(timelineCalls().slice(reportsBeforeFailure)).toEqual([]);
+    expect(beaconCalls()).toEqual([]);
+  });
+
+  it("beacons the last real position when the tab hides and the page leaves after a fatal error", async () => {
+    const { descriptor, unmount } = await failRemoteStream(0, "");
+
+    withHiddenDocument(() => {
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+    });
+    expect(beaconCalls()).toEqual([
+      {
+        ratingKey: descriptor.ratingKey,
+        state: "paused",
+        time: 397_600,
+        duration: 7_200_000,
+      },
+    ]);
+
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    const stopped = {
+      ratingKey: descriptor.ratingKey,
+      state: "stopped",
+      time: 397_600,
+      duration: 7_200_000,
+    };
+    expect(beaconCalls()).toHaveLength(2);
+    expect(beaconCalls().filter((payload) => payload.state === "stopped")).toEqual([
+      stopped,
+    ]);
+
+    act(() => {
+      unmount();
+    });
+    expect(beaconCalls().filter((payload) => payload.state === "stopped")).toEqual([
+      stopped,
+    ]);
+  });
+
+  it("sends nothing when the page is left with the Resume dialog open", async () => {
+    const descriptor = buildWatchDescriptor({ viewOffsetMs: 125_000 });
+    const { hls, unmount } = await startPlayback({ descriptor });
+    expect(screen.getByRole("dialog", { name: /Resume from 2:05/ })).toBeTruthy();
+    act(() => {
+      emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      act(() => {
+        unmount();
+      });
+      act(() => {
+        window.dispatchEvent(new Event("pagehide"));
+      });
+
+      expect(timelineCalls()).toEqual([]);
+      expect(beaconCalls()).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const message = String(warn.mock.calls[0]?.[0]);
+      expect(message).toContain("stopped");
+      expect(message).toContain("no playback position was known");
+      expect(message).not.toContain("http");
+      expect(message).not.toContain("plex.direct");
+      expect(message).not.toContain(descriptor.transient);
+      expect(message).not.toContain(descriptor.sessionId);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("sends no heartbeat at 0 between the teardown and the manifest of a Quality switch", async () => {
+    const { descriptor, video, hls } = await startPlayback();
+    useHeartbeatClock();
+    startPlayingAt(hls, video, 1200);
+    expect(timelineCalls().map((call) => call.time)).toEqual([1_200_000]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: /Quality/ }));
+    fireEvent.click(screen.getByRole("button", { name: "720p" }));
+    await resolveLatestEpisodeWatch(
+      buildWatchDescriptor({
+        ratingKey: descriptor.ratingKey,
+        sessionId: "session-example-2",
+        token: "example-token-57",
+      }),
+    );
+
+    // The old instance is destroyed, the element reads 0, and the new
+    // instance has not parsed its manifest yet.
+    expect(hls.destroyed).toBe(true);
+    expect(video.currentTime).toBe(0);
+    const reportsAtTeardown = timelineCalls().length;
+    advanceClock(10_000);
+    expect(timelineCalls().slice(reportsAtTeardown)).toEqual([]);
+
+    const next = liveInstances()[0];
+    if (next === undefined) {
+      throw new Error("switched Hls instance is missing");
+    }
+    act(() => {
+      emit(next, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+    act(() => {
+      fireMediaEvent(video, "playing");
+    });
+    setMediaCurrentTime(video, 1210);
+    advanceClock(10_000);
+
+    expect(timelineCalls().slice(reportsAtTeardown).map((call) => call.time)).toEqual([
+      1_200_000, 1_210_000,
+    ]);
+    expect(timelineCalls().filter((call) => call.time === 0)).toEqual([]);
+  });
+
+  it("beacons the receiver position when the page is left after a Cast handoff", async () => {
+    const { descriptor, video, hls } = await startPlayback();
+    startPlayingAt(hls, video, 300);
+
+    try {
+      // The receiver plays at 2000 s while Cast is connected.
+      idleCastPlayer.isActive = true;
+      idleCastPlayer.playing = true;
+      idleCastPlayer.currentTime = 2000;
+      setCastConnected(true);
+      expect(hls.destroyed).toBe(true);
+
+      // Cast disconnects and the receiver reads 0. The local stream has been
+      // attached again and has not played.
+      idleCastPlayer.isActive = false;
+      idleCastPlayer.playing = false;
+      idleCastPlayer.currentTime = 0;
+      setCastConnected(false);
+      expect(liveInstances()).toHaveLength(1);
+      expect(video.currentTime).toBe(0);
+
+      vi.mocked(reportTimelineBeacon).mockClear();
+      act(() => {
+        window.dispatchEvent(new Event("pagehide"));
+      });
+
+      expect(beaconCalls()).toEqual([
+        {
+          ratingKey: descriptor.ratingKey,
+          state: "stopped",
+          time: 2_000_000,
+          duration: 7_200_000,
+        },
+      ]);
+    } finally {
+      idleCastPlayer.isActive = false;
+      idleCastPlayer.playing = false;
+      idleCastPlayer.currentTime = 0;
+    }
+  });
+
+  it("skips the playing report at 0 after Start over and reports at the first heartbeat", async () => {
+    const descriptor = buildWatchDescriptor({ viewOffsetMs: 125_000 });
+    const { video, hls } = await startPlayback({ descriptor });
+    act(() => {
+      emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+    setMediaReadyState(video, HTMLMediaElement.HAVE_METADATA);
+    useHeartbeatClock();
+
+    fireEvent.click(screen.getByRole("button", { name: /Start from the beginning/ }));
+    expect(video.currentTime).toBe(0);
+    act(() => {
+      fireMediaEvent(video, "playing");
+    });
+    expect(timelineCalls()).toEqual([]);
+
+    setMediaCurrentTime(video, 10);
+    advanceClock(10_000);
+
+    expect(timelineCalls()).toEqual([
+      {
+        ratingKey: descriptor.ratingKey,
+        state: "playing",
+        time: 10_000,
+        duration: 7_200_000,
+      },
+    ]);
+  });
+
+  it("beacons the position from a timeupdate after a fatal error", async () => {
+    const descriptor = buildWatchDescriptor({ local: null });
+    const { video, hls } = await startPlayback({ descriptor });
+    startPlayingAt(hls, video, 397.6);
+
+    setMediaCurrentTime(video, 452.3);
+    act(() => {
+      fireMediaEvent(video, "timeupdate");
+    });
+    failFragments(hls, descriptor, 0, "");
+
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+
+    expect(beaconCalls()).toEqual([
+      {
+        ratingKey: descriptor.ratingKey,
+        state: "stopped",
+        time: 452_300,
+        duration: 7_200_000,
+      },
+    ]);
   });
 });
