@@ -156,6 +156,7 @@ const SAMPLE_AUDIO: AudioStream[] = [
     channels: 6,
     title: null,
     default: true,
+    selected: false,
   },
   {
     id: "a2",
@@ -164,6 +165,7 @@ const SAMPLE_AUDIO: AudioStream[] = [
     channels: 2,
     title: "Director's Commentary",
     default: false,
+    selected: false,
   },
   {
     id: "a3",
@@ -172,6 +174,7 @@ const SAMPLE_AUDIO: AudioStream[] = [
     channels: 2,
     title: null,
     default: false,
+    selected: false,
   },
 ];
 
@@ -619,6 +622,36 @@ describe("PlayerControls settings menu", () => {
     const valueEl = audioRow.querySelector("[title]");
     expect(valueEl).not.toBeNull();
     expect(valueEl?.getAttribute("title")).toMatch(/English/);
+  });
+
+  it("Audio row title is the selected track", async () => {
+    setViewport("desktop");
+    await mountPlayer({
+      audioTracks: SAMPLE_AUDIO.map((track) =>
+        track.id === "a3" ? { ...track, selected: true } : track,
+      ),
+    });
+    openSettings();
+
+    const audioRow = screen.getByRole("button", { name: /Audio/ });
+    const title = audioRow.querySelector("[title]")?.getAttribute("title") ?? "";
+    expect(title).toMatch(/Spanish/);
+    expect(title).not.toMatch(/English/);
+  });
+
+  it("Audio submenu presses the selected track", async () => {
+    setViewport("desktop");
+    await mountPlayer({
+      audioTracks: SAMPLE_AUDIO.map((track) =>
+        track.id === "a3" ? { ...track, selected: true } : track,
+      ),
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: /Audio/ }));
+
+    expect(
+      screen.getByRole("button", { name: /Spanish/ }).getAttribute("aria-pressed"),
+    ).toBe("true");
   });
 
   it("disambiguates colliding subtitle labels on the root row", async () => {

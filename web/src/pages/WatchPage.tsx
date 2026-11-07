@@ -39,6 +39,8 @@ import {
   fetchPreviousEpisode,
   reportTimeline,
   reportTimelineBeacon,
+  audioIdToSelect,
+  selectAudio,
   selectSubtitle,
   type NextEpisode,
   type PreviousEpisode,
@@ -536,7 +538,9 @@ function tuningForQuality(quality: QualityId): WatchTuning {
 // byte-identical to the untuned one.
 //
 // Subtitles are absent here on purpose: they're a part-level PUT, not a URL
-// param. onStreamSettingsChange handles that separately.
+// param. Audio is a part-level PUT too, and the audioStreamID URL param did
+// nothing in the HLS test on this Plex (DASH wasn't checked). The param is
+// still sent. onStreamSettingsChange handles both PUTs.
 function buildWatchTuning(settings: StreamSettings): WatchTuning | undefined {
   const tuning: WatchTuning = {
     ...tuningForQuality(settings.quality),
@@ -1794,8 +1798,12 @@ export function WatchPage() {
    * listeners attached, and pendingResumeRef carries the position across the
    * rebuild so the switch looks like a short buffer instead of a restart.
    *
-   * @throws whatever the fetch or the subtitle PUT threw. PlayerControls awaits
-   * this and leaves its highlights on the old selection when it rejects.
+   * Audio and subtitles are both stored with a part-level PUT before the
+   * restart.
+   *
+   * @throws whatever the fetch, the subtitle PUT, or the audio PUT threw.
+   * PlayerControls awaits this and leaves its highlights on the old selection
+   * when it rejects.
    */
   const onStreamSettingsChange = async (
     settings: StreamSettings,
@@ -1841,6 +1849,16 @@ export function WatchPage() {
             });
           }
         }
+      }
+
+      // Audio is a part-level PUT, not a transcode URL param. Store the choice
+      // before restarting so the new session plays it.
+      const audioStreamID = audioIdToSelect(
+        settings.audioStreamId,
+        descriptor.streams.audio,
+      );
+      if (audioStreamID !== null) {
+        await selectAudio(descriptor.ratingKey, audioStreamID);
       }
 
       // Re-enter the same endpoint this page loaded from, now with tuning. The

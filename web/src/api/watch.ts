@@ -1,7 +1,8 @@
 // Client for the server's watch router (server/src/routes/watch.ts), mounted at
 // /api/watch behind requireAuth. Everything WatchPage needs: play descriptors,
-// the episode list, next-episode lookup, previous-episode lookup, subtitle
-// selection, progress reporting, and the Continue Watching rail.
+// the episode list, next-episode lookup, previous-episode lookup, audio
+// selection, subtitle selection, progress reporting, and the Continue Watching
+// rail.
 //
 // The thing to understand before reading any of this is what a play descriptor
 // is. Video deliberately doesn't go through the Cloudflare Tunnel. The server
@@ -20,10 +21,10 @@
 //
 // Status codes worth knowing, from the server: 404 "not playable" usually means
 // Seerr has no Plex ratingKey for the title, so it isn't on the server, though
-// PUT /subtitle/:ratingKey reuses the same 404 for a different reason, when the
-// Plex metadata carries no part id. 409 means the session predates Plex token
-// capture and the user has to sign in again. Everything upstream (mint,
-// connection resolve, metadata) collapses to 502.
+// PUT /subtitle/:ratingKey and PUT /audio/:ratingKey reuse the same 404 for a
+// different reason, when the Plex metadata carries no part id. 409 means the
+// session predates Plex token capture and the user has to sign in again.
+// Everything upstream (mint, connection resolve, metadata) collapses to 502.
 
 // Plex's own addresses for this server. `local` is null when Plex advertises no
 // LAN connection, and the player tries local first, then remote.
@@ -47,8 +48,10 @@ export type WatchDash = {
   remote: string;
 };
 
-// An audio track on the file. `id` goes back as the audioStreamID tuning param
-// to switch tracks, which is how commentary tracks get selected.
+// An audio track on the file. `id` is the stream id selectAudio takes. Plex
+// ignored it as an HLS URL param when checked on 2026-11-04, DASH not checked.
+// `default` is the container's flag and Plex doesn't use it to choose.
+// `selected` is per user and marks the track Plex will play.
 export type AudioStream = {
   id: string;
   language: string | null;
@@ -56,6 +59,7 @@ export type AudioStream = {
   channels: number | null;
   title: string | null;
   default: boolean;
+  selected: boolean;
 };
 
 // A subtitle track. `id` goes to selectSubtitle. These get burned into the
@@ -105,7 +109,9 @@ export type WatchTuning = {
   maxVideoBitrate?: number; // kbps
   videoResolution?: string; // "WxH", e.g. "1280x720"
   offset?: number; // seconds to start at
-  audioStreamID?: string; // an id from streams.audio
+  // Plex ignored audioStreamID on this server's HLS path when checked on
+  // 2026-11-04 (DASH wasn't checked). The real selection is selectAudio.
+  audioStreamID?: string;
 };
 
 /**
@@ -184,6 +190,60 @@ export async function selectSubtitle(
     const message = await readErrorMessage(res);
     throw new Error(message ?? `Failed to select subtitle (${res.status})`);
   }
+}
+
+/**
+ * PUT /api/watch/audio/:ratingKey.
+ *
+ * Stores which audio stream Plex plays for the current user on this item.
+ * The stored choice applies to a stream started afterwards, so the caller
+ * refetches the descriptor and restarts playback.
+ *
+ * @throws Error with the server's own message when it sent one, or
+ * "Failed to select audio (<status>)" when the body has none. A rejected
+ * fetch propagates unchanged.
+ */
+export async function selectAudio(
+  ratingKey: string,
+  audioStreamID: string,
+): Promise<void> {
+  const res = await fetch(`/api/watch/audio/${ratingKey}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ audioStreamID }),
+  });
+  if (!res.ok) {
+    const message = await readErrorMessage(res);
+    throw new Error(message ?? `Failed to select audio (${res.status})`);
+  }
+}
+
+/**
+ * The audio track Plex will play. The first track with `selected` wins, then
+ * the first with `default`, then the first track. Null when the list is empty.
+ */
+export function pickActiveAudioId(tracks: AudioStream[]): string | null {
+  return (
+    tracks.find((track) => track.selected)?.id ??
+    tracks.find((track) => track.default)?.id ??
+    tracks[0]?.id ??
+    null
+  );
+}
+
+/**
+ * The id to send to selectAudio, or null when there is no request or the
+ * request is already the track Plex will play. An id that is not one of the
+ * tracks is returned as-is.
+ */
+export function audioIdToSelect(
+  requested: string | null,
+  tracks: AudioStream[],
+): string | null {
+  if (requested === null || requested === pickActiveAudioId(tracks)) {
+    return null;
+  }
+  return requested;
 }
 
 export type TimelineState = "playing" | "paused" | "stopped";

@@ -34,7 +34,11 @@ import {
   type Ref,
   type RefObject,
 } from "react";
-import type { AudioStream, SubtitleStream } from "../api/watch";
+import {
+  pickActiveAudioId,
+  type AudioStream,
+  type SubtitleStream,
+} from "../api/watch";
 import type { RemotePlaybackControl } from "../cast/useCastPlayer";
 import { useCastState } from "../cast/useCastState";
 import { useIsTouch } from "../hooks/useIsTouch";
@@ -1032,12 +1036,9 @@ export function PlayerControls({
     });
   };
 
-  // Nothing is selected until the user picks, so the highlighted audio row is
-  // whatever Plex flags as default, falling back to the first track listed.
-  const defaultAudioId =
-    audioTracks.find((track) => track.default)?.id ??
-    audioTracks[0]?.id ??
-    null;
+  // The highlight is the track Plex will play: selected, then default, then
+  // the first. The menu shows this until the user picks.
+  const defaultAudioId = pickActiveAudioId(audioTracks);
   const activeAudioId = selectedAudioId ?? defaultAudioId;
 
   // Shared path for the three settings that cost a transcode restart. The
@@ -1074,7 +1075,7 @@ export function PlayerControls({
     );
   };
 
-  // Audio track, commentary included. Same restart cost as quality: Plex has to
+  // A pick is a stored choice plus a restart, not a URL param. Plex has to
   // re-decide the stream, which means a new transcode session.
   const selectAudio = (next: string) => {
     if (next === activeAudioId) {
