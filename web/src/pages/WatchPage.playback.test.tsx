@@ -24,6 +24,9 @@ import {
   installWatchFetchMocks,
   renderWatchPage,
   resolveLatestEpisodeWatch,
+  resolveLatestEpisodeWatchThen,
+  resolvePendingEpisodeWatchFor,
+  rejectPendingEpisodeWatchFor,
   type WatchDescriptorOptions,
 } from "../test/renderWatchPage";
 import type { WatchDescriptor } from "../api/watch";
@@ -314,6 +317,106 @@ async function failRemoteStream(
   expect(video.isConnected).toBe(false);
   expect(document.querySelector(".watch-playback-diag")).not.toBeNull();
   return { descriptor, video, unmount, reportsBeforeFailure };
+}
+
+// Phase 56.2 helpers. They are used by the recovery tests at the end of the
+// describe block below.
+
+function fetchCalls() {
+  return vi.mocked(fetchEpisodeWatch).mock.calls;
+}
+
+// Fakes the timers a recovery uses: its delay timer, the heartbeat, and the
+// clock the restart budget reads. Install it after startPlayback, because
+// waitFor needs real timers. The afterEach hook of the describe block
+// restores real timers.
+function useRecoveryClock(): void {
+  vi.useFakeTimers({
+    toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"],
+  });
+  vi.setSystemTime(new Date("2026-11-06T12:00:00Z"));
+}
+
+// The async form lets promise callbacks run between timers, which a fetch
+// that resolves or rejects needs.
+async function advanceRecovery(ms: number): Promise<void> {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
+
+// The descriptor the Nth fetch of the same episode returns. Every descriptor
+// request mints its own session and token, so each one here has its own.
+function restartDescriptor(
+  n: number,
+  viewOffsetMs: number | null = null,
+): WatchDescriptor {
+  return buildWatchDescriptor({
+    ratingKey: "900001",
+    sessionId: `session-example-${n}`,
+    token: `example-token-${n}`,
+    viewOffsetMs,
+  });
+}
+
+// Resolves the Nth descriptor fetch of the episode with its own descriptor.
+// Fetch N is the one that produced descriptor N, so the check that it is out
+// makes a missing restart fail as an assertion.
+async function resolveRestart(
+  n: number,
+  viewOffsetMs: number | null = null,
+): Promise<WatchDescriptor> {
+  expect(fetchCalls()).toHaveLength(n);
+  const descriptor = restartDescriptor(n, viewOffsetMs);
+  await resolveLatestEpisodeWatch(descriptor);
+  return descriptor;
+}
+
+// The stream is working: the manifest parsed, a fragment buffered, and the
+// viewer is at this position and playing.
+function establishAt(
+  hls: FakeHls,
+  video: HTMLVideoElement,
+  seconds: number,
+): void {
+  act(() => {
+    emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+    emit(hls, FakeHls.Events.FRAG_BUFFERED, {});
+  });
+  setMediaCurrentTime(video, seconds);
+  act(() => {
+    fireMediaEvent(video, "timeupdate");
+    fireMediaEvent(video, "playing");
+  });
+}
+
+// A fatal manifest timeout on the newest live instance, as an attempt whose
+// session never answers produces.
+function failLiveInstance(): void {
+  const instance = liveInstances().at(-1);
+  if (instance === undefined || instance.url === null) {
+    throw new Error("no live Hls instance to fail");
+  }
+  const url = instance.url;
+  act(() => {
+    emit(instance, FakeHls.Events.ERROR, fatalManifestTimeout(url));
+  });
+}
+
+// One restart attempt that fails on both connections: the local instance
+// falls over to the remote URL of the same descriptor, and that fails too.
+function failAttempt(): void {
+  failLiveInstance();
+  failLiveInstance();
+}
+
+function expectNoErrorState(): void {
+  expect(screen.queryByText(/Loading stream/)).toBeNull();
+  expect(document.querySelector(".watch-playback-diag")?.textContent ?? null).toBeNull();
+}
+
+function reconnectingBanner(): HTMLElement | null {
+  return screen.queryByText("Reconnecting…");
 }
 
 // document.visibilityState is read at event time, so a test sets it for the
@@ -865,6 +968,1005 @@ describe("WatchPage playback", () => {
         duration: 7_200_000,
       },
     ]);
+  });
+
+  // Phase 56.2: a fatal error on a stream that was working restarts it.
+
+  // Shared by the code 0 and code 404 tests. The viewer is off the LAN (spec
+  // E4): the first descriptor has no local URL, so the stream plays on the
+  // remote one. It is established at 397.6 s, a fatal fragLoadError arrives,
+  // and the page restarts it with a fresh descriptor at the same place. The
+  // fresh descriptor has a local URL, and that is the one the restart loads.
+  async function expectRestartAfterFatal(code: number, text: string): Promise<void> {
+    const first = buildWatchDescriptor({ local: null });
+    const { descriptor, video, hls } = await startPlayback({ descriptor: first });
+    establishAt(hls, video, 397.6);
+    expect(fetchCalls()).toHaveLength(1);
+
+    failFragments(hls, descriptor, code, text);
+
+    expectNoErrorState();
+    expect(fetchCalls()).toHaveLength(2);
+    expect(fetchCalls()[1]?.[0]).toBe(descriptor.ratingKey);
+    expect(fetchCalls()[1]?.[1]).toBeUndefined();
+    // The old instance keeps what it has buffered while the fetch is out.
+    expect(hls.destroyed).toBe(false);
+
+    const next = await resolveRestart(2);
+
+    expectNoErrorState();
+    expect(hls.destroyed).toBe(true);
+    const live = liveInstances();
+    expect(live).toHaveLength(1);
+    expect(live[0]?.url).toBe(next.hls.local);
+    expect(live[0]?.media).toBe(video);
+    expect(video.isConnected).toBe(true);
+
+    const restarted = live[0];
+    if (restarted === undefined) {
+      throw new Error("restarted Hls instance is missing");
+    }
+    const playsBefore = mediaCalls(video).play;
+    act(() => {
+      emit(restarted, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+
+    expect(video.currentTime).toBe(397.6);
+    expect(mediaCalls(video).play).toBe(playsBefore + 1);
+    expect(video.paused).toBe(false);
+    expectNoErrorState();
+  }
+
+  it("restarts at the same place with a fresh descriptor after a fatal fragLoadError with code 0", async () => {
+    await expectRestartAfterFatal(0, "");
+  });
+
+  it("restarts at the same place with a fresh descriptor after a fatal fragLoadError with code 404", async () => {
+    await expectRestartAfterFatal(404, "Not Found");
+  });
+
+  it("fetches the next descriptor 3 s after an attempt fails and never loads an earlier descriptor's URL", async () => {
+    const { descriptor, video, hls } = await startPlayback();
+    useRecoveryClock();
+    establishAt(hls, video, 397.6);
+
+    failFragments(hls, descriptor, 0, "");
+    const second = await resolveRestart(2);
+    failAttempt();
+
+    expect(fetchCalls()).toHaveLength(2);
+    expect(reconnectingBanner()).not.toBeNull();
+    await advanceRecovery(2_999);
+    expect(fetchCalls()).toHaveLength(2);
+    await advanceRecovery(1);
+    expect(fetchCalls()).toHaveLength(3);
+
+    const third = await resolveRestart(3);
+
+    expect(hlsInstances.map((instance) => instance.url)).toEqual([
+      requireLocalUrl(descriptor),
+      requireLocalUrl(second),
+      second.hls.remote,
+      requireLocalUrl(third),
+    ]);
+    expectNoErrorState();
+  });
+
+  it("passes the 720p tuning to a restart after a Quality switch", async () => {
+    const { descriptor, video, hls } = await startPlayback();
+    establishAt(hls, video, 1200);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: /Quality/ }));
+    fireEvent.click(screen.getByRole("button", { name: "720p" }));
+    const switched = await resolveRestart(2);
+    const next = liveInstances()[0];
+    if (next === undefined) {
+      throw new Error("switched Hls instance is missing");
+    }
+    establishAt(next, video, 1210);
+    const callsBefore = fetchCalls().length;
+
+    failFragments(next, switched, 0, "");
+
+    expectNoErrorState();
+    expect(fetchCalls()).toHaveLength(callsBefore + 1);
+    expect(fetchCalls().at(-1)).toEqual([
+      descriptor.ratingKey,
+      { maxVideoBitrate: 4000, videoResolution: "1280x720" },
+    ]);
+  });
+
+  it("restarts paused when the error arrives while paused", async () => {
+    const { descriptor, video, hls } = await startPlayback();
+    establishAt(hls, video, 397.6);
+    act(() => {
+      video.pause();
+    });
+
+    failFragments(hls, descriptor, 0, "");
+    expect(reconnectingBanner()).not.toBeNull();
+    await resolveRestart(2);
+    const restarted = liveInstances()[0];
+    if (restarted === undefined) {
+      throw new Error("restarted Hls instance is missing");
+    }
+    const calls = mediaCalls(video);
+    act(() => {
+      emit(restarted, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+
+    expect(video.currentTime).toBe(397.6);
+    expect(mediaCalls(video).play).toBe(calls.play);
+    expect(mediaCalls(video).pause).toBe(calls.pause + 1);
+    expect(video.paused).toBe(true);
+    expectNoErrorState();
+
+    // No playing event follows a paused restart, so the banner ends when the
+    // restarted stream buffers a fragment.
+    expect(reconnectingBanner()).not.toBeNull();
+    act(() => {
+      emit(restarted, FakeHls.Events.FRAG_BUFFERED, {});
+    });
+    expect(reconnectingBanner()).toBeNull();
+  });
+
+  it("counts a rejected descriptor fetch as a failed attempt and retries on the schedule", async () => {
+    const { descriptor, video, hls } = await startPlayback();
+    useRecoveryClock();
+    establishAt(hls, video, 397.6);
+    vi.mocked(fetchEpisodeWatch).mockImplementationOnce(() =>
+      Promise.reject(new Error("descriptor unavailable")),
+    );
+
+    failFragments(hls, descriptor, 0, "");
+    await advanceRecovery(0);
+
+    expect(fetchCalls()).toHaveLength(2);
+    expect(reconnectingBanner()).not.toBeNull();
+    expectNoErrorState();
+    await advanceRecovery(2_999);
+    expect(fetchCalls()).toHaveLength(2);
+    await advanceRecovery(1);
+    expect(fetchCalls()).toHaveLength(3);
+
+    const next = await resolveRestart(3);
+
+    expect(hls.destroyed).toBe(true);
+    expect(liveInstances().map((instance) => instance.url)).toEqual([
+      requireLocalUrl(next),
+    ]);
+    const restarted = liveInstances()[0];
+    if (restarted === undefined) {
+      throw new Error("restarted Hls instance is missing");
+    }
+    act(() => {
+      emit(restarted, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+    expect(video.currentTime).toBe(397.6);
+  });
+
+  it("gives up after four restarts in 5 minutes with a message that names the place", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { descriptor, video, hls } = await startPlayback();
+      useRecoveryClock();
+      establishAt(hls, video, 397.6);
+
+      failFragments(hls, descriptor, 0, "");
+      await resolveRestart(2);
+      failAttempt();
+      await advanceRecovery(3_000);
+      expect(fetchCalls()).toHaveLength(3);
+      await resolveRestart(3);
+      failAttempt();
+      await advanceRecovery(10_000);
+      expect(fetchCalls()).toHaveLength(4);
+      await resolveRestart(4);
+      failAttempt();
+      await advanceRecovery(30_000);
+      expect(fetchCalls()).toHaveLength(5);
+      expect(reconnectingBanner()).not.toBeNull();
+      await resolveRestart(5);
+      failAttempt();
+
+      // The fifth restart in 5 minutes is refused.
+      const diag = document.querySelector(".watch-playback-diag");
+      if (!(diag instanceof HTMLElement) || diag.textContent === null) {
+        throw new Error("playback error text is missing");
+      }
+      expect(diag.textContent).toContain("6:37");
+      expect(diag.textContent).toContain("Reload");
+      expect(diag.textContent).toContain("Playback stopped.");
+      for (let n = 1; n <= 5; n += 1) {
+        expect(diag.textContent).not.toContain(`example-token-${n}`);
+      }
+      expect(diag.textContent).not.toContain(descriptor.transient);
+      // The paragraph is followed by a blank line and the report of the last
+      // attach that failed: attempt 5, which failed on both connections. The
+      // report of that attach alone is shown, not one per attempt.
+      expect(diag.textContent).toMatch(/\n\nPlayback failed on all connections\./);
+      expect(diag.textContent.split("Playback failed on all connections.")).toHaveLength(2);
+      expect(diag.textContent).toContain("Descriptor had local URL: yes");
+      expect(diag.textContent).toContain(
+        "1. local — local.example.plex.direct/video/:/transcode/universal/start.m3u8",
+      );
+      expect(diag.textContent).toContain(
+        "2. remote — remote.example.plex.direct/video/:/transcode/universal/start.m3u8",
+      );
+      expect(diag.textContent).toContain("manifestLoadTimeOut");
+      expect(diag.textContent).not.toContain("The request for a new stream failed");
+      expect(diag.textContent).not.toContain("X-Plex-Token");
+      expect(liveInstances()).toEqual([]);
+      expect(document.querySelector("video.watch-player")).toBeNull();
+      expect(reconnectingBanner()).toBeNull();
+
+      await advanceRecovery(300_000);
+      expect(fetchCalls()).toHaveLength(5);
+
+      const failure = error.mock.calls.find((call) => call[0] === "HLS playback failed");
+      expect(failure).toBeDefined();
+      const payload = failure?.[1] as { attempts?: unknown } | undefined;
+      expect(Array.isArray(payload?.attempts)).toBe(true);
+
+      const warnings = warn.mock.calls
+        .map((call) => String(call[0]))
+        .filter((message) => message.includes("Playback recovery"));
+      expect(warnings).toHaveLength(4);
+    } finally {
+      error.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  it("restarts after 0 ms when a restarted stream that buffered fails again", async () => {
+    const { descriptor, video, hls } = await startPlayback();
+    useRecoveryClock();
+    establishAt(hls, video, 397.6);
+
+    // The first attempt fails, so the delay index is 1.
+    failFragments(hls, descriptor, 0, "");
+    await resolveRestart(2);
+    failAttempt();
+    await advanceRecovery(3_000);
+    expect(fetchCalls()).toHaveLength(3);
+
+    // The second attempt buffers a fragment, which resets the delay index.
+    const third = await resolveRestart(3);
+    const restarted = liveInstances()[0];
+    if (restarted === undefined) {
+      throw new Error("restarted Hls instance is missing");
+    }
+    establishAt(restarted, video, 397.6);
+    await advanceRecovery(20_000);
+    setMediaCurrentTime(video, 417.6);
+    act(() => {
+      fireMediaEvent(video, "timeupdate");
+    });
+
+    failFragments(restarted, third, 0, "");
+
+    // No timer advance: the fetch for the next restart is already out.
+    expect(fetchCalls()).toHaveLength(4);
+    expectNoErrorState();
+    await resolveRestart(4);
+    const again = liveInstances()[0];
+    if (again === undefined) {
+      throw new Error("restarted Hls instance is missing");
+    }
+    act(() => {
+      emit(again, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+    expect(video.currentTime).toBe(417.6);
+  });
+
+  it("changes nothing before the stream is established", async () => {
+    const descriptor = buildWatchDescriptor({ local: null });
+    const { hls } = await startPlayback({ descriptor });
+    act(() => {
+      emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+
+    failFragments(hls, descriptor, 0, "");
+
+    expect(fetchCalls()).toHaveLength(1);
+    expect(hlsInstances).toHaveLength(1);
+    expect(reconnectingBanner()).toBeNull();
+    expect(
+      document
+        .querySelector(".watch-playback-diag")
+        ?.textContent?.startsWith("Playback failed on all connections."),
+    ).toBe(true);
+  });
+
+  it("restarts a local stream that had buffered instead of falling to the remote URL of its session", async () => {
+    const { descriptor, video, hls } = await startPlayback();
+    establishAt(hls, video, 397.6);
+
+    failFragments(hls, descriptor, 0, "");
+
+    expect(hlsInstances).toHaveLength(1);
+    expect(fetchCalls()).toHaveLength(2);
+    const next = await resolveRestart(2);
+    expect(hlsInstances.map((instance) => instance.url)).toEqual([
+      requireLocalUrl(descriptor),
+      requireLocalUrl(next),
+    ]);
+    expect(hlsInstances.map((instance) => instance.url)).not.toContain(
+      descriptor.hls.remote,
+    );
+  });
+
+  it("adds no attempt for errors from the old instance after a recovery began", async () => {
+    const { descriptor, video, hls } = await startPlayback();
+    useRecoveryClock();
+    establishAt(hls, video, 397.6);
+
+    failFragments(hls, descriptor, 0, "");
+    expect(fetchCalls()).toHaveLength(2);
+    failFragments(hls, descriptor, 0, "");
+    failFragments(hls, descriptor, 404, "Not Found");
+    await advanceRecovery(60_000);
+
+    expect(fetchCalls()).toHaveLength(2);
+    await resolveRestart(2);
+    expect(liveInstances().map((instance) => instance.url)).toEqual([
+      requireLocalUrl(restartDescriptor(2)),
+    ]);
+  });
+
+  // The three cancellation tests start from the same place: attempt 1 has
+  // failed, so the next one waits 3 s.
+  async function startWaitingRecovery(): Promise<{
+    descriptor: WatchDescriptor;
+    video: HTMLVideoElement;
+  }> {
+    const { descriptor, video, hls } = await startPlayback();
+    await screen.findByRole("link", { name: /Next episode/ });
+    useRecoveryClock();
+    establishAt(hls, video, 397.6);
+    failFragments(hls, descriptor, 0, "");
+    await resolveRestart(2);
+    failAttempt();
+    expect(fetchCalls()).toHaveLength(2);
+    expect(reconnectingBanner()).not.toBeNull();
+    return { descriptor, video };
+  }
+
+  it("cancels a waiting attempt when the page navigates to another episode", async () => {
+    vi.mocked(fetchNextEpisode).mockResolvedValue({
+      ratingKey: "900002",
+      seasonNumber: 1,
+      episodeNumber: 2,
+      title: "Second Example",
+      thumb: null,
+    });
+    await startWaitingRecovery();
+
+    fireEvent.click(screen.getByRole("link", { name: /Next episode/ }));
+    await advanceRecovery(60_000);
+
+    const forOldEpisode = fetchCalls().filter((call) => call[0] === "900001");
+    expect(forOldEpisode).toHaveLength(2);
+    expect(fetchCalls().filter((call) => call[0] === "900002")).toHaveLength(1);
+    expect(reconnectingBanner()).toBeNull();
+  });
+
+  it("cancels a waiting attempt when Cast connects", async () => {
+    vi.mocked(fetchNextEpisode).mockResolvedValue({
+      ratingKey: "900002",
+      seasonNumber: 1,
+      episodeNumber: 2,
+      title: "Second Example",
+      thumb: null,
+    });
+    await startWaitingRecovery();
+
+    setCastConnected(true);
+    await advanceRecovery(60_000);
+
+    expect(fetchCalls()).toHaveLength(2);
+    expect(reconnectingBanner()).toBeNull();
+  });
+
+  it("cancels a waiting attempt when a Quality switch starts and attaches only the switch's descriptor", async () => {
+    vi.mocked(fetchNextEpisode).mockResolvedValue({
+      ratingKey: "900002",
+      seasonNumber: 1,
+      episodeNumber: 2,
+      title: "Second Example",
+      thumb: null,
+    });
+    const { descriptor, video } = await startWaitingRecovery();
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: /Quality/ }));
+    fireEvent.click(screen.getByRole("button", { name: "720p" }));
+    expect(fetchCalls()).toHaveLength(3);
+    expect(fetchCalls().at(-1)).toEqual([
+      descriptor.ratingKey,
+      { maxVideoBitrate: 4000, videoResolution: "1280x720" },
+    ]);
+    const switched = await resolveRestart(3);
+    await advanceRecovery(60_000);
+
+    expect(fetchCalls()).toHaveLength(3);
+    expect(liveInstances().map((instance) => instance.url)).toEqual([
+      requireLocalUrl(switched),
+    ]);
+    expect(reconnectingBanner()).toBeNull();
+    // The switch parked the recovery's position and intent, not the 0 the
+    // torn-down element reads.
+    const restarted = liveInstances()[0];
+    if (restarted === undefined) {
+      throw new Error("switched Hls instance is missing");
+    }
+    const playsBefore = mediaCalls(video).play;
+    act(() => {
+      emit(restarted, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+    expect(video.currentTime).toBe(397.6);
+    expect(mediaCalls(video).play).toBe(playsBefore + 1);
+  });
+
+  it("makes exactly one descriptor fetch for one fatal error under StrictMode", async () => {
+    const { descriptor, video, hls } = await startPlayback({ strict: true });
+    establishAt(hls, video, 397.6);
+    const before = fetchCalls().length;
+
+    failFragments(hls, descriptor, 0, "");
+
+    expect(fetchCalls()).toHaveLength(before + 1);
+  });
+
+  it("shows Reconnecting from the fatal error until the restarted stream plays and never opens the Resume dialog", async () => {
+    const { descriptor, video, hls } = await startPlayback();
+    establishAt(hls, video, 397.6);
+    expect(reconnectingBanner()).toBeNull();
+
+    failFragments(hls, descriptor, 0, "");
+    const banner = reconnectingBanner();
+    expect(banner).not.toBeNull();
+    const status = banner?.closest('[role="status"]');
+    expect(status?.getAttribute("aria-live")).toBe("polite");
+    expect(status?.classList.contains("watch-cast-status")).toBe(true);
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // The new descriptor carries the position Plex saved, which would open
+    // the Resume dialog on a first load.
+    await resolveRestart(2, 300_000);
+    expect(reconnectingBanner()).not.toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    const restarted = liveInstances()[0];
+    if (restarted === undefined) {
+      throw new Error("restarted Hls instance is missing");
+    }
+    act(() => {
+      emit(restarted, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+    expect(reconnectingBanner()).not.toBeNull();
+    act(() => {
+      emit(restarted, FakeHls.Events.FRAG_BUFFERED, {});
+    });
+    expect(reconnectingBanner()).not.toBeNull();
+    act(() => {
+      fireMediaEvent(video, "playing");
+    });
+
+    expect(reconnectingBanner()).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expectNoErrorState();
+  });
+
+  it("logs one warning per restart with the attempt, the delay and the error, and no token", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { descriptor, video, hls } = await startPlayback();
+      useRecoveryClock();
+      establishAt(hls, video, 397.6);
+
+      failFragments(hls, descriptor, 0, "");
+      await resolveRestart(2);
+      failAttempt();
+
+      const messages = warn.mock.calls
+        .map((call) => String(call[0]))
+        .filter((message) => message.includes("Playback recovery"));
+      expect(messages).toHaveLength(2);
+      expect(messages[0]).toContain("attempt 1");
+      expect(messages[0]).toContain("0 ms");
+      expect(messages[0]).toContain("networkError");
+      expect(messages[0]).toContain("fragLoadError");
+      expect(messages[0]).toContain(
+        "local.example.plex.direct/video/:/transcode/universal/start.m3u8",
+      );
+      expect(messages[1]).toContain("attempt 2");
+      expect(messages[1]).toContain("3000 ms");
+      expect(messages[1]).toContain("networkError");
+      expect(messages[1]).toContain("manifestLoadTimeOut");
+      for (const message of messages) {
+        expect(message).not.toContain("X-Plex-Token");
+        expect(message).not.toContain("example-token");
+        expect(message).not.toContain("session-example");
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  // Phase 56.2 fix-up. The tests below pin the place a restart returns to, the
+  // connection report in the give-up text, and guards that no earlier test
+  // pinned.
+
+  // A fatal fragment error on this descriptor's stream, as one emit.
+  function fatalFragmentError(descriptor: WatchDescriptor) {
+    const segmentUrl = `${new URL(descriptor.hls.remote).origin}/video/:/transcode/universal/session/${descriptor.sessionId}/base/00042.ts?X-Plex-Token=${descriptor.transient}`;
+    return fragLoadError(segmentUrl, 0, "", true);
+  }
+
+  it("restarts at the place the element reached while the old stream played on its buffer", async () => {
+    const { descriptor, video, hls } = await startPlayback();
+    useRecoveryClock();
+    establishAt(hls, video, 397.6);
+
+    failFragments(hls, descriptor, 0, "");
+    expect(fetchCalls()).toHaveLength(2);
+    // The old instance stays attached and the element plays what it buffered.
+    setMediaCurrentTime(video, 399.1);
+    act(() => {
+      fireMediaEvent(video, "timeupdate");
+    });
+    await resolveRestart(2);
+    const restarted = liveInstances()[0];
+    if (restarted === undefined) {
+      throw new Error("restarted Hls instance is missing");
+    }
+    act(() => {
+      emit(restarted, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+
+    expect(video.currentTime).toBe(399.1);
+
+    // The attempt fails. The place used at the attach is the one a later
+    // attempt returns to, whatever the torn-down element reads.
+    failAttempt();
+    await advanceRecovery(3_000);
+    setMediaCurrentTime(video, 0);
+    await resolveRestart(3);
+    const again = liveInstances()[0];
+    if (again === undefined) {
+      throw new Error("restarted Hls instance is missing");
+    }
+    act(() => {
+      emit(again, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+    expect(video.currentTime).toBe(399.1);
+  });
+
+  // Four descriptor fetches are rejected. The element is at 397.6 s at the
+  // fatal error and at 420 s before the last fetch, so the give-up text has
+  // to name 7:00. Returns the text of the error state.
+  async function giveUpAfterRejectedFetches(): Promise<string> {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { descriptor, video, hls } = await startPlayback();
+      useRecoveryClock();
+      establishAt(hls, video, 397.6);
+      for (let rejected = 0; rejected < 4; rejected += 1) {
+        vi.mocked(fetchEpisodeWatch).mockImplementationOnce(() =>
+          Promise.reject(new Error("descriptor unavailable")),
+        );
+      }
+
+      failFragments(hls, descriptor, 0, "");
+      await advanceRecovery(0);
+      expect(fetchCalls()).toHaveLength(2);
+      await advanceRecovery(3_000);
+      expect(fetchCalls()).toHaveLength(3);
+      await advanceRecovery(10_000);
+      expect(fetchCalls()).toHaveLength(4);
+      setMediaCurrentTime(video, 420);
+      await advanceRecovery(30_000);
+      expect(fetchCalls()).toHaveLength(5);
+
+      const diag = document.querySelector(".watch-playback-diag");
+      if (!(diag instanceof HTMLElement) || diag.textContent === null) {
+        throw new Error("playback error text is missing");
+      }
+      expect(liveInstances()).toEqual([]);
+      return diag.textContent;
+    } finally {
+      error.mockRestore();
+      warn.mockRestore();
+    }
+  }
+
+  it("names the place the element reached when the give-up follows rejected fetches", async () => {
+    const text = await giveUpAfterRejectedFetches();
+
+    expect(text).toContain("Playback stopped.");
+    expect(text).toContain("7:00");
+    expect(text).not.toContain("6:37");
+  });
+
+  it("ends the give-up text with the failed request when the last attempt failed at the fetch", async () => {
+    const text = await giveUpAfterRejectedFetches();
+
+    // No attempt attached, so the report is the item's original stream: a
+    // local stream that buffered and then failed on a fragment.
+    expect(text).toMatch(/\n\nPlayback failed on all connections\./);
+    expect(text).toContain("Descriptor had local URL: yes");
+    expect(text).toContain(
+      "1. local — local.example.plex.direct/video/:/transcode/universal/start.m3u8",
+    );
+    expect(text).toContain("details: fragLoadError");
+    expect(text.endsWith("\nThe request for a new stream failed: descriptor unavailable.")).toBe(
+      true,
+    );
+    expect(text).not.toContain("X-Plex-Token");
+    expect(text).not.toContain("example-token");
+  });
+
+  it("ignores a fatal error and a buffered fragment from the old instance while the new descriptor commits", async () => {
+    const { descriptor, video, hls } = await startPlayback();
+    useRecoveryClock();
+    establishAt(hls, video, 397.6);
+    failFragments(hls, descriptor, 0, "");
+    expect(fetchCalls()).toHaveLength(2);
+
+    // Inside the act that resolves the fetch, after the page's callback ran
+    // and before React commits its descriptor, the old instance is still
+    // attached.
+    await resolveLatestEpisodeWatchThen(restartDescriptor(2), () => {
+      expect(hls.destroyed).toBe(false);
+      emit(hls, FakeHls.Events.ERROR, fatalFragmentError(descriptor));
+      emit(hls, FakeHls.Events.FRAG_BUFFERED, {});
+    });
+
+    expect(hls.destroyed).toBe(true);
+    expect(liveInstances().map((instance) => instance.url)).toEqual([
+      requireLocalUrl(restartDescriptor(2)),
+    ]);
+    await advanceRecovery(60_000);
+    expect(fetchCalls()).toHaveLength(2);
+    expect(reconnectingBanner()).not.toBeNull();
+
+    // The new attach fails on both connections. It is the first failed
+    // attempt, so the next fetch waits 3 s.
+    failAttempt();
+    expect(fetchCalls()).toHaveLength(2);
+    await advanceRecovery(2_999);
+    expect(fetchCalls()).toHaveLength(2);
+    await advanceRecovery(1);
+    expect(fetchCalls()).toHaveLength(3);
+  });
+
+  it("leaves a fatal error to a Quality switch whose fetch is still out", async () => {
+    const { descriptor, video, hls } = await startPlayback();
+    useRecoveryClock();
+    establishAt(hls, video, 397.6);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: /Quality/ }));
+    fireEvent.click(screen.getByRole("button", { name: "720p" }));
+    expect(fetchCalls()).toHaveLength(2);
+
+    failFragments(hls, descriptor, 0, "");
+
+    expect(fetchCalls()).toHaveLength(2);
+    expect(reconnectingBanner()).toBeNull();
+    expectNoErrorState();
+
+    const switched = await resolveRestart(2);
+    await advanceRecovery(60_000);
+
+    expect(hlsInstances.map((instance) => instance.url)).toEqual([
+      requireLocalUrl(descriptor),
+      requireLocalUrl(switched),
+    ]);
+    expect(liveInstances()).toHaveLength(1);
+    expect(fetchCalls()).toHaveLength(2);
+    expect(reconnectingBanner()).toBeNull();
+  });
+
+  // Episode 2 of the tests below. The default is a local stream.
+  async function openSecondEpisode(
+    descriptorOptions?: WatchDescriptorOptions,
+  ): Promise<{ descriptor: WatchDescriptor; video: HTMLVideoElement; hls: FakeHls }> {
+    fireEvent.click(screen.getByRole("link", { name: /Next episode/ }));
+    expect(fetchCalls().at(-1)?.[0]).toBe("900002");
+    const descriptor = buildWatchDescriptor({
+      ...descriptorOptions,
+      ratingKey: "900002",
+      sessionId: "session-example-ep2",
+      token: "example-token-ep2",
+    });
+    await resolveLatestEpisodeWatch(descriptor);
+    const hls = liveInstances().at(-1);
+    if (hls === undefined) {
+      throw new Error("episode 2 Hls instance is missing");
+    }
+    return { descriptor, video: watchVideo(), hls };
+  }
+
+  function mockSecondEpisode(): void {
+    vi.mocked(fetchNextEpisode).mockResolvedValue({
+      ratingKey: "900002",
+      seasonNumber: 1,
+      episodeNumber: 2,
+      title: "Second Example",
+      thumb: null,
+    });
+  }
+
+  it("asks for no tuning on the next episode after a Quality switch on the first", async () => {
+    mockSecondEpisode();
+    const { video, hls } = await startPlayback();
+    await screen.findByRole("link", { name: /Next episode/ });
+    establishAt(hls, video, 1200);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: /Quality/ }));
+    fireEvent.click(screen.getByRole("button", { name: "720p" }));
+    await resolveRestart(2);
+
+    const second = await openSecondEpisode();
+    establishAt(second.hls, second.video, 120);
+    const before = fetchCalls().length;
+    failFragments(second.hls, second.descriptor, 0, "");
+
+    expect(fetchCalls()).toHaveLength(before + 1);
+    expect(fetchCalls().at(-1)?.[0]).toBe("900002");
+    expect(fetchCalls().at(-1)?.[1]).toBeUndefined();
+  });
+
+  it("shows the error state for a stream of the next episode that never buffered, though the first had", async () => {
+    mockSecondEpisode();
+    const { video, hls } = await startPlayback();
+    await screen.findByRole("link", { name: /Next episode/ });
+    establishAt(hls, video, 1200);
+
+    const second = await openSecondEpisode({ local: null });
+    act(() => {
+      emit(second.hls, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+    const before = fetchCalls().length;
+    failFragments(second.hls, second.descriptor, 0, "");
+
+    expect(fetchCalls()).toHaveLength(before);
+    expect(reconnectingBanner()).toBeNull();
+    expect(
+      document
+        .querySelector(".watch-playback-diag")
+        ?.textContent?.startsWith("Playback failed on all connections."),
+    ).toBe(true);
+  });
+
+  it("starts the next episode with a fresh restart budget after four restarts on the first", async () => {
+    mockSecondEpisode();
+    const { descriptor, video, hls } = await startPlayback();
+    await screen.findByRole("link", { name: /Next episode/ });
+    useRecoveryClock();
+    establishAt(hls, video, 397.6);
+
+    failFragments(hls, descriptor, 0, "");
+    await resolveRestart(2);
+    failAttempt();
+    await advanceRecovery(3_000);
+    await resolveRestart(3);
+    failAttempt();
+    await advanceRecovery(10_000);
+    await resolveRestart(4);
+    failAttempt();
+    await advanceRecovery(30_000);
+    // The fourth restart in 5 minutes has its fetch out.
+    expect(fetchCalls()).toHaveLength(5);
+
+    const second = await openSecondEpisode();
+    establishAt(second.hls, second.video, 120);
+    const before = fetchCalls().length;
+    failFragments(second.hls, second.descriptor, 0, "");
+
+    expectNoErrorState();
+    expect(fetchCalls()).toHaveLength(before + 1);
+    expect(fetchCalls().at(-1)?.[0]).toBe("900002");
+    expect(reconnectingBanner()).not.toBeNull();
+  });
+
+  it("attaches nothing from a restart fetch that resolves after the page moved to the next episode", async () => {
+    mockSecondEpisode();
+    const { descriptor, video, hls } = await startPlayback();
+    await screen.findByRole("link", { name: /Next episode/ });
+    establishAt(hls, video, 397.6);
+    failFragments(hls, descriptor, 0, "");
+    expect(fetchCalls()).toHaveLength(2);
+
+    const second = await openSecondEpisode();
+    await resolvePendingEpisodeWatchFor(restartDescriptor(2));
+
+    expect(hlsInstances.map((instance) => instance.url)).toEqual([
+      requireLocalUrl(descriptor),
+      requireLocalUrl(second.descriptor),
+    ]);
+    expect(liveInstances()).toHaveLength(1);
+    expect(liveInstances()[0]?.url).toBe(requireLocalUrl(second.descriptor));
+    expect(reconnectingBanner()).toBeNull();
+  });
+
+  // Phase 56.2 fix-up 2. A Quality switch parks a seek and the HLS effect
+  // pauses the element until the new manifest applies it. A recovery that
+  // begins in that gap takes its place and play intent from the parked seek,
+  // because the element reads paused although the viewer was playing.
+
+  function chooseQuality720(): void {
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: /Quality/ }));
+    fireEvent.click(screen.getByRole("button", { name: "720p" }));
+  }
+
+  // Established at 397.6 s, Quality 720p, and the switch's new session fails on
+  // both connections before its manifest loads. Returns once the restart
+  // attempt has attached and its manifest parsed, with the media calls made
+  // by that parse.
+  async function restartAfterFailedSwitch(
+    pauseFirst: boolean,
+  ): Promise<{ video: HTMLVideoElement; play: number; pause: number }> {
+    const { descriptor, video, hls } = await startPlayback();
+    establishAt(hls, video, 397.6);
+    if (pauseFirst) {
+      act(() => {
+        video.pause();
+      });
+    }
+    chooseQuality720();
+    await resolveRestart(2);
+    failAttempt();
+
+    expect(fetchCalls()).toHaveLength(3);
+    expect(fetchCalls().at(-1)).toEqual([
+      descriptor.ratingKey,
+      { maxVideoBitrate: 4000, videoResolution: "1280x720" },
+    ]);
+    await resolveRestart(3);
+    const restarted = liveInstances()[0];
+    if (restarted === undefined) {
+      throw new Error("restarted Hls instance is missing");
+    }
+    const before = mediaCalls(video);
+    act(() => {
+      emit(restarted, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+    expect(video.currentTime).toBe(397.6);
+    const after = mediaCalls(video);
+    return {
+      video,
+      play: after.play - before.play,
+      pause: after.pause - before.pause,
+    };
+  }
+
+  it("restarts playing when the switch's stream failed before it applied the parked seek", async () => {
+    const calls = await restartAfterFailedSwitch(false);
+
+    expect(calls.play).toBe(1);
+    expect(calls.pause).toBe(0);
+    expect(calls.video.paused).toBe(false);
+  });
+
+  it("restarts paused when the viewer was paused before the switch and its stream failed", async () => {
+    const calls = await restartAfterFailedSwitch(true);
+
+    expect(calls.play).toBe(0);
+    expect(calls.pause).toBe(1);
+    expect(calls.video.paused).toBe(true);
+  });
+
+  it("parks the element's place when a Quality switch cancels a recovery whose fetch was rejected", async () => {
+    const { descriptor, video, hls } = await startPlayback();
+    useRecoveryClock();
+    establishAt(hls, video, 397.6);
+    vi.mocked(fetchEpisodeWatch).mockImplementationOnce(() =>
+      Promise.reject(new Error("descriptor unavailable")),
+    );
+
+    failFragments(hls, descriptor, 0, "");
+    await advanceRecovery(0);
+    expect(fetchCalls()).toHaveLength(2);
+    // The old stream plays on its buffer during the 3 s wait.
+    setMediaCurrentTime(video, 399.1);
+    act(() => {
+      fireMediaEvent(video, "timeupdate");
+    });
+    chooseQuality720();
+    await resolveRestart(3);
+    const switched = liveInstances()[0];
+    if (switched === undefined) {
+      throw new Error("switched Hls instance is missing");
+    }
+    const playsBefore = mediaCalls(video).play;
+    act(() => {
+      emit(switched, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+
+    expect(video.currentTime).toBe(399.1);
+    expect(mediaCalls(video).play).toBe(playsBefore + 1);
+  });
+
+  it("ignores a restart fetch for the first episode that is rejected after the page moved to the next episode", async () => {
+    mockSecondEpisode();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { descriptor, video, hls } = await startPlayback();
+      await screen.findByRole("link", { name: /Next episode/ });
+      useRecoveryClock();
+      establishAt(hls, video, 397.6);
+      failFragments(hls, descriptor, 0, "");
+      expect(fetchCalls()).toHaveLength(2);
+      const recoveryWarnings = () =>
+        warn.mock.calls.filter((call) => String(call[0]).includes("Playback recovery"))
+          .length;
+      expect(recoveryWarnings()).toBe(1);
+
+      const second = await openSecondEpisode();
+      await rejectPendingEpisodeWatchFor("900001", new Error("descriptor unavailable"));
+      await advanceRecovery(60_000);
+
+      expect(recoveryWarnings()).toBe(1);
+      expect(fetchCalls().filter((call) => call[0] === "900001")).toHaveLength(2);
+
+      // Episode 2 starts with an unspent budget, so its first restart is at once.
+      establishAt(second.hls, second.video, 120);
+      const before = fetchCalls().length;
+      failFragments(second.hls, second.descriptor, 0, "");
+
+      expect(fetchCalls()).toHaveLength(before + 1);
+      expect(fetchCalls().at(-1)?.[0]).toBe("900002");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("leaves the request line out of the give-up text when later attempts attached and failed", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { descriptor, video, hls } = await startPlayback();
+      useRecoveryClock();
+      establishAt(hls, video, 397.6);
+      vi.mocked(fetchEpisodeWatch).mockImplementationOnce(() =>
+        Promise.reject(new Error("descriptor unavailable")),
+      );
+
+      // Restart 1 is rejected at the fetch. Restarts 2 to 4 attach and fail.
+      failFragments(hls, descriptor, 0, "");
+      await advanceRecovery(0);
+      expect(fetchCalls()).toHaveLength(2);
+      await advanceRecovery(3_000);
+      await resolveRestart(3);
+      failAttempt();
+      await advanceRecovery(10_000);
+      await resolveRestart(4);
+      failAttempt();
+      await advanceRecovery(30_000);
+      await resolveRestart(5);
+      failAttempt();
+
+      const diag = document.querySelector(".watch-playback-diag");
+      if (!(diag instanceof HTMLElement) || diag.textContent === null) {
+        throw new Error("playback error text is missing");
+      }
+      expect(diag.textContent).toContain("Playback stopped.");
+      expect(diag.textContent).toMatch(/\n\nPlayback failed on all connections\./);
+      expect(diag.textContent.split("Playback failed on all connections.")).toHaveLength(2);
+      expect(diag.textContent).toContain(
+        "2. remote — remote.example.plex.direct/video/:/transcode/universal/start.m3u8",
+      );
+      expect(diag.textContent).not.toContain("The request for a new stream failed");
+      expect(diag.textContent).not.toContain("descriptor unavailable");
+    } finally {
+      error.mockRestore();
+      warn.mockRestore();
+    }
   });
 
   it("beacons the position from a timeupdate after a fatal error", async () => {

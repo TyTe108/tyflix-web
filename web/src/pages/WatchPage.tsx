@@ -59,7 +59,8 @@ import {
   type QualityId,
   type StreamSettings,
 } from "../components/PlayerControls";
-import { ResumeDialog } from "../components/ResumeDialog";
+import { ReconnectingOverlay } from "../components/ReconnectingOverlay";
+import { ResumeDialog, formatResumeTime } from "../components/ResumeDialog";
 import { UpNextCard } from "../components/UpNextCard";
 import { loadMediaOnCast } from "../cast/loadMediaOnCast";
 import { subscribeSessionReady } from "../cast/subscribeSessionReady";
@@ -67,6 +68,16 @@ import { useCastPlayer } from "../cast/useCastPlayer";
 import { useCastState } from "../cast/useCastState";
 import { useAuth } from "../auth/AuthContext";
 import { isLandingLocation, landingState } from "../lib/landing";
+import {
+  classifyFatalError,
+  createRecoveryBudget,
+  planRestart,
+  recordAttemptFailed,
+  recordAttemptRecovered,
+  recordRestartStart,
+  type RecoveryBudget,
+  type RestartPlan,
+} from "../lib/playbackRecovery";
 
 // Auto-advance is a per-browser preference, so it lives in localStorage.
 const AUTO_PLAY_STORAGE_KEY = "tyflix.autoPlay";
@@ -93,6 +104,52 @@ type PendingResume = {
   position: number;
   // Whether to resume playing once the seek lands, or hold it paused.
   wasPlaying: boolean;
+};
+
+// One recovery from a fatal hls.js error on a stream that was working. It lives
+// from the fatal error until the restarted stream buffers a fragment, and it
+// survives failed attempts, so the banner and the place to return to stay the
+// same across them.
+type ActiveRecovery = {
+  // Seconds into the item to return to, and whether the viewer was playing.
+  // Every attempt parks these in pendingResumeRef. Both start from a seek that
+  // was already parked when the recovery began, if there was one, and from the
+  // element otherwise. A parked seek wins because the HLS effect pauses the
+  // element while a seek waits, so the element reads paused and near 0 although
+  // the viewer was playing at the parked place. A settings switch and the Cast
+  // handoff park seeks this way. The place is only a stored value here:
+  // resolveRecoveryPosition says which one to use, because the old stream keeps
+  // playing its buffer until an attempt attaches.
+  position: number;
+  wasPlaying: boolean;
+  // True once an attempt of this recovery has been attached with setDescriptor.
+  // Its teardown reset the element, so from then on the stored place is the
+  // only record of where the viewer was.
+  attached: boolean;
+  // waiting: a timer runs before the next descriptor fetch.
+  // fetching: a descriptor fetch is in flight.
+  // attaching: a new descriptor was set and its stream is loading.
+  phase: "waiting" | "fetching" | "attaching";
+  timerId: ReturnType<typeof setTimeout> | null;
+  // Fatal errors seen during this recovery, for the log when it gives up.
+  failures: HlsAttemptFailure[];
+  hadLocalUrl: boolean;
+  // The most recent attach that failed: the item's original stream until an
+  // attempt attaches, then that attempt. The give-up text shows its report.
+  lastAttach: { attempts: HlsAttemptFailure[]; hadLocalUrl: boolean };
+  // The error message of a descriptor fetch that was the last attempt to fail,
+  // or null when the last attempt failed on a stream.
+  fetchError: string | null;
+};
+
+// What the HLS effect hands to the recovery logic when a fatal error calls for
+// a restart.
+type FatalRecoveryInput = {
+  // The fatal error that ended the attach.
+  failure: HlsAttemptFailure;
+  // A copy of every fatal error of that attach, local and then remote.
+  attemptFailures: HlsAttemptFailure[];
+  hadLocalUrl: boolean;
 };
 
 // Mirror of the <video> clock in seconds, so rendering can react to time.
@@ -262,6 +319,18 @@ function summarizeHlsErrorData(
   }
 
   return summary;
+}
+
+// One line about a fatal error for the recovery warnings: type, details, the
+// HTTP code when there is one, and the stream URL as host and path only. The
+// URL of the failing fragment is left out because its path holds the session id.
+function describeFatalForLog(failure: HlsAttemptFailure): string {
+  const { type, details, response } = failure.data;
+  const code =
+    typeof response === "object" && response !== null && "code" in response
+      ? ` HTTP ${String(response.code)}`
+      : "";
+  return `${String(type)} ${String(details)}${code} on ${redactStreamUrl(failure.sourceUrl)}`;
 }
 
 /**
@@ -698,6 +767,36 @@ export function WatchPage() {
   // (or by an in-episode switch). Not a mirror of whatever Plex had selected
   // on its own.
   const appliedSubtitleIdRef = useRef<string | null>(null);
+  // The tuning of the last Quality or audio change, so a restart asks for the
+  // same transcode. The page needs it because Quality lives in PlayerControls,
+  // and the page only sees it as the settings that onStreamSettingsChange
+  // receives. Undefined means no change was made, which fetches an untuned
+  // descriptor. The load effect resets it for each item.
+  const currentTuningRef = useRef<WatchTuning | undefined>(undefined);
+  // True once any stream of this item buffered a fragment. Before that a fatal
+  // error means the item never worked and goes to the error state. The load
+  // effect resets it for each item.
+  const streamEstablishedRef = useRef(false);
+  // Restart starts and failed attempts for this item, see playbackRecovery.ts.
+  const recoveryBudgetRef = useRef<RecoveryBudget>(createRecoveryBudget());
+  // The recovery in progress, or null. At most one runs at a time.
+  const recoveryRef = useRef<ActiveRecovery | null>(null);
+  // Settings switches whose descriptor fetch is still out. A fatal error on
+  // the old stream during one is left to the switch, which replaces the stream.
+  const settingsSwitchesInFlightRef = useRef(0);
+  // Destroys the hls.js instance the HLS effect currently owns. A recovery that
+  // gives up uses it, because the error state does not re-run that effect.
+  const destroyHlsRef = useRef<(() => void) | null>(null);
+  // The latest recovery handlers, for the HLS effect. That effect runs once per
+  // descriptor, so it reads them through this ref instead of closing over one
+  // render's copies.
+  const recoveryHandlersRef = useRef<{
+    onFatalError: (input: FatalRecoveryInput) => void;
+    onStreamBuffered: () => void;
+  } | null>(null);
+  // The "Reconnecting…" banner, from the fatal error until the restarted stream
+  // plays.
+  const [reconnecting, setReconnecting] = useState(false);
   const [descriptor, setDescriptor] = useState<WatchDescriptor | null>(null);
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -792,6 +891,278 @@ export function WatchPage() {
     beginPlaybackAt(0);
   }, [beginPlaybackAt]);
 
+  // Ends the recovery in progress, if any: stops its timer, hides the banner,
+  // and makes a descriptor fetch that is still out harmless, because the fetch
+  // only acts while its recovery is the one in recoveryRef.
+  const cancelRecovery = useCallback(() => {
+    const recovery = recoveryRef.current;
+    if (recovery !== null && recovery.timerId !== null) {
+      clearTimeout(recovery.timerId);
+    }
+    recoveryRef.current = null;
+    setReconnecting(false);
+  }, []);
+
+  // Fetches a descriptor from the endpoint this page loaded from, with the
+  // given tuning. Used by a settings switch and by a restart. It does not await
+  // anything before the fetch call, so a switch still fetches on the click.
+  // Throws for a route param that did not validate.
+  const fetchDescriptorForRoute = (
+    tuning: WatchTuning | undefined,
+  ): Promise<WatchDescriptor> => {
+    if (isEpisode) {
+      if (ratingKey === null) {
+        throw new Error("Invalid episode");
+      }
+      return fetchEpisodeWatch(ratingKey, tuning);
+    }
+    if (isItem) {
+      if (itemRatingKey === null) {
+        throw new Error("Invalid title");
+      }
+      return fetchItemWatch(itemRatingKey, tuning);
+    }
+    if (tmdbId === null) {
+      throw new Error("Invalid title");
+    }
+    return fetchMovieWatch(tmdbId, tuning);
+  };
+
+  // The place a recovery returns to. Until an attempt has attached, the old
+  // stream is still on the element and plays what it buffered, so the element's
+  // current time is the place when it is above 0. It is read at the moment it
+  // is used. After an attempt attached, the teardown reset the element, and the
+  // place is the stored one.
+  const resolveRecoveryPosition = (recovery: ActiveRecovery): number => {
+    if (!recovery.attached) {
+      const video = videoRef.current;
+      const live = video === null ? 0 : video.currentTime;
+      if (Number.isFinite(live) && live > 0) {
+        return live;
+      }
+    }
+    return recovery.position;
+  };
+
+  // The restart budget is spent. Destroys the stream, logs the report that
+  // every failed connection feeds, and shows where the item stood followed by
+  // the connection report of the most recent attach that failed, so the page
+  // never ends as a dead player without a message. A last attempt that failed
+  // at the descriptor fetch adds one line with that error.
+  const giveUpRecovery = (
+    recovery: ActiveRecovery,
+    plan: Extract<RestartPlan, { kind: "give-up" }>,
+  ) => {
+    const position = resolveRecoveryPosition(recovery);
+    recoveryRef.current = null;
+    setReconnecting(false);
+    destroyHlsRef.current?.();
+    pendingResumeRef.current = null;
+    const logReport = buildHlsPlaybackFailureReport({
+      hadLocalUrl: recovery.hadLocalUrl,
+      attempts: recovery.failures,
+    });
+    console.error("HLS playback failed", logReport.logPayload);
+    const attachReport = buildHlsPlaybackFailureReport({
+      hadLocalUrl: recovery.lastAttach.hadLocalUrl,
+      attempts: recovery.lastAttach.attempts,
+    });
+    const fetchLine =
+      recovery.fetchError === null
+        ? ""
+        : `\nThe request for a new stream failed: ${recovery.fetchError}.`;
+    setStatus("error");
+    setError(
+      `Playback stopped. The stream was restarted ${plan.restartsInWindow} times in the last 5 minutes and kept failing. It was at ${formatResumeTime(position)}. Reload the page to continue.\n\n${attachReport.message}${fetchLine}`,
+    );
+  };
+
+  // Plans the next restart of a recovery and either starts it now, waits for
+  // its delay, or gives up. Logs one warning per restart with the attempt
+  // number, the delay and what went wrong, with URLs as host and path only.
+  const scheduleRestart = (recovery: ActiveRecovery, reason: string) => {
+    const budget = recoveryBudgetRef.current;
+    const plan = planRestart(budget, Date.now());
+    if (plan.kind === "give-up") {
+      giveUpRecovery(recovery, plan);
+      return;
+    }
+    console.warn(
+      `Playback recovery: attempt ${budget.failedStreak + 1}, restarting in ${plan.delayMs} ms after ${reason}`,
+    );
+    recovery.phase = "waiting";
+    if (plan.delayMs <= 0) {
+      startRestart(recovery);
+      return;
+    }
+    recovery.timerId = setTimeout(() => {
+      recovery.timerId = null;
+      startRestart(recovery);
+    }, plan.delayMs);
+  };
+
+  // Fetches a fresh descriptor for the item and attaches it through the same
+  // path as a settings switch: the place is parked in pendingResumeRef, then
+  // setDescriptor replaces the descriptor while status stays "ready". The place
+  // is read right before setDescriptor, because the old stream plays on until
+  // then, and is stored as the recovery's place for later attempts. The old
+  // hls.js instance stays alive until the replacement tears it down. A rejected
+  // fetch counts as a failed attempt.
+  const startRestart = (recovery: ActiveRecovery) => {
+    if (recoveryRef.current !== recovery) {
+      return;
+    }
+    recovery.phase = "fetching";
+    recoveryBudgetRef.current = recordRestartStart(
+      recoveryBudgetRef.current,
+      Date.now(),
+    );
+    let request: Promise<WatchDescriptor>;
+    try {
+      request = fetchDescriptorForRoute(currentTuningRef.current);
+    } catch (err: unknown) {
+      request = Promise.reject(err);
+    }
+    void request.then(
+      (result) => {
+        if (recoveryRef.current !== recovery) {
+          return;
+        }
+        recovery.phase = "attaching";
+        recovery.position = resolveRecoveryPosition(recovery);
+        recovery.attached = true;
+        recovery.fetchError = null;
+        pendingResumeRef.current = {
+          position: recovery.position,
+          wasPlaying: recovery.wasPlaying,
+        };
+        setDescriptor(result);
+      },
+      (err: unknown) => {
+        if (recoveryRef.current !== recovery) {
+          return;
+        }
+        recoveryBudgetRef.current = recordAttemptFailed(
+          recoveryBudgetRef.current,
+        );
+        const message = err instanceof Error ? err.message : "unknown error";
+        recovery.fetchError = message;
+        scheduleRestart(recovery, `a failed descriptor fetch (${message})`);
+      },
+    );
+  };
+
+  // A fatal hls.js error on an item whose stream was working. During an attempt
+  // (phase "attaching") it is that attempt failing, and the next one is planned.
+  // Otherwise it starts a recovery. If a seek is parked in pendingResumeRef,
+  // its place and play intent are the recovery's. That happens when a settings
+  // switch or the Cast handoff attached a stream that failed before its
+  // manifest applied the seek, and the HLS effect had paused the element in the
+  // meantime. Reading the element then would restart a playing viewer paused.
+  // With nothing parked, the play intent is read from the element now, because
+  // it resets once hls.js tears the stream down, and so is a first value for the
+  // place. The place is read again when an attempt attaches.
+  const handleRecoverableFatalError = (input: FatalRecoveryInput) => {
+    if (settingsSwitchesInFlightRef.current > 0) {
+      return;
+    }
+    const active = recoveryRef.current;
+    if (active !== null) {
+      if (active.phase !== "attaching") {
+        return;
+      }
+      active.failures.push(input.failure);
+      active.lastAttach = {
+        attempts: input.attemptFailures,
+        hadLocalUrl: input.hadLocalUrl,
+      };
+      active.fetchError = null;
+      recoveryBudgetRef.current = recordAttemptFailed(
+        recoveryBudgetRef.current,
+      );
+      scheduleRestart(active, describeFatalForLog(input.failure));
+      return;
+    }
+
+    const video = videoRef.current;
+    const parked = pendingResumeRef.current;
+    let position = 0;
+    let wasPlaying = video === null ? true : !video.paused;
+    if (parked !== null) {
+      position = parked.position;
+      wasPlaying = parked.wasPlaying;
+    } else {
+      const live = video === null ? 0 : video.currentTime;
+      const kept = lastGoodPositionRef.current;
+      if (Number.isFinite(live) && live > 0) {
+        position = live;
+      } else if (kept !== null && Number.isFinite(kept) && kept > 0) {
+        position = kept;
+      }
+    }
+    const recovery: ActiveRecovery = {
+      position,
+      wasPlaying,
+      attached: false,
+      phase: "waiting",
+      timerId: null,
+      failures: [input.failure],
+      hadLocalUrl: input.hadLocalUrl,
+      lastAttach: {
+        attempts: input.attemptFailures,
+        hadLocalUrl: input.hadLocalUrl,
+      },
+      fetchError: null,
+    };
+    recoveryRef.current = recovery;
+    setReconnecting(true);
+    scheduleRestart(recovery, describeFatalForLog(input.failure));
+  };
+
+  // A stream buffered a fragment. When it is the attempt of a recovery, the
+  // recovery is over and the failed streak starts again at 0. The banner stays
+  // until the element plays, except for a restart that lands paused, which
+  // never plays by itself.
+  const handleStreamBuffered = () => {
+    const recovery = recoveryRef.current;
+    if (recovery === null || recovery.phase !== "attaching") {
+      return;
+    }
+    recoveryRef.current = null;
+    recoveryBudgetRef.current = recordAttemptRecovered(
+      recoveryBudgetRef.current,
+    );
+    if (!recovery.wasPlaying) {
+      setReconnecting(false);
+    }
+  };
+  // The HLS effect runs once per descriptor and reads the latest handlers here.
+  recoveryHandlersRef.current = {
+    onFatalError: handleRecoverableFatalError,
+    onStreamBuffered: handleStreamBuffered,
+  };
+
+  // Hides the banner when the restarted stream plays. A recovery that is still
+  // running ignores the event, since the old stream may fire one while it dies.
+  useEffect(() => {
+    if (!reconnecting) {
+      return;
+    }
+    const video = videoRef.current;
+    if (video === null) {
+      return;
+    }
+    const onPlaying = () => {
+      if (recoveryRef.current === null) {
+        setReconnecting(false);
+      }
+    };
+    video.addEventListener("playing", onPlaying);
+    return () => {
+      video.removeEventListener("playing", onPlaying);
+    };
+  }, [reconnecting]);
+
   // Load the play descriptor. Runs on mount and on any route-param change, so
   // navigating from one episode to the next re-enters here.
   //
@@ -836,6 +1207,11 @@ export function WatchPage() {
     lastRemotePositionRef.current = null;
     lastGoodPositionRef.current = null;
     appliedSubtitleIdRef.current = null;
+    // Per-item recovery state: a new item starts with no tuning, no working
+    // stream yet, and a fresh restart budget.
+    currentTuningRef.current = undefined;
+    streamEstablishedRef.current = false;
+    recoveryBudgetRef.current = createRecoveryBudget();
 
     void load()
       .then(async (result) => {
@@ -892,10 +1268,13 @@ export function WatchPage() {
         setError(err instanceof Error ? err.message : "Failed to load stream");
       });
 
+    // Leaving the item, by navigation or unmount, also ends a recovery that is
+    // waiting or fetching for it.
     return () => {
       cancelled = true;
+      cancelRecovery();
     };
-  }, [isEpisode, isItem, ratingKey, itemRatingKey, tmdbId]);
+  }, [isEpisode, isItem, ratingKey, itemRatingKey, tmdbId, cancelRecovery]);
 
   // Prefetch the next episode so auto-advance can navigate without waiting.
   // Soft-fail: a null/failed result just disables advance for this episode.
@@ -1416,8 +1795,20 @@ export function WatchPage() {
   // first and falls back to the remote one on a fatal hls.js error.
   // Quality/audio switches update descriptor in place (status stays "ready") so
   // the <video> stays mounted; pendingResumeRef carries position across rebuilds.
+  // A restart after a failed stream takes the same path: a fresh descriptor is
+  // set in place and this effect rebuilds the stream at the parked position.
   // While casting, tear down local hls.js so only the receiver consumes the
   // transcode session (one X-Plex-Session-Identifier).
+  //
+  // A fatal error is handled in one of three ways, see classifyFatalError. An
+  // attach that buffered nothing fails over from local to remote once. A stream
+  // that was working (this attach or an earlier one of the item buffered a
+  // fragment) is handed to the recovery logic, which restarts it with a fresh
+  // descriptor, because Plex ends an idle transcode about 181 s after its last
+  // request and the URLs of this descriptor are dead after that. Anything else
+  // is the error state with the connection report. After the hand-off this
+  // run ignores further errors and keeps its instance until the next
+  // descriptor replaces it.
   //
   // This effect owns the hls.js instance and destroys it on cleanup. It's the
   // point where the descriptor stops being data and becomes a video stream:
@@ -1433,6 +1824,9 @@ export function WatchPage() {
     // all. Dropping the src (rather than just pausing) is what actually stops
     // the fetching; the receiver plays the DASH URLs from the same descriptor.
     if (castUi.connected) {
+      // The receiver takes over, so a restart that is waiting has no stream
+      // left to restore.
+      cancelRecovery();
       const video = videoRef.current;
       if (video !== null) {
         video.pause();
@@ -1511,6 +1905,12 @@ export function WatchPage() {
 
     let hls: Hls | null = null;
     let usedRemote = primaryUrl === remoteUrl;
+    // True once this run handed its fatal error to the recovery logic or to the
+    // error state. Later errors from its instance are ignored.
+    let settled = false;
+    // True once the current attach buffered a fragment. A failover attach
+    // starts again at false.
+    let attachBuffered = false;
     // Accumulate fatal errors across the local→remote failover. The first hls
     // instance is destroyed before the second starts, so replacing the message
     // (as the old code did) could only ever show the last failure.
@@ -1528,6 +1928,7 @@ export function WatchPage() {
     // can take several seconds even on a reachable local link. Remote (and
     // primary-when-local-is-null) keeps patient default timeouts.
     const attach = (source: string, fastFail: boolean) => {
+      attachBuffered = false;
       hls = new Hls({
         enableWorker: false,
         ...(fastFail
@@ -1554,8 +1955,15 @@ export function WatchPage() {
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         applyPendingResume();
       });
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        attachBuffered = true;
+        streamEstablishedRef.current = true;
+        if (!settled) {
+          recoveryHandlersRef.current?.onStreamBuffered();
+        }
+      });
       hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (!data.fatal) {
+        if (!data.fatal || settled) {
           return;
         }
         const connection: "local" | "remote" =
@@ -1573,12 +1981,28 @@ export function WatchPage() {
             response: data.response,
           },
         });
-        // On a fatal error, fall back local → remote once; if remote also
-        // fails, surface a visible error rather than a silent dead player.
-        if (!usedRemote && remoteUrl !== source) {
+        // On a fatal error, fall back local → remote once; a stream that was
+        // working restarts with a fresh descriptor; anything else surfaces a
+        // visible error rather than a silent dead player.
+        const failure = attemptFailures[attemptFailures.length - 1];
+        const action = classifyFatalError({
+          attachBuffered,
+          failoverAvailable: !usedRemote && remoteUrl !== source,
+          streamEstablished: streamEstablishedRef.current,
+        });
+        if (action === "fail-over") {
           usedRemote = true;
           hls?.destroy();
           attach(remoteUrl, false);
+          return;
+        }
+        settled = true;
+        if (action === "recover" && failure !== undefined) {
+          recoveryHandlersRef.current?.onFatalError({
+            failure,
+            attemptFailures: [...attemptFailures],
+            hadLocalUrl: localUrl !== null,
+          });
           return;
         }
         hls?.destroy();
@@ -1598,11 +2022,19 @@ export function WatchPage() {
 
     attach(primaryUrl, primaryUrl === localUrl);
 
-    return () => {
+    const destroyThisRun = () => {
       hls?.destroy();
       hls = null;
     };
-  }, [descriptor, castUi.connected]);
+    destroyHlsRef.current = destroyThisRun;
+
+    return () => {
+      if (destroyHlsRef.current === destroyThisRun) {
+        destroyHlsRef.current = null;
+      }
+      destroyThisRun();
+    };
+  }, [descriptor, castUi.connected, cancelRecovery]);
 
   // Hand the current title to the receiver once the Cast *session* is ready
   // (SESSION_STARTED / SESSION_RESUMED). CAST_STATE_CHANGED=CONNECTED can fire
@@ -1844,11 +2276,17 @@ export function WatchPage() {
       />
     ) : null;
 
-  // All three overlays go to PlayerControls as one node so they sit inside the
+  // The recovery banner. The receiver owns playback while casting, so it
+  // never shows then.
+  const reconnectingOverlay =
+    reconnecting && !castUi.connected ? <ReconnectingOverlay /> : null;
+
+  // All the overlays go to PlayerControls as one node so they sit inside the
   // player frame and above the control bar.
   const playerOverlay = (
     <>
       {castOverlay}
+      {reconnectingOverlay}
       {resumeOverlay}
       {upNextOverlay}
     </>
@@ -1864,6 +2302,13 @@ export function WatchPage() {
    * The `<video>` element is never unmounted, which keeps PlayerControls'
    * listeners attached, and pendingResumeRef carries the position across the
    * rebuild so the switch looks like a short buffer instead of a restart.
+   *
+   * A restart after a fatal stream error uses this same path with the tuning
+   * kept in currentTuningRef. A switch made while a restart is waiting cancels
+   * that restart and parks the restart's place. Until a restart attempt has
+   * attached, that place is the element's current time, because the old stream
+   * keeps playing its buffer. After an attempt attached, it is the place stored
+   * at that attach, because the teardown reset the element.
    *
    * Audio and subtitles are both stored with a part-level PUT before the
    * restart.
@@ -1882,11 +2327,18 @@ export function WatchPage() {
     }
 
     // Bank where we are before anything tears down, including whether it was
-    // playing, so a switch made while paused doesn't start playback.
-    pendingResumeRef.current = {
-      position: video.currentTime,
-      wasPlaying: !video.paused,
-    };
+    // playing, so a switch made while paused doesn't start playback. A restart
+    // in progress has the better answer, since its stream is already gone.
+    const recovering = recoveryRef.current;
+    pendingResumeRef.current =
+      recovering !== null
+        ? {
+            position: resolveRecoveryPosition(recovering),
+            wasPlaying: recovering.wasPlaying,
+          }
+        : { position: video.currentTime, wasPlaying: !video.paused };
+    cancelRecovery();
+    settingsSwitchesInFlightRef.current += 1;
 
     try {
       // Burn-in is a part-level PUT, not a transcode URL param. Select (or
@@ -1931,23 +2383,8 @@ export function WatchPage() {
       // Re-enter the same endpoint this page loaded from, now with tuning. The
       // route decides which one, exactly as it did on mount.
       const tuning = buildWatchTuning(settings);
-      let result: WatchDescriptor;
-      if (isEpisode) {
-        if (ratingKey === null) {
-          throw new Error("Invalid episode");
-        }
-        result = await fetchEpisodeWatch(ratingKey, tuning);
-      } else if (isItem) {
-        if (itemRatingKey === null) {
-          throw new Error("Invalid title");
-        }
-        result = await fetchItemWatch(itemRatingKey, tuning);
-      } else {
-        if (tmdbId === null) {
-          throw new Error("Invalid title");
-        }
-        result = await fetchMovieWatch(tmdbId, tuning);
-      }
+      currentTuningRef.current = tuning;
+      const result = await fetchDescriptorForRoute(tuning);
       // Keep status "ready" and the existing descriptor until the new one
       // arrives so the <video> (and PlayerControls listeners) stay mounted.
       setDescriptor(result);
@@ -1961,6 +2398,8 @@ export function WatchPage() {
         err instanceof Error ? err.message : "Failed to switch stream settings",
       );
       throw err;
+    } finally {
+      settingsSwitchesInFlightRef.current -= 1;
     }
   };
 

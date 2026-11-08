@@ -154,6 +154,23 @@ export function installWatchFetchMocks(): void {
   vi.mocked(reportTimelineBeacon).mockReset();
 }
 
+function takePending(
+  index: number,
+  descriptor: WatchDescriptor,
+): PendingEpisodeWatch {
+  const next = pending[index];
+  if (next === undefined) {
+    throw new Error("no episode watch fetch is waiting");
+  }
+  if (next.ratingKey !== descriptor.ratingKey) {
+    throw new Error(
+      `episode watch for ${next.ratingKey} was resolved with descriptor ${descriptor.ratingKey}`,
+    );
+  }
+  pending.splice(index, 1);
+  return next;
+}
+
 /**
  * Resolves the newest pending fetchEpisodeWatch with this descriptor.
  *
@@ -163,18 +180,89 @@ export function installWatchFetchMocks(): void {
 export async function resolveLatestEpisodeWatch(
   descriptor: WatchDescriptor,
 ): Promise<void> {
-  const next = pending.at(-1);
-  if (next === undefined) {
-    throw new Error("no episode watch fetch is waiting");
-  }
-  if (next.ratingKey !== descriptor.ratingKey) {
-    throw new Error(
-      `episode watch for ${next.ratingKey} was resolved with descriptor ${descriptor.ratingKey}`,
-    );
-  }
-  pending.pop();
+  const next = takePending(pending.length - 1, descriptor);
   await act(async () => {
     next.resolve(descriptor);
+    await Promise.resolve();
+  });
+}
+
+/**
+ * Resolves the newest pending fetchEpisodeWatch like
+ * resolveLatestEpisodeWatch, and runs `between` inside the same act, right
+ * after the callbacks the page attached to that fetch have run. React has
+ * not committed what those callbacks set yet, so `between` sees the page in
+ * the gap between "the descriptor arrived" and "the new stream replaced the
+ * old one". resolveLatestEpisodeWatch alone flushes React before a test can
+ * step in.
+ *
+ * @throws Error when nothing is waiting, or the waiting rating key does not
+ * match the descriptor. Whatever `between` throws also propagates.
+ */
+export async function resolveLatestEpisodeWatchThen(
+  descriptor: WatchDescriptor,
+  between: () => void,
+): Promise<void> {
+  const next = takePending(pending.length - 1, descriptor);
+  await act(async () => {
+    next.resolve(descriptor);
+    await Promise.resolve();
+    between();
+  });
+}
+
+/**
+ * Resolves the newest pending fetchEpisodeWatch for the descriptor's rating
+ * key, even when a newer fetch for another rating key is waiting. This is how
+ * a test delivers a fetch that the page has since stopped caring about.
+ *
+ * @throws Error when no pending fetch has this descriptor's rating key.
+ */
+export async function resolvePendingEpisodeWatchFor(
+  descriptor: WatchDescriptor,
+): Promise<void> {
+  let index = -1;
+  for (let i = pending.length - 1; i >= 0; i -= 1) {
+    if (pending[i]?.ratingKey === descriptor.ratingKey) {
+      index = i;
+      break;
+    }
+  }
+  if (index < 0) {
+    throw new Error(`no episode watch fetch is waiting for ${descriptor.ratingKey}`);
+  }
+  const next = takePending(index, descriptor);
+  await act(async () => {
+    next.resolve(descriptor);
+    await Promise.resolve();
+  });
+}
+
+/**
+ * Rejects the newest pending fetchEpisodeWatch for this rating key with this
+ * error, even when a newer fetch for another rating key is waiting. This is
+ * how a test fails a fetch that the page has since stopped caring about.
+ *
+ * @throws Error when no pending fetch has this rating key.
+ */
+export async function rejectPendingEpisodeWatchFor(
+  ratingKey: string,
+  error: unknown,
+): Promise<void> {
+  let index = -1;
+  for (let i = pending.length - 1; i >= 0; i -= 1) {
+    if (pending[i]?.ratingKey === ratingKey) {
+      index = i;
+      break;
+    }
+  }
+  const next = pending[index];
+  if (next === undefined) {
+    throw new Error(`no episode watch fetch is waiting for ${ratingKey}`);
+  }
+  pending.splice(index, 1);
+  await act(async () => {
+    next.reject(error);
     await Promise.resolve();
   });
 }
