@@ -48,12 +48,16 @@ export type StaleSessionError = {
  * True only for details "fragLoadError" or "fragLoadTimeOut", when
  * lastSignOfLifeMs is not null and nowMs is more than STALE_SESSION_MS past it.
  * A fatal error is never stale, because the fatal path decides that one.
+ * knownDead means a ping already found this session dead. A fragment failure
+ * is then stale immediately, because the session cannot come back, whatever
+ * the times say. It defaults to false, which is the silence rule above.
  * Throws when nowMs is not a finite number.
  */
 export function isStaleSessionError(
   error: StaleSessionError,
   lastSignOfLifeMs: number | null,
   nowMs: number,
+  knownDead = false,
 ): boolean {
   if (!Number.isFinite(nowMs)) {
     throw new Error(`nowMs must be a finite time, got ${nowMs}`);
@@ -66,6 +70,9 @@ export function isStaleSessionError(
     error.details !== "fragLoadTimeOut"
   ) {
     return false;
+  }
+  if (knownDead) {
+    return true;
   }
   if (lastSignOfLifeMs === null) {
     return false;

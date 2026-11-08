@@ -459,6 +459,7 @@ async function establishWithSignOfLife(): Promise<{
   descriptor: WatchDescriptor;
   video: HTMLVideoElement;
   hls: FakeHls;
+  unmount: () => void;
 }> {
   const started = await startPlayback();
   useRecoveryClock();
@@ -467,6 +468,107 @@ async function establishWithSignOfLife(): Promise<{
     emit(started.hls, FakeHls.Events.FRAG_LOADED, {});
   });
   return started;
+}
+
+// Phase 56.4 helpers. The ping is the only request these tests let global
+// fetch answer. Anything else still throws, which is what stubFetch does.
+
+type PingOutcome = "alive" | "dead" | "unknown";
+
+// The 404 body recorded on 2026-11-06 for a stopped session. A 200 is empty.
+const PING_NOT_FOUND_BODY =
+  "<html><head><title>Not Found</title></head><body><h1>404 Not Found</h1></body></html>";
+
+function pingResponse(status: number): Response {
+  return new Response(status === 404 ? PING_NOT_FOUND_BODY : "", {
+    status,
+    headers: { "Content-Type": "text/html" },
+  });
+}
+
+function statusForPing(outcome: PingOutcome): number {
+  if (outcome === "alive") {
+    return 200;
+  }
+  if (outcome === "dead") {
+    return 404;
+  }
+  return 500;
+}
+
+// The URL a ping of this stream must use. Built here, not through
+// buildPingUrl, so a stub of that function cannot make the page tests pass.
+function expectedPingUrl(sourceUrl: string, sessionId: string, token: string): string {
+  const origin = new URL(sourceUrl).origin;
+  const query = new URLSearchParams({
+    session: sessionId,
+    "X-Plex-Token": token,
+  });
+  return `${origin}/video/:/transcode/universal/ping?${query.toString()}`;
+}
+
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  if (input instanceof URL) {
+    return input.href;
+  }
+  return input.url;
+}
+
+// Answers ping URLs and records them. Pass "hold" to leave the first ping
+// pending until settle() and to answer later pings with 200.
+function installPingFetch(outcome: PingOutcome | "hold"): {
+  urls: () => string[];
+  settle: () => Promise<void>;
+} {
+  const urls: string[] = [];
+  let held: ((response: Response) => void) | null = null;
+  let holding = outcome === "hold";
+  vi.stubGlobal("fetch", (input: RequestInfo | URL) => {
+    const target = requestUrl(input);
+    if (!target.includes("/video/:/transcode/universal/ping")) {
+      throw new Error(`unexpected network fetch: ${target}`);
+    }
+    urls.push(target);
+    if (holding) {
+      holding = false;
+      return new Promise<Response>((resolve) => {
+        held = resolve;
+      });
+    }
+    const status = outcome === "hold" ? 200 : statusForPing(outcome);
+    return Promise.resolve(pingResponse(status));
+  });
+  return {
+    urls: () => urls,
+    settle: async () => {
+      const resolve = held;
+      if (resolve === null) {
+        throw new Error("no ping is pending");
+      }
+      held = null;
+      await act(async () => {
+        resolve(pingResponse(200));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    },
+  };
+}
+
+function pausePlayback(video: HTMLVideoElement): void {
+  act(() => {
+    video.pause();
+  });
+}
+
+function setVideoEnded(video: HTMLVideoElement): void {
+  Object.defineProperty(video, "ended", {
+    configurable: true,
+    get: () => true,
+  });
 }
 
 // document.visibilityState is read at event time, so a test sets it for the
@@ -2260,6 +2362,361 @@ describe("WatchPage playback", () => {
 
     expect(fetchCalls()).toHaveLength(2);
     expect(reconnectingBanner()).toBeNull();
+  });
+
+  // Phase 56.4: an idle stream pings its Plex session every 30 s.
+
+  it("pings the local session every 30 s while a paused stream loads no fragments", async () => {
+    const { descriptor, video } = await establishWithSignOfLife();
+    pausePlayback(video);
+    const pings = installPingFetch("alive");
+    const url = expectedPingUrl(
+      descriptor.hls.local ?? "",
+      descriptor.sessionId,
+      descriptor.transient,
+    );
+
+    await advanceRecovery(29_999);
+    expect(pings.urls()).toEqual([]);
+    await advanceRecovery(1);
+    expect(pings.urls()).toEqual([url]);
+    await advanceRecovery(30_000);
+    expect(pings.urls()).toEqual([url, url]);
+    await advanceRecovery(30_000);
+    expect(pings.urls()).toEqual([url, url, url]);
+  });
+
+  it("pings the remote origin after a fail-over", async () => {
+    const { descriptor, video } = await startPlayback();
+    useRecoveryClock();
+    const pings = installPingFetch("alive");
+    failLiveInstance();
+    const remote = liveInstances()[0];
+    if (remote === undefined) {
+      throw new Error("remote Hls instance is missing");
+    }
+    act(() => {
+      emit(remote, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+    pausePlayback(video);
+
+    await advanceRecovery(30_000);
+
+    expect(pings.urls()).toEqual([
+      expectedPingUrl(
+        descriptor.hls.remote,
+        descriptor.sessionId,
+        descriptor.transient,
+      ),
+    ]);
+  });
+
+  it("stops the local interval when a fail-over happens after the local manifest parsed", async () => {
+    const { descriptor, video } = await startPlayback();
+    useRecoveryClock();
+    const local = liveInstances()[0];
+    if (local === undefined) {
+      throw new Error("local Hls instance is missing");
+    }
+    act(() => {
+      emit(local, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+    pausePlayback(video);
+    const pings = installPingFetch("alive");
+    const localUrl = expectedPingUrl(
+      descriptor.hls.local ?? "",
+      descriptor.sessionId,
+      descriptor.transient,
+    );
+    await advanceRecovery(30_000);
+    expect(pings.urls()).toEqual([localUrl]);
+
+    failLiveInstance();
+    const remote = liveInstances()[0];
+    if (remote === undefined) {
+      throw new Error("remote Hls instance is missing");
+    }
+    act(() => {
+      emit(remote, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+    pausePlayback(video);
+    await advanceRecovery(90_000);
+
+    const remoteUrl = expectedPingUrl(
+      descriptor.hls.remote,
+      descriptor.sessionId,
+      descriptor.transient,
+    );
+    expect(pings.urls()).toEqual([localUrl, remoteUrl, remoteUrl, remoteUrl]);
+  });
+
+  it("stops pinging when playback gives up after the manifest parsed", async () => {
+    const descriptor = buildWatchDescriptor({ local: null });
+    const { video, hls } = await startPlayback({ descriptor });
+    useRecoveryClock();
+    act(() => {
+      emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+    pausePlayback(video);
+    const pings = installPingFetch("alive");
+    await advanceRecovery(30_000);
+    expect(pings.urls()).toHaveLength(1);
+
+    failLiveInstance();
+    expect(document.querySelector(".watch-playback-diag")).not.toBeNull();
+
+    await advanceRecovery(90_000);
+    expect(pings.urls()).toHaveLength(1);
+  });
+
+  it("does not ping a playing, seeking element, so a fragment timeout after 121 s restarts at once", async () => {
+    const { descriptor, video, hls } = await establishWithSignOfLife();
+    Object.defineProperty(video, "seeking", {
+      configurable: true,
+      get: () => true,
+    });
+    const pings = installPingFetch("alive");
+
+    await advanceRecovery(121_000);
+
+    expect(pings.urls()).toEqual([]);
+    emitNonFatal(hls, descriptor, "fragLoadTimeOut");
+
+    expect(fetchCalls()).toHaveLength(2);
+    expect(reconnectingBanner()).not.toBeNull();
+    expectNoErrorState();
+  });
+
+  it("sends no ping while a playing element is not seeking and loads no fragments", async () => {
+    await establishWithSignOfLife();
+    const pings = installPingFetch("alive");
+
+    await advanceRecovery(90_000);
+
+    expect(pings.urls()).toEqual([]);
+  });
+
+  it("sends no ping while a paused element is seeking", async () => {
+    const { video } = await establishWithSignOfLife();
+    pausePlayback(video);
+    Object.defineProperty(video, "seeking", {
+      configurable: true,
+      get: () => true,
+    });
+    const pings = installPingFetch("alive");
+
+    await advanceRecovery(90_000);
+
+    expect(pings.urls()).toEqual([]);
+  });
+
+  it("sends no ping while fragments keep loading", async () => {
+    const { video, hls } = await establishWithSignOfLife();
+    pausePlayback(video);
+    const pings = installPingFetch("alive");
+
+    for (let step = 0; step < 18; step += 1) {
+      await advanceRecovery(5_000);
+      act(() => {
+        emit(hls, FakeHls.Events.FRAG_LOADED, {});
+      });
+    }
+
+    expect(pings.urls()).toEqual([]);
+  });
+
+  it("keeps pinging every 30 s through 2 hours of idle when every ping is alive", async () => {
+    const { descriptor, video } = await establishWithSignOfLife();
+    pausePlayback(video);
+    const pings = installPingFetch("alive");
+    const url = expectedPingUrl(
+      descriptor.hls.local ?? "",
+      descriptor.sessionId,
+      descriptor.transient,
+    );
+
+    await advanceRecovery(2 * 60 * 60 * 1000);
+
+    expect(pings.urls()).toHaveLength(240);
+    expect(pings.urls().every((ping) => ping === url)).toBe(true);
+  });
+
+  it("stops pinging when the page unmounts", async () => {
+    const { video, unmount } = await establishWithSignOfLife();
+    pausePlayback(video);
+    const pings = installPingFetch("alive");
+    await advanceRecovery(30_000);
+    expect(pings.urls()).toHaveLength(1);
+
+    act(() => {
+      unmount();
+    });
+    await advanceRecovery(90_000);
+
+    expect(pings.urls()).toHaveLength(1);
+  });
+
+  it("stops pinging the old session when the page moves to another episode", async () => {
+    vi.mocked(fetchNextEpisode).mockResolvedValue({
+      ratingKey: "900002",
+      seasonNumber: 1,
+      episodeNumber: 2,
+      title: "Second Example",
+      thumb: null,
+    });
+    const { descriptor, video, hls } = await startPlayback();
+    await screen.findByRole("link", { name: /Next episode/ });
+    useRecoveryClock();
+    establishAt(hls, video, 397.6);
+    act(() => {
+      emit(hls, FakeHls.Events.FRAG_LOADED, {});
+    });
+    pausePlayback(video);
+    const pings = installPingFetch("alive");
+    await advanceRecovery(30_000);
+    expect(pings.urls()).toHaveLength(1);
+    expect(pings.urls()[0]).toContain(`session=${descriptor.sessionId}`);
+
+    await openSecondEpisode();
+    await advanceRecovery(90_000);
+
+    expect(pings.urls()).toHaveLength(1);
+  });
+
+  it("stops pinging when Cast connects", async () => {
+    const { video } = await establishWithSignOfLife();
+    pausePlayback(video);
+    const pings = installPingFetch("alive");
+    await advanceRecovery(30_000);
+    expect(pings.urls()).toHaveLength(1);
+
+    setCastConnected(true);
+    await advanceRecovery(90_000);
+
+    expect(pings.urls()).toHaveLength(1);
+  });
+
+  it("stops pinging the old session when a restart replaces it", async () => {
+    const { descriptor, video, hls } = await establishWithSignOfLife();
+    pausePlayback(video);
+    const pings = installPingFetch("alive");
+    await advanceRecovery(30_000);
+    expect(pings.urls()).toHaveLength(1);
+
+    failFragments(hls, descriptor, 0, "");
+    await resolveRestart(2);
+    await advanceRecovery(90_000);
+
+    expect(pings.urls()).toHaveLength(1);
+  });
+
+  it("sends one ping per 30 s under StrictMode", async () => {
+    const { video, hls } = await startPlayback({ strict: true });
+    useRecoveryClock();
+    establishAt(hls, video, 397.6);
+    act(() => {
+      emit(hls, FakeHls.Events.FRAG_LOADED, {});
+    });
+    pausePlayback(video);
+    const pings = installPingFetch("alive");
+
+    await advanceRecovery(90_000);
+
+    expect(pings.urls()).toHaveLength(3);
+  });
+
+  it("ends the pings on a dead answer and restarts at the next fragment failure", async () => {
+    const { descriptor, video, hls } = await establishWithSignOfLife();
+    pausePlayback(video);
+    const pings = installPingFetch("dead");
+    await advanceRecovery(30_000);
+    expect(pings.urls()).toHaveLength(1);
+
+    await advanceRecovery(60_000);
+    expect(pings.urls()).toHaveLength(1);
+    act(() => {
+      emit(hls, FakeHls.Events.FRAG_LOADED, {});
+    });
+    await advanceRecovery(40_000);
+    expect(pings.urls()).toHaveLength(1);
+
+    emitNonFatal(hls, descriptor);
+
+    expect(fetchCalls()).toHaveLength(2);
+    expect(reconnectingBanner()).not.toBeNull();
+    expectNoErrorState();
+  });
+
+  it("does not restart after 300 s of idle when the pings came back alive", async () => {
+    const { descriptor, video, hls } = await establishWithSignOfLife();
+    pausePlayback(video);
+    const pings = installPingFetch("alive");
+
+    await advanceRecovery(300_000);
+    expect(pings.urls()).toHaveLength(10);
+    emitNonFatal(hls, descriptor);
+
+    expect(fetchCalls()).toHaveLength(1);
+    expect(reconnectingBanner()).toBeNull();
+    expectNoErrorState();
+  });
+
+  it("sends no second ping while the first is still out, then one on the tick after it settles", async () => {
+    const { video } = await establishWithSignOfLife();
+    pausePlayback(video);
+    const pings = installPingFetch("hold");
+
+    await advanceRecovery(30_000);
+    expect(pings.urls()).toHaveLength(1);
+    await advanceRecovery(30_000);
+    expect(pings.urls()).toHaveLength(1);
+
+    await pings.settle();
+    await advanceRecovery(30_000);
+
+    expect(pings.urls()).toHaveLength(2);
+  });
+
+  it("sends no ping after the element has ended", async () => {
+    const { video } = await establishWithSignOfLife();
+    pausePlayback(video);
+    setVideoEnded(video);
+    const pings = installPingFetch("alive");
+
+    await advanceRecovery(90_000);
+
+    expect(pings.urls()).toEqual([]);
+  });
+
+  it("logs one redacted warning per instance when a ping's answer is unknown", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { descriptor, video } = await establishWithSignOfLife();
+      pausePlayback(video);
+      installPingFetch("unknown");
+
+      await advanceRecovery(30_000);
+      await advanceRecovery(90_000);
+
+      const messages = warn.mock.calls
+        .map((call) => call.map((part) => String(part)).join(" "))
+        .filter((message) => message.startsWith("Keepalive ping"));
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toContain(
+        "local.example.plex.direct/video/:/transcode/universal/ping",
+      );
+      const logged = [...warn.mock.calls, ...error.mock.calls]
+        .map((call) => call.map((part) => String(part)).join(" "))
+        .join("\n");
+      expect(logged).not.toContain(descriptor.transient);
+      expect(logged).not.toContain("X-Plex-Token");
+      expect(document.body.textContent ?? "").not.toContain(descriptor.transient);
+      expect(document.querySelector(".watch-playback-diag")).toBeNull();
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
   });
 
   it("beacons the position from a timeupdate after a fatal error", async () => {

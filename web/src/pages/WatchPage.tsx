@@ -79,6 +79,11 @@ import {
   type RecoveryBudget,
   type RestartPlan,
 } from "../lib/playbackRecovery";
+import {
+  KEEPALIVE_INTERVAL_MS,
+  buildPingUrl,
+  pingTranscodeSession,
+} from "../lib/transcodeKeepalive";
 
 // Auto-advance is a per-browser preference, so it lives in localStorage.
 const AUTO_PLAY_STORAGE_KEY = "tyflix.autoPlay";
@@ -779,9 +784,10 @@ export function WatchPage() {
   // effect resets it for each item.
   const streamEstablishedRef = useRef(false);
   // The last time this item showed its session was alive, as Date.now()
-  // milliseconds. A loaded fragment (FRAG_LOADED) and a parsed manifest
-  // (MANIFEST_PARSED) count. Nothing else does. The load effect resets it to
-  // null for each item, and null means this item has shown no sign of life yet.
+  // milliseconds. A loaded fragment (FRAG_LOADED), a parsed manifest
+  // (MANIFEST_PARSED), and a keepalive ping that comes back alive count. The
+  // load effect resets it to null for each item, and null means this item has
+  // shown no sign of life yet.
   const lastSignOfLifeRef = useRef<number | null>(null);
   // Restart starts and failed attempts for this item, see playbackRecovery.ts.
   const recoveryBudgetRef = useRef<RecoveryBudget>(createRecoveryBudget());
@@ -1829,6 +1835,12 @@ export function WatchPage() {
   // the hand-off this run ignores further errors and keeps its instance until
   // the next descriptor replaces it.
   //
+  // While an instance sits idle it pings that session every 30 s, with no time
+  // limit, so a pause in an open tab does not end the session. A ping that
+  // finds the session dead stops the pings and makes the next fragment failure
+  // restart at once. Cast and the native HLS path never attach hls.js, so they
+  // never ping.
+  //
   // This effect owns the hls.js instance and destroys it on cleanup. It's the
   // point where the descriptor stops being data and becomes a video stream:
   // hls.js loads a plex.direct URL that already carries the transient token, so
@@ -1942,6 +1954,18 @@ export function WatchPage() {
       video.pause();
     }
 
+    // Stops the current instance's pings and destroys it. The interval belongs
+    // to that instance, so every place the run destroys one clears it here:
+    // a fail-over, the give-up, and the effect cleanup (which also covers an
+    // item change, Cast connecting, and a restart). The fake hls.js never
+    // fires DESTROYING, so this does not listen for it.
+    let stopInstanceKeepalive = (): void => {};
+    const destroyAttachedInstance = () => {
+      stopInstanceKeepalive();
+      hls?.destroy();
+      hls = null;
+    };
+
     // Fast-fail only the LOCAL master-manifest probe (~3s, no retries) so an
     // unreachable LAN plex.direct falls over to remote quickly. Fragment and
     // media-playlist timeouts stay at hls.js defaults — cold Plex transcodes
@@ -1949,6 +1973,71 @@ export function WatchPage() {
     // primary-when-local-is-null) keeps patient default timeouts.
     const attach = (source: string, fastFail: boolean) => {
       attachBuffered = false;
+      // This instance's own keepalive. lastFragmentAtMs starts when its
+      // manifest parses and moves on each loaded fragment. A tick pings only
+      // a paused element that is not seeking, and only when nothing has
+      // loaded for 30 s. Fragments already prove the session is alive, and
+      // hls.js's own retries cover a short blip. A playing or seeking element
+      // that has loaded nothing is stuck, not idle: an alive ping would count
+      // as a sign of life and hide that hang from the stale-session rule.
+      // There is no cap (D3): the pings continue for as long as the paused
+      // instance stays idle. A dead answer ends them, because that session
+      // cannot come back.
+      let stopped = false;
+      let sessionDead = false;
+      let pingInFlight = false;
+      let warnedUnknown = false;
+      let lastFragmentAtMs = 0;
+      let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+      const stopThisKeepalive = () => {
+        stopped = true;
+        if (keepaliveTimer !== null) {
+          clearInterval(keepaliveTimer);
+          keepaliveTimer = null;
+        }
+      };
+      stopInstanceKeepalive = stopThisKeepalive;
+      const sendKeepalive = async (): Promise<void> => {
+        if (stopped || sessionDead || pingInFlight || video.ended || !video.paused || video.seeking) {
+          return;
+        }
+        const now = Date.now();
+        if (now - lastFragmentAtMs < KEEPALIVE_INTERVAL_MS) {
+          return;
+        }
+        let url: string;
+        try {
+          url = buildPingUrl(source, descriptor.sessionId, descriptor.transient);
+        } catch (err: unknown) {
+          if (!warnedUnknown) {
+            warnedUnknown = true;
+            const reason = err instanceof Error ? err.message : "bad ping URL";
+            console.warn(`Keepalive ping skipped: ${reason}`);
+          }
+          return;
+        }
+        pingInFlight = true;
+        const result = await pingTranscodeSession(url);
+        pingInFlight = false;
+        if (stopped) {
+          return;
+        }
+        if (result === "alive") {
+          lastSignOfLifeRef.current = Date.now();
+          return;
+        }
+        if (result === "dead") {
+          sessionDead = true;
+          stopThisKeepalive();
+          return;
+        }
+        if (!warnedUnknown) {
+          warnedUnknown = true;
+          console.warn(
+            `Keepalive ping: unknown result for ${redactStreamUrl(url)}`,
+          );
+        }
+      };
       hls = new Hls({
         enableWorker: false,
         ...(fastFail
@@ -1973,11 +2062,22 @@ export function WatchPage() {
           : {}),
       });
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        lastSignOfLifeRef.current = Date.now();
+        const now = Date.now();
+        lastSignOfLifeRef.current = now;
+        if (!stopped) {
+          lastFragmentAtMs = now;
+          if (keepaliveTimer !== null) {
+            clearInterval(keepaliveTimer);
+          }
+          keepaliveTimer = setInterval(() => {
+            void sendKeepalive();
+          }, KEEPALIVE_INTERVAL_MS);
+        }
         applyPendingResume();
       });
       hls.on(Hls.Events.FRAG_LOADED, () => {
         lastSignOfLifeRef.current = Date.now();
+        lastFragmentAtMs = Date.now();
       });
       hls.on(Hls.Events.FRAG_BUFFERED, () => {
         attachBuffered = true;
@@ -2036,6 +2136,7 @@ export function WatchPage() {
               { fatal: false, details },
               lastSignOfLifeRef.current,
               Date.now(),
+              sessionDead,
             )
           ) {
             recoverFrom(data);
@@ -2068,7 +2169,7 @@ export function WatchPage() {
         });
         if (action === "fail-over") {
           usedRemote = true;
-          hls?.destroy();
+          destroyAttachedInstance();
           attach(remoteUrl, false);
           return;
         }
@@ -2081,8 +2182,7 @@ export function WatchPage() {
           });
           return;
         }
-        hls?.destroy();
-        hls = null;
+        destroyAttachedInstance();
         pendingResumeRef.current = null;
         const report = buildHlsPlaybackFailureReport({
           hadLocalUrl: localUrl !== null,
@@ -2099,8 +2199,7 @@ export function WatchPage() {
     attach(primaryUrl, primaryUrl === localUrl);
 
     const destroyThisRun = () => {
-      hls?.destroy();
-      hls = null;
+      destroyAttachedInstance();
     };
     destroyHlsRef.current = destroyThisRun;
 

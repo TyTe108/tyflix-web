@@ -299,4 +299,49 @@ describe("isStaleSessionError", () => {
       isStaleSessionError(fragment, aliveAt, Number.POSITIVE_INFINITY),
     ).toThrow();
   });
+
+  it("treats a fragment failure as stale at once when the session is known dead", () => {
+    const recent = aliveAt + 10_000;
+
+    expect(
+      isStaleSessionError(
+        { fatal: false, details: "fragLoadError" },
+        aliveAt,
+        recent,
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      isStaleSessionError(
+        { fatal: false, details: "fragLoadTimeOut" },
+        aliveAt,
+        recent,
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      isStaleSessionError(
+        { fatal: true, details: "fragLoadError" },
+        aliveAt,
+        recent,
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      isStaleSessionError(
+        { fatal: false, details: "bufferStalledError" },
+        aliveAt,
+        recent,
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      isStaleSessionError(
+        { fatal: false, details: "fragLoadError" },
+        aliveAt,
+        recent,
+        false,
+      ),
+    ).toBe(false);
+  });
 });
