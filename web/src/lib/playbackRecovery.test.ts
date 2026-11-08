@@ -15,6 +15,8 @@ import {
   recordAttemptFailed,
   recordAttemptRecovered,
   recordRestartStart,
+  STALE_SESSION_MS,
+  isStaleSessionError,
   type RecoveryBudget,
   type RestartPlan,
 } from "./playbackRecovery";
@@ -235,5 +237,66 @@ describe("recording attempts", () => {
     expect(() => recordRestartStart(budget, Number.NaN)).toThrow();
     expect(() => recordRestartStart(budget, -5)).toThrow();
     expect(() => recordRestartStart(budget, Number.POSITIVE_INFINITY)).toThrow();
+  });
+});
+
+// Phase 56.3: a failed segment after a long silence is a dead session.
+describe("isStaleSessionError", () => {
+  const aliveAt = 1_000;
+  const staleAt = aliveAt + STALE_SESSION_MS + 1;
+  const fragment = { fatal: false, details: "fragLoadError" };
+
+  it("is the 120 s margin under Plex's 181 s idle kill", () => {
+    expect(STALE_SESSION_MS).toBe(120_000);
+  });
+
+  it("is stale only once the silence is past 120 s", () => {
+    expect(
+      isStaleSessionError(fragment, aliveAt, aliveAt + STALE_SESSION_MS),
+    ).toBe(false);
+    expect(
+      isStaleSessionError(fragment, aliveAt, aliveAt + STALE_SESSION_MS + 1),
+    ).toBe(true);
+  });
+
+  it("is false when no sign of life was recorded", () => {
+    expect(isStaleSessionError(fragment, null, staleAt)).toBe(false);
+  });
+
+  it("counts fragLoadError and fragLoadTimeOut and no other details", () => {
+    expect(
+      isStaleSessionError(
+        { fatal: false, details: "fragLoadTimeOut" },
+        aliveAt,
+        staleAt,
+      ),
+    ).toBe(true);
+    for (const details of [
+      "bufferStalledError",
+      "levelLoadError",
+      "manifestLoadError",
+      "fragParsingError",
+    ]) {
+      expect(
+        isStaleSessionError({ fatal: false, details }, aliveAt, staleAt),
+      ).toBe(false);
+    }
+  });
+
+  it("is false for a fatal error even after a long silence", () => {
+    expect(
+      isStaleSessionError(
+        { fatal: true, details: "fragLoadError" },
+        aliveAt,
+        staleAt,
+      ),
+    ).toBe(false);
+  });
+
+  it("throws when the time is not finite", () => {
+    expect(() => isStaleSessionError(fragment, aliveAt, Number.NaN)).toThrow();
+    expect(() =>
+      isStaleSessionError(fragment, aliveAt, Number.POSITIVE_INFINITY),
+    ).toThrow();
   });
 });

@@ -12,7 +12,8 @@
 // same way (spec E15).
 //
 // This module holds the pure part: which of three actions a fatal error leads
-// to, and the budget that decides when a restart may start and when to stop.
+// to, the budget that decides when a restart may start and when to stop, and
+// whether a non-fatal fragment failure means the session has gone stale.
 // WatchPage owns the timers, the descriptor fetch and the hls.js instances.
 
 /** Wait before a restart by consecutive failed attempts. The last value repeats. */
@@ -26,6 +27,51 @@ export const RECOVERY_WINDOW_MS = 300_000;
 
 /** The least time between the starts of two restarts. */
 export const RECOVERY_MIN_SPACING_MS = 2_000;
+
+/**
+ * Silence after which a failed segment means the session is dead, two minutes.
+ * Plex kills an idle transcode about 181 s after its last request, measured
+ * 2026-11-06, and 120 s leaves margin under that. The gap is wall time, from
+ * Date.now(), because Plex's idle timer runs on wall time and performance.now()
+ * may not move while a machine sleeps.
+ */
+export const STALE_SESSION_MS = 120_000;
+
+/** The hls.js error fields isStaleSessionError reads. */
+export type StaleSessionError = {
+  fatal: boolean;
+  details: string;
+};
+
+/**
+ * Whether a non-fatal fragment failure arrived after a dead session's silence.
+ * True only for details "fragLoadError" or "fragLoadTimeOut", when
+ * lastSignOfLifeMs is not null and nowMs is more than STALE_SESSION_MS past it.
+ * A fatal error is never stale, because the fatal path decides that one.
+ * Throws when nowMs is not a finite number.
+ */
+export function isStaleSessionError(
+  error: StaleSessionError,
+  lastSignOfLifeMs: number | null,
+  nowMs: number,
+): boolean {
+  if (!Number.isFinite(nowMs)) {
+    throw new Error(`nowMs must be a finite time, got ${nowMs}`);
+  }
+  if (error.fatal) {
+    return false;
+  }
+  if (
+    error.details !== "fragLoadError" &&
+    error.details !== "fragLoadTimeOut"
+  ) {
+    return false;
+  }
+  if (lastSignOfLifeMs === null) {
+    return false;
+  }
+  return nowMs - lastSignOfLifeMs > STALE_SESSION_MS;
+}
 
 /**
  * What a fatal hls.js error leads to.

@@ -419,6 +419,56 @@ function reconnectingBanner(): HTMLElement | null {
   return screen.queryByText("Reconnecting…");
 }
 
+// Phase 56.3 helpers. A segment failure after a long silence, and the clock
+// move that creates the silence without running any timer.
+
+function segmentUrl(descriptor: WatchDescriptor): string {
+  return `${new URL(descriptor.hls.remote).origin}/video/:/transcode/universal/session/${descriptor.sessionId}/base/00042.ts?X-Plex-Token=${descriptor.transient}`;
+}
+
+// A non-fatal ERROR payload. details defaults to fragLoadError.
+function nonFatalLoadError(descriptor: WatchDescriptor, details?: string) {
+  return {
+    type: FakeHls.ErrorTypes.NETWORK_ERROR,
+    details: details ?? FakeHls.ErrorDetails.FRAG_LOAD_ERROR,
+    fatal: false,
+    response: { url: segmentUrl(descriptor), data: undefined, code: 0, text: "" },
+    error: new Error("HTTP Error 0 "),
+  };
+}
+
+function emitNonFatal(
+  hls: FakeHls,
+  descriptor: WatchDescriptor,
+  details?: string,
+): void {
+  act(() => {
+    emit(hls, FakeHls.Events.ERROR, nonFatalLoadError(descriptor, details));
+  });
+}
+
+// Moves the faked wall clock forward. It does not run timers, so a recovery
+// delay that was already scheduled stays where it is.
+function advanceWallClock(ms: number): void {
+  vi.setSystemTime(Date.now() + ms);
+}
+
+// The stream is established and a fragment has loaded, which is the sign of
+// life the silence is measured from. The recovery clock is installed here.
+async function establishWithSignOfLife(): Promise<{
+  descriptor: WatchDescriptor;
+  video: HTMLVideoElement;
+  hls: FakeHls;
+}> {
+  const started = await startPlayback();
+  useRecoveryClock();
+  establishAt(started.hls, started.video, 397.6);
+  act(() => {
+    emit(started.hls, FakeHls.Events.FRAG_LOADED, {});
+  });
+  return started;
+}
+
 // document.visibilityState is read at event time, so a test sets it for the
 // length of one callback and then removes the override.
 function withHiddenDocument(run: () => void): void {
@@ -1967,6 +2017,249 @@ describe("WatchPage playback", () => {
       error.mockRestore();
       warn.mockRestore();
     }
+  });
+
+  // Phase 56.3: the first failed segment after a long silence restarts at once.
+
+  it("restarts at the first non-fatal fragment error after 340 s without a sign of life", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { descriptor, hls } = await establishWithSignOfLife();
+      advanceWallClock(340_000);
+
+      emitNonFatal(hls, descriptor);
+
+      expect(reconnectingBanner()).not.toBeNull();
+      expect(fetchCalls()).toHaveLength(2);
+      expectNoErrorState();
+
+      // The retries hls.js would still make, and the fatal error they end in,
+      // belong to the session the recovery already left.
+      act(() => {
+        for (let retry = 0; retry < 5; retry += 1) {
+          emit(hls, FakeHls.Events.ERROR, nonFatalLoadError(descriptor));
+        }
+        emit(
+          hls,
+          FakeHls.Events.ERROR,
+          fragLoadError(segmentUrl(descriptor), 0, "", true),
+        );
+      });
+      await advanceRecovery(60_000);
+
+      expect(fetchCalls()).toHaveLength(2);
+      expect(reconnectingBanner()).not.toBeNull();
+      expectNoErrorState();
+
+      const messages = warn.mock.calls
+        .map((call) => String(call[0]))
+        .filter((message) => message.includes("Playback recovery"));
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toContain("attempt 1");
+      expect(messages[0]).toContain("0 ms");
+      expect(messages[0]).toContain("stale session");
+      expect(messages[0]).toContain("340 s");
+      expect(messages[0]).not.toContain("X-Plex-Token");
+      expect(messages[0]).not.toContain("example-token");
+      expect(messages[0]).not.toContain(descriptor.transient);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("waits for the fatal error when the last sign of life was 100 s ago", async () => {
+    const { descriptor, hls } = await establishWithSignOfLife();
+    advanceWallClock(100_000);
+
+    emitNonFatal(hls, descriptor);
+
+    expect(fetchCalls()).toHaveLength(1);
+    expect(reconnectingBanner()).toBeNull();
+    expectNoErrorState();
+
+    act(() => {
+      emit(
+        hls,
+        FakeHls.Events.ERROR,
+        fragLoadError(segmentUrl(descriptor), 0, "", true),
+      );
+    });
+
+    expect(fetchCalls()).toHaveLength(2);
+    expect(reconnectingBanner()).not.toBeNull();
+    expectNoErrorState();
+  });
+
+  it("starts a recovery once the silence passes 120 s and not at 120 s", async () => {
+    const { descriptor, hls } = await establishWithSignOfLife();
+    advanceWallClock(120_000);
+
+    emitNonFatal(hls, descriptor);
+
+    expect(fetchCalls()).toHaveLength(1);
+    expect(reconnectingBanner()).toBeNull();
+
+    advanceWallClock(1);
+    emitNonFatal(hls, descriptor);
+
+    expect(fetchCalls()).toHaveLength(2);
+    expect(reconnectingBanner()).not.toBeNull();
+    expectNoErrorState();
+  });
+
+  it("restarts on a non-fatal fragLoadTimeOut after a long silence", async () => {
+    const { descriptor, hls } = await establishWithSignOfLife();
+    advanceWallClock(340_000);
+
+    emitNonFatal(hls, descriptor, FakeHls.ErrorDetails.FRAG_LOAD_TIMEOUT);
+
+    expect(fetchCalls()).toHaveLength(2);
+    expect(reconnectingBanner()).not.toBeNull();
+    expectNoErrorState();
+  });
+
+  it("does not restart on a non-fatal buffer stall, level load or manifest load error", async () => {
+    const { descriptor, hls } = await establishWithSignOfLife();
+    advanceWallClock(340_000);
+
+    emitNonFatal(hls, descriptor, FakeHls.ErrorDetails.BUFFER_STALLED_ERROR);
+    emitNonFatal(hls, descriptor, FakeHls.ErrorDetails.LEVEL_LOAD_ERROR);
+    emitNonFatal(hls, descriptor, FakeHls.ErrorDetails.MANIFEST_LOAD_ERROR);
+
+    expect(fetchCalls()).toHaveLength(1);
+    expect(reconnectingBanner()).toBeNull();
+    expectNoErrorState();
+  });
+
+  it("treats the restarted stream's parsed manifest as a new sign of life", async () => {
+    const { descriptor, hls } = await establishWithSignOfLife();
+    advanceWallClock(340_000);
+    emitNonFatal(hls, descriptor);
+    expect(fetchCalls()).toHaveLength(2);
+
+    await resolveRestart(2);
+    const restarted = liveInstances()[0];
+    if (restarted === undefined) {
+      throw new Error("restarted Hls instance is missing");
+    }
+    act(() => {
+      emit(restarted, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+    advanceWallClock(5_000);
+    const next = restartDescriptor(2);
+    emitNonFatal(restarted, next);
+
+    expect(fetchCalls()).toHaveLength(2);
+    expectNoErrorState();
+  });
+
+  it("starts nothing on a non-fatal error when the item has no sign of life yet", async () => {
+    const descriptor = buildWatchDescriptor();
+    const { hls } = await startPlayback({ descriptor });
+    useRecoveryClock();
+    advanceWallClock(340_000);
+
+    emitNonFatal(hls, descriptor);
+
+    expect(fetchCalls()).toHaveLength(1);
+    expect(reconnectingBanner()).toBeNull();
+    expectNoErrorState();
+  });
+
+  it("still restarts from wall time when performance.now() does not move", async () => {
+    const clock = vi.spyOn(performance, "now").mockReturnValue(1234);
+    try {
+      const { descriptor, hls } = await establishWithSignOfLife();
+      advanceWallClock(340_000);
+      expect(performance.now()).toBe(1234);
+
+      emitNonFatal(hls, descriptor);
+
+      expect(performance.now()).toBe(1234);
+      expect(reconnectingBanner()).not.toBeNull();
+      expect(fetchCalls()).toHaveLength(2);
+      expectNoErrorState();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("starts nothing for a stream that never buffered, and its fatal error then fails playback", async () => {
+    const descriptor = buildWatchDescriptor({ local: null });
+    const { hls } = await startPlayback({ descriptor });
+    useRecoveryClock();
+    act(() => {
+      emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+    advanceWallClock(340_000);
+
+    emitNonFatal(hls, descriptor);
+
+    expect(fetchCalls()).toHaveLength(1);
+    expect(reconnectingBanner()).toBeNull();
+    expect(document.querySelector(".watch-playback-diag")).toBeNull();
+
+    act(() => {
+      emit(
+        hls,
+        FakeHls.Events.ERROR,
+        fragLoadError(segmentUrl(descriptor), 0, "", true),
+      );
+    });
+
+    expect(fetchCalls()).toHaveLength(1);
+    expect(reconnectingBanner()).toBeNull();
+    expect(
+      document
+        .querySelector(".watch-playback-diag")
+        ?.textContent?.startsWith("Playback failed on all connections."),
+    ).toBe(true);
+  });
+
+  // Pins the FRAG_LOADED stamp. The other silence tests load their fragment at
+  // the same moment the manifest parses, so either stamp would satisfy them.
+  // This one loads a fragment 200 s into playback and fails a segment 100 s
+  // later. That is inside the 120 s margin. Without the stamp the sign of life
+  // would stay at the stream's start, 300 s earlier, and the blip would restart
+  // the stream.
+  it("does not restart a blip 100 s after a fragment loaded during playback", async () => {
+    const { descriptor, hls } = await establishWithSignOfLife();
+    advanceWallClock(200_000);
+    act(() => {
+      emit(hls, FakeHls.Events.FRAG_LOADED, {});
+    });
+    advanceWallClock(100_000);
+
+    emitNonFatal(hls, descriptor);
+
+    expect(fetchCalls()).toHaveLength(1);
+    expect(reconnectingBanner()).toBeNull();
+  });
+
+  // Pins the MANIFEST_PARSED stamp. A Quality switch after a long pause
+  // attaches a new session, and its parsed manifest is a sign of life for that
+  // session. Without the stamp the first segment error on it would count the
+  // pause as silence and restart.
+  it("does not restart the first segment error after a Quality switch that followed a long pause", async () => {
+    const { video } = await establishWithSignOfLife();
+    act(() => {
+      video.pause();
+    });
+    advanceWallClock(300_000);
+    chooseQuality720();
+    await resolveRestart(2);
+    const switched = liveInstances()[0];
+    if (switched === undefined) {
+      throw new Error("switched Hls instance is missing");
+    }
+    act(() => {
+      emit(switched, FakeHls.Events.MANIFEST_PARSED, {});
+    });
+
+    emitNonFatal(switched, restartDescriptor(2));
+
+    expect(fetchCalls()).toHaveLength(2);
+    expect(reconnectingBanner()).toBeNull();
   });
 
   it("beacons the position from a timeupdate after a fatal error", async () => {

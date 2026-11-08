@@ -71,6 +71,7 @@ import { isLandingLocation, landingState } from "../lib/landing";
 import {
   classifyFatalError,
   createRecoveryBudget,
+  isStaleSessionError,
   planRestart,
   recordAttemptFailed,
   recordAttemptRecovered,
@@ -777,6 +778,11 @@ export function WatchPage() {
   // error means the item never worked and goes to the error state. The load
   // effect resets it for each item.
   const streamEstablishedRef = useRef(false);
+  // The last time this item showed its session was alive, as Date.now()
+  // milliseconds. A loaded fragment (FRAG_LOADED) and a parsed manifest
+  // (MANIFEST_PARSED) count. Nothing else does. The load effect resets it to
+  // null for each item, and null means this item has shown no sign of life yet.
+  const lastSignOfLifeRef = useRef<number | null>(null);
   // Restart starts and failed attempts for this item, see playbackRecovery.ts.
   const recoveryBudgetRef = useRef<RecoveryBudget>(createRecoveryBudget());
   // The recovery in progress, or null. At most one runs at a time.
@@ -1116,7 +1122,16 @@ export function WatchPage() {
     };
     recoveryRef.current = recovery;
     setReconnecting(true);
-    scheduleRestart(recovery, describeFatalForLog(input.failure));
+    // A non-fatal error only reaches here when the session had gone stale, so
+    // the warning names that and the silence. A fatal error keeps the 56.2
+    // wording.
+    const described = describeFatalForLog(input.failure);
+    const lastSignOfLife = lastSignOfLifeRef.current;
+    const reason =
+      input.failure.data.fatal === false && lastSignOfLife !== null
+        ? `a stale session, ${Math.floor((Date.now() - lastSignOfLife) / 1000)} s since the last sign of life (${described})`
+        : described;
+    scheduleRestart(recovery, reason);
   };
 
   // A stream buffered a fragment. When it is the attempt of a recovery, the
@@ -1211,6 +1226,7 @@ export function WatchPage() {
     // stream yet, and a fresh restart budget.
     currentTuningRef.current = undefined;
     streamEstablishedRef.current = false;
+    lastSignOfLifeRef.current = null;
     recoveryBudgetRef.current = createRecoveryBudget();
 
     void load()
@@ -1806,9 +1822,12 @@ export function WatchPage() {
   // fragment) is handed to the recovery logic, which restarts it with a fresh
   // descriptor, because Plex ends an idle transcode about 181 s after its last
   // request and the URLs of this descriptor are dead after that. Anything else
-  // is the error state with the connection report. After the hand-off this
-  // run ignores further errors and keeps its instance until the next
-  // descriptor replaces it.
+  // is the error state with the connection report. A non-fatal fragLoadError or
+  // fragLoadTimeOut starts that same recovery, and skips the failover, when the
+  // session has been silent for more than STALE_SESSION_MS. The two URLs share
+  // the dead session, so the remote URL of this descriptor is dead too. After
+  // the hand-off this run ignores further errors and keeps its instance until
+  // the next descriptor replaces it.
   //
   // This effect owns the hls.js instance and destroys it on cleanup. It's the
   // point where the descriptor stops being data and becomes a video stream:
@@ -1905,8 +1924,9 @@ export function WatchPage() {
 
     let hls: Hls | null = null;
     let usedRemote = primaryUrl === remoteUrl;
-    // True once this run handed its fatal error to the recovery logic or to the
-    // error state. Later errors from its instance are ignored.
+    // True once this run handed an error to the recovery logic or to the error
+    // state. Later errors from its instance are ignored, including the retries
+    // that follow a stale fragment failure.
     let settled = false;
     // True once the current attach buffered a fragment. A failover attach
     // starts again at false.
@@ -1953,7 +1973,11 @@ export function WatchPage() {
           : {}),
       });
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        lastSignOfLifeRef.current = Date.now();
         applyPendingResume();
+      });
+      hls.on(Hls.Events.FRAG_LOADED, () => {
+        lastSignOfLifeRef.current = Date.now();
       });
       hls.on(Hls.Events.FRAG_BUFFERED, () => {
         attachBuffered = true;
@@ -1962,8 +1986,60 @@ export function WatchPage() {
           recoveryHandlersRef.current?.onStreamBuffered();
         }
       });
+      // Records this error against the attach and hands it to the recovery
+      // 56.2 starts for a fatal error. The run is settled first, so later
+      // errors from this instance add nothing.
+      const recoverFrom = (data: {
+        type: unknown;
+        details: unknown;
+        fatal: unknown;
+        url?: unknown;
+        reason?: unknown;
+        error?: unknown;
+        response?: unknown;
+      }) => {
+        const connection: "local" | "remote" =
+          localUrl !== null && source === localUrl ? "local" : "remote";
+        const failure: HlsAttemptFailure = {
+          connection,
+          sourceUrl: source,
+          data: {
+            type: data.type,
+            details: data.details,
+            fatal: data.fatal,
+            url: data.url,
+            reason: data.reason,
+            error: data.error,
+            response: data.response,
+          },
+        };
+        attemptFailures.push(failure);
+        settled = true;
+        recoveryHandlersRef.current?.onFatalError({
+          failure,
+          attemptFailures: [...attemptFailures],
+          hadLocalUrl: localUrl !== null,
+        });
+      };
       hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (!data.fatal || settled) {
+        if (settled) {
+          return;
+        }
+        if (!data.fatal) {
+          const details = typeof data.details === "string" ? data.details : "";
+          // A failed segment after a long silence is a dead session. It never
+          // fails over: the remote URL belongs to the same session.
+          if (
+            streamEstablishedRef.current &&
+            recoveryRef.current === null &&
+            isStaleSessionError(
+              { fatal: false, details },
+              lastSignOfLifeRef.current,
+              Date.now(),
+            )
+          ) {
+            recoverFrom(data);
+          }
           return;
         }
         const connection: "local" | "remote" =
