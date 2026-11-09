@@ -2,9 +2,11 @@ name: Deploy tyflix-web
 
 # Deploy job runs on a GitHub-hosted runner that joins the tailnet just for
 # this job (tailscale/github-action, ephemeral + tagged) and SSHes to the
-# Dell using a dedicated deploy-only key. That key's entry in the Dell's
+# Dell using a dedicated deploy-only key. The SSH target comes from the
+# DEPLOY_HOST and DEPLOY_USER repo secrets, so it isn't written in this file
+# and shows as *** in run logs. That key's entry in the Dell's
 # authorized_keys carries a forced `command=` restricted to the exact deploy
-# line below -- sshd runs ONLY that line no matter what the client sends, so
+# line below. sshd runs ONLY that line no matter what the client sends, so
 # even a fully leaked DEPLOY_SSH_KEY secret can't do anything beyond this one
 # deploy. No standing process lives on the Dell for this.
 
@@ -50,10 +52,18 @@ jobs:
           tags: tag:ci
 
       - name: Deploy (the Dell's forced command does the actual work)
+        # User, host, and key come from repo secrets, so this script never contains them.
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           set -euo pipefail
           umask 077
+          : "${DEPLOY_SSH_KEY:?DEPLOY_SSH_KEY is unset or empty}"
+          : "${DEPLOY_HOST:?DEPLOY_HOST is unset or empty}"
+          : "${DEPLOY_USER:?DEPLOY_USER is unset or empty}"
           install -m 600 /dev/null deploy_key
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > deploy_key
+          printf '%s\n' "$DEPLOY_SSH_KEY" > deploy_key
           ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-              -i deploy_key tyler@100.88.236.50
+              -i deploy_key "${DEPLOY_USER}@${DEPLOY_HOST}"
