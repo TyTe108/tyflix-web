@@ -850,19 +850,28 @@ export function WatchPage() {
   const upNextDismissedRef = useRef(upNextDismissed);
   const timelineDurationMsRef = useRef<number | null>(null);
   const resumeDialogOpenRef = useRef(false);
+  // Starts the instance that is waiting behind the Resume dialog, once its
+  // manifest has parsed. Null when no instance is waiting.
+  const startHeldLoadRef = useRef<((position: number) => void) | null>(null);
   autoPlayRef.current = autoPlay;
   nextEpisodeRef.current = nextEpisode;
   upNextDismissedRef.current = upNextDismissed;
   timelineDurationMsRef.current = descriptor?.durationMs ?? null;
   resumeDialogOpenRef.current = resumeDialog !== null;
 
-  // Seek to a position and start playing. Only seeks straight away when the
-  // element already has metadata. Otherwise the seek is parked in
-  // pendingResumeRef, and applyPendingResume applies it once the manifest
-  // parses.
+  // Start playback at a position. When an instance is waiting on the Resume
+  // dialog, start that instance at the position, or park the choice until its
+  // manifest parses. Otherwise seek and play straight away when the element
+  // already has metadata, and park the seek until the manifest parses when it
+  // does not.
   const beginPlaybackAt = useCallback((position: number) => {
     const video = videoRef.current;
     if (video === null) {
+      return;
+    }
+    const startHeld = startHeldLoadRef.current;
+    if (startHeld !== null) {
+      startHeld(position);
       return;
     }
 
@@ -1823,12 +1832,17 @@ export function WatchPage() {
   // transcode session (one X-Plex-Session-Identifier).
   //
   // A fatal error is handled in one of three ways, see classifyFatalError. An
-  // attach that buffered nothing fails over from local to remote once. A stream
-  // that was working (this attach or an earlier one of the item buffered a
-  // fragment) is handed to the recovery logic, which restarts it with a fresh
-  // descriptor, because Plex ends an idle transcode about 181 s after its last
-  // request and the URLs of this descriptor are dead after that. Anything else
-  // is the error state with the connection report. A non-fatal fragLoadError or
+  // attach that buffered nothing fails over from local to remote once. A
+  // waiting instance the viewer has already started does not: its media
+  // playlist and first fragment both waited for the choice, so it has buffered
+  // nothing, and before 56.7 the same failure restarted a working stream
+  // (spec 4.7). It restarts at the chosen place instead of failing over to the
+  // remote URL of the same session. A stream that was working (this attach or
+  // an earlier one of the item buffered a fragment) is handed to the recovery
+  // logic, which restarts it with a fresh descriptor, because Plex ends an
+  // idle transcode about 181 s after its last request and the URLs of this
+  // descriptor are dead after that. Anything else is the error state with the
+  // connection report. A non-fatal fragLoadError or
   // fragLoadTimeOut starts that same recovery, and skips the failover, when the
   // session has been silent for more than STALE_SESSION_MS. The two URLs share
   // the dead session, so the remote URL of this descriptor is dead too. After
@@ -1840,6 +1854,14 @@ export function WatchPage() {
   // finds the session dead stops the pings and makes the next fragment failure
   // restart at once. Cast and the native HLS path never attach hls.js, so they
   // never ping.
+  //
+  // An attach made while the Resume dialog is open loads nothing after the
+  // manifest. The viewer's choice starts that instance at the chosen position.
+  // Buffering from 0:00 behind the dialog could leave the resume request held
+  // for minutes (spec E20). Starting at the chosen position makes the first
+  // request that position, which is the request pattern a restart uses (spec
+  // E21). A fatal error after that start, and before a fragment buffers,
+  // restarts at the chosen place rather than failing over.
   //
   // This effect owns the hls.js instance and destroys it on cleanup. It's the
   // point where the descriptor stops being data and becomes a video stream:
@@ -1878,9 +1900,11 @@ export function WatchPage() {
     const remoteUrl = descriptor.hls.remote;
     const primaryUrl = localUrl ?? remoteUrl;
 
-    // Single decision point for "the stream is ready, now what". Either apply a
-    // parked seek (resume, settings restart, cast handoff), or sit still
-    // because the resume dialog is asking the user, or just play.
+    // Single decision point for a stream that was allowed to load: apply a
+    // parked seek (a settings restart, a cast handoff, or a recovery), sit
+    // still because the Resume dialog is open, or just play. An instance held
+    // for the dialog does not come through here. Its choice starts it at the
+    // chosen position, including a choice parked before the manifest parsed.
     const applyPendingResume = () => {
       const pending = pendingResumeRef.current;
       if (pending !== null) {
@@ -1960,7 +1984,10 @@ export function WatchPage() {
     // item change, Cast connecting, and a restart). The fake hls.js never
     // fires DESTROYING, so this does not listen for it.
     let stopInstanceKeepalive = (): void => {};
+    let markAttachedDestroyed = (): void => {};
     const destroyAttachedInstance = () => {
+      startHeldLoadRef.current = null;
+      markAttachedDestroyed();
       stopInstanceKeepalive();
       hls?.destroy();
       hls = null;
@@ -2038,8 +2065,23 @@ export function WatchPage() {
           );
         }
       };
-      hls = new Hls({
+      // While the Resume dialog is open, load nothing after the manifest. A
+      // Resume clicked while hls.js was buffering from 0:00 left Plex holding
+      // the request for the resume segment for minutes (spec E20). The
+      // viewer's choice starts this instance at the chosen position, so the
+      // first request is that position, the same request pattern a restart
+      // uses (spec E21). hls.js ignores a startLoad position before the
+      // manifest has parsed, so a choice made earlier is parked until then.
+      const holdForResume = resumeDialogOpenRef.current;
+      let manifestParsed = false;
+      let loadStarted = false;
+      let attachedDestroyed = false;
+      markAttachedDestroyed = () => {
+        attachedDestroyed = true;
+      };
+      const instance = new Hls({
         enableWorker: false,
+        ...(holdForResume ? { autoStartLoad: false } : {}),
         ...(fastFail
           ? {
               manifestLoadPolicy: {
@@ -2061,6 +2103,30 @@ export function WatchPage() {
             }
           : {}),
       });
+      hls = instance;
+      const startHeldAt = (position: number): void => {
+        if (!manifestParsed || attachedDestroyed) {
+          pendingResumeRef.current = { position, wasPlaying: true };
+          return;
+        }
+        if (loadStarted) {
+          return;
+        }
+        loadStarted = true;
+        pendingResumeRef.current = null;
+        try {
+          video.currentTime = position;
+        } catch (err: unknown) {
+          console.error("Resume seek failed", err);
+        }
+        instance.startLoad(position);
+        void video.play().catch((err: unknown) => {
+          console.error("Resume play failed", err);
+        });
+      };
+      if (holdForResume) {
+        startHeldLoadRef.current = startHeldAt;
+      }
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         const now = Date.now();
         lastSignOfLifeRef.current = now;
@@ -2072,6 +2138,18 @@ export function WatchPage() {
           keepaliveTimer = setInterval(() => {
             void sendKeepalive();
           }, KEEPALIVE_INTERVAL_MS);
+        }
+        manifestParsed = true;
+        if (holdForResume) {
+          const pending = pendingResumeRef.current;
+          if (pending !== null) {
+            startHeldAt(pending.position);
+            return;
+          }
+          if (resumeDialogOpenRef.current) {
+            video.pause();
+            return;
+          }
         }
         applyPendingResume();
       });
@@ -2130,7 +2208,7 @@ export function WatchPage() {
           // A failed segment after a long silence is a dead session. It never
           // fails over: the remote URL belongs to the same session.
           if (
-            streamEstablishedRef.current &&
+            (streamEstablishedRef.current || loadStarted) &&
             recoveryRef.current === null &&
             isStaleSessionError(
               { fatal: false, details },
@@ -2160,12 +2238,17 @@ export function WatchPage() {
         });
         // On a fatal error, fall back local → remote once; a stream that was
         // working restarts with a fresh descriptor; anything else surfaces a
-        // visible error rather than a silent dead player.
+        // visible error rather than a silent dead player. A waiting instance
+        // the viewer has started is that working stream. Its media playlist
+        // and first fragment both waited for the choice, so it has buffered
+        // nothing, and before 56.7 the same failure restarted a stream that
+        // had buffered from 0:00 (spec 4.7). Do not fail over to the remote
+        // URL of the same session.
         const failure = attemptFailures[attemptFailures.length - 1];
         const action = classifyFatalError({
           attachBuffered,
-          failoverAvailable: !usedRemote && remoteUrl !== source,
-          streamEstablished: streamEstablishedRef.current,
+          failoverAvailable: !usedRemote && remoteUrl !== source && !loadStarted,
+          streamEstablished: streamEstablishedRef.current || loadStarted,
         });
         if (action === "fail-over") {
           usedRemote = true;

@@ -1,9 +1,10 @@
 // Fake hls.js for WatchPage playback tests.
 //
 // WatchPage imports this as the default export and calls isSupported, Events,
-// the constructor, on, loadSource, attachMedia, and destroy. Every instance is
-// kept, in order, with the config it was given, the URL passed to loadSource,
-// the element passed to attachMedia, and a destroyed flag.
+// the constructor, on, loadSource, attachMedia, startLoad, and destroy. Every
+// instance is kept, in order, with the config it was given, the URL passed to
+// loadSource, the element passed to attachMedia, each startLoad call in order,
+// and a destroyed flag.
 //
 // What it copies from hls.js 1.6.16, and nothing else:
 // attachMedia points the element at a MediaSource (dist/hls.mjs 18701-18715).
@@ -40,6 +41,7 @@ type Handler = (event: string, data: unknown) => void;
  */
 export type FakeHlsConfig = {
   enableWorker?: boolean;
+  autoStartLoad?: boolean;
   manifestLoadPolicy?: {
     default: {
       maxTimeToFirstByteMs: number;
@@ -107,9 +109,15 @@ export function emit(instance: FakeHls, event: string, data: unknown): void {
   }
 }
 
+/** One startLoad call, in the order WatchPage made it. */
+export type FakeStartLoadCall = {
+  startPosition?: number;
+  skipSeekToStartPosition?: boolean;
+};
+
 /**
- * Stand-in for hls.js. Records construction, source, media, and destroy.
- * Events, ErrorTypes, and ErrorDetails are the real hls.js enums.
+ * Stand-in for hls.js. Records construction, source, media, startLoad, and
+ * destroy. Events, ErrorTypes, and ErrorDetails are the real hls.js enums.
  */
 export default class FakeHls {
   /** True unless setHlsSupported has turned it off. */
@@ -137,6 +145,9 @@ export default class FakeHls {
 
   /** True after destroy. A second destroy does not touch the element again. */
   destroyed = false;
+
+  /** startLoad calls in order. Empty until WatchPage starts a held instance. */
+  readonly startLoadCalls: FakeStartLoadCall[] = [];
 
   constructor(config: FakeHlsConfig = {}) {
     this.config = config;
@@ -179,6 +190,18 @@ export default class FakeHls {
     this.media = media;
     media.removeAttribute("src");
     media.load();
+  }
+
+  /**
+   * Records a startLoad call.
+   *
+   * @throws Error when the instance has been destroyed.
+   */
+  startLoad(startPosition?: number, skipSeekToStartPosition?: boolean): void {
+    if (this.destroyed) {
+      throw new Error("startLoad() called on a destroyed Hls instance");
+    }
+    this.startLoadCalls.push({ startPosition, skipSeekToStartPosition });
   }
 
   /**

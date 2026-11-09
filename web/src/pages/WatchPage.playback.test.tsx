@@ -571,6 +571,130 @@ function setVideoEnded(video: HTMLVideoElement): void {
   });
 }
 
+// The local attach's manifest policy, copied from the fast-fail WatchPage
+// passes when the source is the LAN URL.
+const localManifestPolicy = {
+  default: {
+    maxTimeToFirstByteMs: 3000,
+    maxLoadTimeMs: 3000,
+    timeoutRetry: {
+      maxNumRetry: 0,
+      retryDelayMs: 0,
+      maxRetryDelayMs: 0,
+    },
+    errorRetry: {
+      maxNumRetry: 0,
+      retryDelayMs: 0,
+      maxRetryDelayMs: 0,
+    },
+  },
+};
+
+function localAttachConfig(hold: boolean): FakeHls["config"] {
+  return hold
+    ? {
+        enableWorker: false,
+        autoStartLoad: false,
+        manifestLoadPolicy: localManifestPolicy,
+      }
+    : {
+        enableWorker: false,
+        manifestLoadPolicy: localManifestPolicy,
+      };
+}
+
+function remoteAttachConfig(hold: boolean): FakeHls["config"] {
+  return hold
+    ? { enableWorker: false, autoStartLoad: false }
+    : { enableWorker: false };
+}
+
+function startLoadAt(position: number): FakeHls["startLoadCalls"] {
+  return [{ startPosition: position, skipSeekToStartPosition: undefined }];
+}
+
+function startWithResumeDialog(): ReturnType<typeof startPlayback> {
+  const descriptor = buildWatchDescriptor({ viewOffsetMs: 125_000 });
+  return startPlayback({ descriptor });
+}
+
+function chooseResume(): void {
+  fireEvent.click(screen.getByRole("button", { name: /^Resume$/ }));
+}
+
+function chooseStartOver(): void {
+  fireEvent.click(
+    screen.getByRole("button", { name: /Start from the beginning/ }),
+  );
+}
+
+function indexPlaylistUrl(descriptor: WatchDescriptor): string {
+  const source = descriptor.hls.local ?? descriptor.hls.remote;
+  return `${new URL(source).origin}/video/:/transcode/universal/session/${descriptor.sessionId}/index.m3u8`;
+}
+
+function levelLoadError(url: string, code: number, fatal: boolean) {
+  return {
+    type: FakeHls.ErrorTypes.NETWORK_ERROR,
+    details: FakeHls.ErrorDetails.LEVEL_LOAD_ERROR,
+    fatal,
+    url,
+    response: { url, data: undefined, code, text: "" },
+    error: new Error(`HTTP Error ${code}`),
+  };
+}
+
+function emitLevelLoad(
+  hls: FakeHls,
+  url: string,
+  code: number,
+  fatal: boolean,
+): void {
+  act(() => {
+    emit(hls, FakeHls.Events.ERROR, levelLoadError(url, code, fatal));
+  });
+}
+
+function fatalFragLoadTimeout(descriptor: WatchDescriptor) {
+  return {
+    type: FakeHls.ErrorTypes.NETWORK_ERROR,
+    details: FakeHls.ErrorDetails.FRAG_LOAD_TIMEOUT,
+    fatal: true,
+    response: {
+      url: segmentUrl(descriptor),
+      data: undefined,
+      code: 0,
+      text: "",
+    },
+    error: new Error("fragment load timed out"),
+  };
+}
+
+// The restart that follows a choice. The new descriptor is the LAN one, so
+// its config is today's local attach, and the parked place is applied when
+// its manifest parses.
+async function expectRestartAt(
+  video: HTMLVideoElement,
+  position: number,
+): Promise<void> {
+  expect(fetchCalls()).toHaveLength(2);
+  expect(reconnectingBanner()).not.toBeNull();
+  expectNoErrorState();
+  await resolveRestart(2);
+  const restarted = liveInstances()[0];
+  if (restarted === undefined) {
+    throw new Error("restarted Hls instance is missing");
+  }
+  expect(restarted.config).toEqual(localAttachConfig(false));
+  expect(restarted.startLoadCalls).toEqual([]);
+  const plays = mediaCalls(video).play;
+  act(() => {
+    emit(restarted, FakeHls.Events.MANIFEST_PARSED, {});
+  });
+  expect(video.currentTime).toBe(position);
+  expect(mediaCalls(video).play).toBe(plays + 1);
+}
+
 // document.visibilityState is read at event time, so a test sets it for the
 // length of one callback and then removes the override.
 function withHiddenDocument(run: () => void): void {
@@ -2717,6 +2841,424 @@ describe("WatchPage playback", () => {
       warn.mockRestore();
       error.mockRestore();
     }
+  });
+
+  // Phase 56.7: the Resume dialog loads nothing until the viewer chooses.
+
+  describe("Resume dialog load hold", () => {
+    it("builds the first instance with autoStartLoad false and does not start loading", async () => {
+      const { hls } = await startWithResumeDialog();
+      useRecoveryClock();
+      expect(hls.config).toEqual(localAttachConfig(true));
+
+      act(() => {
+        emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+      expect(hls.startLoadCalls).toEqual([]);
+      installPingFetch("alive");
+      await advanceRecovery(10 * 60 * 1000);
+
+      expect(hls.startLoadCalls).toEqual([]);
+    });
+
+    it("starts loading at 125 when Resume is chosen after the manifest parses", async () => {
+      const { video, hls } = await startWithResumeDialog();
+      act(() => {
+        emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+      setMediaReadyState(video, HTMLMediaElement.HAVE_METADATA);
+      const plays = mediaCalls(video).play;
+
+      chooseResume();
+
+      expect(hls.startLoadCalls).toEqual(startLoadAt(125));
+      expect(video.currentTime).toBe(125);
+      expect(mediaCalls(video).play).toBe(plays + 1);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("starts loading at 125 when Resume is chosen before the element has metadata", async () => {
+      const { video, hls } = await startWithResumeDialog();
+      act(() => {
+        emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+      expect(video.readyState).toBe(HTMLMediaElement.HAVE_NOTHING);
+      const plays = mediaCalls(video).play;
+
+      chooseResume();
+
+      expect(video.currentTime).toBe(125);
+      expect(mediaCalls(video).play).toBe(plays + 1);
+      expect(hls.startLoadCalls).toEqual(startLoadAt(125));
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("parks a Resume chosen before the manifest parses and starts loading when it parses", async () => {
+      const { video, hls } = await startWithResumeDialog();
+      const plays = mediaCalls(video).play;
+
+      chooseResume();
+
+      expect(hls.startLoadCalls).toEqual([]);
+      act(() => {
+        emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+
+      expect(hls.startLoadCalls).toEqual(startLoadAt(125));
+      expect(video.currentTime).toBe(125);
+      expect(mediaCalls(video).play).toBe(plays + 1);
+    });
+
+    it("starts loading at 0 when Start from the beginning is chosen", async () => {
+      const { video, hls } = await startWithResumeDialog();
+      act(() => {
+        emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+      setMediaReadyState(video, HTMLMediaElement.HAVE_METADATA);
+      const plays = mediaCalls(video).play;
+
+      chooseStartOver();
+
+      expect(hls.startLoadCalls).toEqual(startLoadAt(0));
+      expect(video.currentTime).toBe(0);
+      expect(mediaCalls(video).play).toBe(plays + 1);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("starts loading at 125 when the Resume dialog is closed with Escape", async () => {
+      const { video, hls } = await startWithResumeDialog();
+      act(() => {
+        emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+      setMediaReadyState(video, HTMLMediaElement.HAVE_METADATA);
+      const plays = mediaCalls(video).play;
+
+      fireEvent.keyDown(window, { key: "Escape" });
+
+      expect(hls.startLoadCalls).toEqual(startLoadAt(125));
+      expect(video.currentTime).toBe(125);
+      expect(mediaCalls(video).play).toBe(plays + 1);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("starts the remote instance at 125 after a fail-over while the dialog is open", async () => {
+      const { video, hls } = await startWithResumeDialog();
+      failLiveInstance();
+      const remote = liveInstances()[0];
+      if (remote === undefined) {
+        throw new Error("remote Hls instance is missing");
+      }
+
+      expect(remote.config).toEqual(remoteAttachConfig(true));
+      expect(hls.destroyed).toBe(true);
+      act(() => {
+        emit(remote, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+      setMediaReadyState(video, HTMLMediaElement.HAVE_METADATA);
+      chooseResume();
+
+      expect(hls.startLoadCalls).toEqual([]);
+      expect(remote.startLoadCalls).toEqual(startLoadAt(125));
+      expect(video.currentTime).toBe(125);
+    });
+
+    it("does not start loading a destroyed instance on unmount or an item change", async () => {
+      const unmounted = await startWithResumeDialog();
+      act(() => {
+        emit(unmounted.hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+      act(() => {
+        unmounted.unmount();
+      });
+      expect(unmounted.hls.destroyed).toBe(true);
+      expect(unmounted.hls.startLoadCalls).toEqual([]);
+
+      vi.mocked(fetchNextEpisode).mockResolvedValue({
+        ratingKey: "900002",
+        seasonNumber: 1,
+        episodeNumber: 2,
+        title: "Second Example",
+        thumb: null,
+      });
+      const { hls } = await startWithResumeDialog();
+      await screen.findByRole("link", { name: /Next episode/ });
+      act(() => {
+        emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+      await openSecondEpisode();
+
+      expect(hls.destroyed).toBe(true);
+      expect(hls.startLoadCalls).toEqual([]);
+    });
+
+    it("keeps today's config and plays at the manifest when there is no saved position", async () => {
+      const { video, hls } = await startPlayback();
+
+      expect(hls.config).toEqual(localAttachConfig(false));
+      expect(hls.startLoadCalls).toEqual([]);
+      act(() => {
+        emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+
+      expect(hls.startLoadCalls).toEqual([]);
+      expect(mediaCalls(video).play).toBe(1);
+      expect(video.paused).toBe(false);
+    });
+
+    it("keeps today's config for a restart and applies the parked seek", async () => {
+      const { descriptor, video, hls } = await establishWithSignOfLife();
+      failFragments(hls, descriptor, 0, "");
+      await resolveRestart(2);
+      const restarted = liveInstances()[0];
+      if (restarted === undefined) {
+        throw new Error("restarted Hls instance is missing");
+      }
+
+      expect(restarted.config).toEqual(localAttachConfig(false));
+      expect(restarted.startLoadCalls).toEqual([]);
+      const plays = mediaCalls(video).play;
+      act(() => {
+        emit(restarted, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+
+      expect(video.currentTime).toBe(397.6);
+      expect(mediaCalls(video).play).toBe(plays + 1);
+      expect(restarted.startLoadCalls).toEqual([]);
+    });
+
+    it("keeps today's config for a Quality switch and applies the parked seek", async () => {
+      const { descriptor, video, hls } = await startPlayback();
+      setMediaCurrentTime(video, 1200);
+      await act(async () => {
+        await video.play();
+      });
+      const plays = mediaCalls(video).play;
+      chooseQuality720();
+      const switched = buildWatchDescriptor({
+        ratingKey: descriptor.ratingKey,
+        sessionId: "session-example-2",
+        token: "example-token-57",
+      });
+      await resolveLatestEpisodeWatch(switched);
+      const next = liveInstances()[0];
+      if (next === undefined) {
+        throw new Error("switched Hls instance is missing");
+      }
+
+      expect(hls.destroyed).toBe(true);
+      expect(next.config).toEqual(localAttachConfig(false));
+      expect(next.startLoadCalls).toEqual([]);
+      act(() => {
+        emit(next, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+
+      expect(video.currentTime).toBe(1200);
+      expect(mediaCalls(video).play).toBe(plays + 1);
+      expect(next.startLoadCalls).toEqual([]);
+    });
+
+    it("pings the session after 30 s while the Resume dialog waits", async () => {
+      const { descriptor, hls } = await startWithResumeDialog();
+      useRecoveryClock();
+      act(() => {
+        emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+      const pings = installPingFetch("alive");
+
+      await advanceRecovery(30_000);
+
+      expect(pings.urls()).toEqual([
+        expectedPingUrl(
+          descriptor.hls.local ?? "",
+          descriptor.sessionId,
+          descriptor.transient,
+        ),
+      ]);
+      expect(hls.startLoadCalls).toEqual([]);
+    });
+
+    it("restarts at 125 when the session died while the Resume dialog waited", async () => {
+      const { descriptor, video, hls } = await startWithResumeDialog();
+      useRecoveryClock();
+      act(() => {
+        emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+      const pings = installPingFetch("dead");
+      await advanceRecovery(30_000);
+      expect(pings.urls()).toHaveLength(1);
+      setMediaReadyState(video, HTMLMediaElement.HAVE_METADATA);
+
+      chooseResume();
+      emitNonFatal(hls, descriptor);
+
+      expect(fetchCalls()).toHaveLength(2);
+      expect(reconnectingBanner()).not.toBeNull();
+      expectNoErrorState();
+      await resolveRestart(2);
+      const restarted = liveInstances()[0];
+      if (restarted === undefined) {
+        throw new Error("restarted Hls instance is missing");
+      }
+      act(() => {
+        emit(restarted, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+
+      expect(video.currentTime).toBe(125);
+      expect(restarted.config).toEqual(localAttachConfig(false));
+      expect(restarted.startLoadCalls).toEqual([]);
+    });
+
+    it("restarts at 125 when the dialog waited 121 s with the ping unanswered", async () => {
+      const { descriptor, video, hls } = await startWithResumeDialog();
+      useRecoveryClock();
+      act(() => {
+        emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+      installPingFetch("hold");
+      await advanceRecovery(121_000);
+      setMediaReadyState(video, HTMLMediaElement.HAVE_METADATA);
+
+      chooseResume();
+      emitNonFatal(hls, descriptor);
+
+      expect(fetchCalls()).toHaveLength(2);
+      expect(reconnectingBanner()).not.toBeNull();
+      expectNoErrorState();
+      await resolveRestart(2);
+      const restarted = liveInstances()[0];
+      if (restarted === undefined) {
+        throw new Error("restarted Hls instance is missing");
+      }
+      act(() => {
+        emit(restarted, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+
+      expect(video.currentTime).toBe(125);
+    });
+
+    it("restarts at 125 after a fatal levelLoadError once Resume has started the instance", async () => {
+      const { descriptor, video, hls } = await startWithResumeDialog();
+      act(() => {
+        emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+      chooseResume();
+      const indexUrl = indexPlaylistUrl(descriptor);
+
+      emitLevelLoad(hls, indexUrl, 404, false);
+      emitLevelLoad(hls, indexUrl, 404, false);
+
+      expect(fetchCalls()).toHaveLength(1);
+      expect(hlsInstances).toHaveLength(1);
+      expect(hls.destroyed).toBe(false);
+
+      emitLevelLoad(hls, indexUrl, 404, true);
+
+      expect(hlsInstances).toHaveLength(1);
+      expect(hls.destroyed).toBe(false);
+      await expectRestartAt(video, 125);
+    });
+
+    it("restarts at 125 after a fatal levelLoadError on a remote-only descriptor", async () => {
+      const descriptor = buildWatchDescriptor({
+        viewOffsetMs: 125_000,
+        local: null,
+      });
+      const { video, hls } = await startPlayback({ descriptor });
+      act(() => {
+        emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+      chooseResume();
+
+      emitLevelLoad(hls, indexPlaylistUrl(descriptor), 0, true);
+
+      expect(hls.destroyed).toBe(false);
+      await expectRestartAt(video, 125);
+    });
+
+    it("restarts at 125 after a fatal fragLoadTimeOut once Resume has started the instance", async () => {
+      const { descriptor, video, hls } = await startWithResumeDialog();
+      act(() => {
+        emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+      chooseResume();
+
+      act(() => {
+        emit(hls, FakeHls.Events.ERROR, fatalFragLoadTimeout(descriptor));
+      });
+
+      expect(hlsInstances).toHaveLength(1);
+      expect(hls.destroyed).toBe(false);
+      await expectRestartAt(video, 125);
+    });
+
+    it("restarts at 0 after Start from the beginning and a fatal levelLoadError", async () => {
+      const { descriptor, video, hls } = await startWithResumeDialog();
+      act(() => {
+        emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+      chooseStartOver();
+
+      emitLevelLoad(hls, indexPlaylistUrl(descriptor), 404, true);
+
+      expect(hlsInstances).toHaveLength(1);
+      await expectRestartAt(video, 0);
+    });
+
+    it("restarts at the later position after the parked Resume was consumed by the start", async () => {
+      const { descriptor, video, hls } = await startWithResumeDialog();
+      chooseResume();
+      act(() => {
+        emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+      act(() => {
+        emit(hls, FakeHls.Events.FRAG_BUFFERED, {});
+      });
+      setMediaCurrentTime(video, 600);
+      act(() => {
+        fireMediaEvent(video, "playing");
+      });
+      // The restart reads the element again, and a positive reading wins over
+      // anything parked. 0 is what the element reads after a teardown, so the
+      // last real position has to beat a Resume that the start should have
+      // consumed.
+      setMediaCurrentTime(video, 0);
+
+      act(() => {
+        emit(
+          hls,
+          FakeHls.Events.ERROR,
+          fragLoadError(segmentUrl(descriptor), 0, "", true),
+        );
+      });
+
+      await expectRestartAt(video, 600);
+    });
+
+    it("does not start a destroyed instance when Cast connects while the dialog waits, and resumes at 125 after disconnect", async () => {
+      const { video, hls } = await startWithResumeDialog();
+      act(() => {
+        emit(hls, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+      setCastConnected(true);
+      expect(hls.destroyed).toBe(true);
+
+      chooseResume();
+
+      expect(hls.startLoadCalls).toEqual([]);
+      setCastConnected(false);
+      const restarted = liveInstances()[0];
+      if (restarted === undefined) {
+        throw new Error("reattached Hls instance is missing");
+      }
+      expect(restarted.config).toEqual(localAttachConfig(false));
+      const plays = mediaCalls(video).play;
+      act(() => {
+        emit(restarted, FakeHls.Events.MANIFEST_PARSED, {});
+      });
+
+      expect(video.currentTime).toBe(125);
+      expect(mediaCalls(video).play).toBe(plays + 1);
+    });
   });
 
   it("beacons the position from a timeupdate after a fatal error", async () => {
