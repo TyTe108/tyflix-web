@@ -944,6 +944,11 @@ a {
   display: block;
   width: 100%;
   max-height: 80vh;
+  /* The element has no size of its own until a frame arrives. The Resume
+     dialog holds the load until the viewer chooses. Without this the
+     browser falls back to a 150px-tall box. auto hands sizing back to the
+     video's own ratio once it has one. */
+  aspect-ratio: auto 16 / 9;
   background: #000;
 }
 
