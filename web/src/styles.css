@@ -3579,12 +3579,13 @@ a {
   }
 }
 
-/* Snap rail in the desktop shell. The bleed uses --page-pad because that is
-   the page's own horizontal padding: the same value pulls the rail to the
-   page box's right edge and pads the last tile back in. A hardcoded width
-   would ignore the gutter. The extra padding keeps the hover lift and the
-   focus ring inside the scrollport, and the matching left margin puts the
-   first tile back in line with the heading. */
+/* Snap rail in the desktop shell. Both gutters bleed by --page-pad, the
+   page's own horizontal padding, so each arrow sits in a gutter and a
+   scrolled tile slides under it. The same padding puts the first tile back
+   in line with the heading, and keeps the last tile, the hover lift and the
+   focus ring inside the scrollport. scroll-padding matches padding-left:
+   snap positions ignore padding, and without it the first tile would sit
+   on the padding edge, left of the heading. */
 .app-shell:not(.app-shell--mobile) .episode-rail {
   flex-direction: row;
   overflow-x: auto;
@@ -3593,18 +3594,85 @@ a {
   scrollbar-width: thin;
   margin-right: calc(-1 * var(--page-pad));
   padding-right: var(--page-pad);
-  margin-left: -0.375rem;
-  padding-left: 0.375rem;
-  /* Snap positions ignore padding, so the first tile would sit on the padding
-     edge and 6px left of the heading. This inset matches padding-left. */
-  scroll-padding-inline-start: 0.375rem;
+  margin-left: calc(-1 * var(--page-pad));
+  padding-left: var(--page-pad);
+  scroll-padding-inline-start: var(--page-pad);
   padding-top: 0.5rem;
   padding-bottom: 0.375rem;
 }
 
+.episode-rail-frame {
+  position: relative;
+}
+
+/* One value for the tile width and the arrows' top. EpisodeBrowser's img
+   sizes still assumes the 19.7rem cap. */
+.app-shell:not(.app-shell--mobile) .episode-rail-frame {
+  --episode-tile-w: clamp(14rem, 22vw, 19.7rem);
+}
+
 .app-shell:not(.app-shell--mobile) .episode-tile {
-  flex: 0 0 clamp(14rem, 22vw, 19.7rem);
+  flex: 0 0 var(--episode-tile-w);
   scroll-snap-align: start;
+}
+
+/* 0.5rem is the rail's padding-top, so the two change together. 9/32 of the
+   tile width is the middle of the 16:9 still, and the margin pulls the 3rem
+   button up by half its height. */
+.episode-rail-arrow {
+  position: absolute;
+  z-index: 1;
+  top: calc(0.5rem + var(--episode-tile-w) * 9 / 32);
+  margin-top: -1.5rem;
+  width: 3rem;
+  height: 3rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--text) 22%, transparent);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  color: var(--text);
+  box-shadow: var(--shadow-2);
+  cursor: pointer;
+  transition:
+    opacity var(--transition),
+    visibility var(--transition),
+    background var(--transition),
+    border-color var(--transition);
+}
+
+.episode-rail-arrow svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+/* The middle of the gutter, never closer than 0.25rem to the window edge.
+   The frame starts at the content edge, so this offset reaches into the
+   page padding. */
+.episode-rail-arrow--prev {
+  left: max(calc(0.25rem - var(--page-pad)), calc(var(--page-pad) / -2 - 1.5rem));
+}
+
+.episode-rail-arrow--next {
+  right: max(calc(0.25rem - var(--page-pad)), calc(var(--page-pad) / -2 - 1.5rem));
+}
+
+.episode-rail-arrow.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.episode-rail-arrow:focus-visible {
+  border-radius: 50%;
+}
+
+@media (hover: hover) {
+  .episode-rail-arrow:hover {
+    background: color-mix(in srgb, var(--surface-2) 80%, var(--text));
+    border-color: color-mix(in srgb, var(--text) 35%, transparent);
+  }
 }
 
 .person-loading,

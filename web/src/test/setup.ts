@@ -5,6 +5,10 @@
 // Default is desktop width (matches: false) and a fine pointer. Tests flip the
 // axes with setViewport / setPointer, which update matches and notify change
 // listeners so hooks can react — not just the initial read.
+//
+// jsdom 29 also has no ResizeObserver. EpisodeRail creates one on the episodes
+// rail. The stub installed below does nothing: it never calls its callback.
+// A test that needs the callback installs its own fake.
 import { afterEach, beforeEach } from "vitest";
 import { MOBILE_MEDIA_QUERY } from "../hooks/useIsMobile";
 import { TOUCH_MEDIA_QUERY } from "../hooks/useIsTouch";
@@ -100,8 +104,30 @@ export function setPointer(pointer: Pointer): void {
   notifyListeners(TOUCH_MEDIA_QUERY, pointer === "coarse");
 }
 
+// A ResizeObserver that records nothing and never calls its callback.
+// EpisodeRail can mount in any suite. Tests that need resize callbacks
+// replace this with their own fake.
+function installResizeObserver(): void {
+  if (typeof globalThis.ResizeObserver !== "undefined") {
+    return;
+  }
+  globalThis.ResizeObserver = class ResizeObserver {
+    constructor(callback: ResizeObserverCallback) {
+      // The stub never calls the callback.
+      void callback;
+    }
+
+    observe(): void {}
+
+    unobserve(): void {}
+
+    disconnect(): void {}
+  };
+}
+
 beforeEach(() => {
   installMatchMedia();
+  installResizeObserver();
 });
 
 afterEach(() => {

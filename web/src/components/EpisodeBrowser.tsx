@@ -2,7 +2,7 @@
 // the default is the lowest numbered season, or Specials when that is the only
 // season. Each episode is one tile, and the whole tile is the Play link.
 // Layout is CSS: a horizontal snap rail in the desktop shell, a full-width
-// stack on phones.
+// stack on phones. EpisodeRail adds the side arrows.
 //
 // MediaDetailPage renders this only for shows that resolved to something on the
 // server. It's keyed on TMDB id, and the backend does the TMDB-to-Plex join, so
@@ -18,6 +18,7 @@ import { formatRuntime } from "../api/discover";
 import { libraryImageUrl } from "../api/library";
 import { fetchEpisodes, type Episode } from "../api/watch";
 import { Dropdown } from "./Dropdown";
+import { EpisodeRail } from "./EpisodeRail";
 import { WatchProgress } from "./WatchProgress";
 
 type LoadStatus = "loading" | "ready" | "error";
@@ -201,7 +202,7 @@ export function EpisodeBrowser({ tmdbId }: { tmdbId: number }) {
       ) : null}
 
       {status === "ready" && visible.length > 0 ? (
-        <div className="episode-rail" key={`${tmdbId}-${selectedSeason}`}>
+        <EpisodeRail key={`${tmdbId}-${selectedSeason}`}>
           {visible.map((episode) => {
             const title = episodeTitle(episode);
             const meta = episodeMeta(episode);
@@ -261,7 +262,7 @@ export function EpisodeBrowser({ tmdbId }: { tmdbId: number }) {
               </Link>
             );
           })}
-        </div>
+        </EpisodeRail>
       ) : null}
     </section>
   );
